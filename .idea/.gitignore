@@ -1,0 +1,28 @@
+# --- RIDER / IDE ---
+.idea/
+*.sln.iml
+*.swp
+*.user
+
+# --- .NET (BACKEND) ---
+**/bin/
+**/obj/
+
+# Тимчасові файли
+[Tt]emp/
+[Ll]og/
+[Ll]ogs/
+
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/secrets.json
+
+# --- FRONTEND ---
+node_modules/
+dist/
+build/
+.env.local
+
+# --- OS ---
+.DS_Store
+Thumbs.db
