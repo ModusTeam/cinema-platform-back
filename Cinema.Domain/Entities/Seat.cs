@@ -1,18 +1,51 @@
 using Cinema.Domain.Common;
+using Cinema.Domain.Enums;
 
 namespace Cinema.Domain.Entities;
 
-public class Seat : BaseEntity
+public class Seat
 {
-    public int Number { get; set; }
-    public string RowLabel { get; set; } = string.Empty;
-    public int GridX { get; set; }
-    public int GridY { get; set; }
-    public bool IsBroken { get; set; }
+    public EntityId<Seat> Id { get; }
+    public string RowLabel { get; private set; }
+    public int Number { get; private set; }
+    public int GridX { get; private set; }
+    public int GridY { get; private set; }
+    public SeatStatus Status { get; private set; }
+    public EntityId<Hall> HallId { get; private set; }
+    public Hall? Hall { get; private set; }
 
-    public Guid HallId { get; set; }
-    public Hall Hall { get; set; } = null!;
+    public EntityId<SeatType> SeatTypeId { get; private set; }
+    public SeatType? SeatType { get; private set; }
 
-    public Guid SeatTypeId { get; set; }
-    public SeatType SeatType { get; set; } = null!;
+    private Seat(
+        EntityId<Seat> id,
+        string rowLabel,
+        int number,
+        int gridX,
+        int gridY,
+        SeatStatus status,
+        EntityId<Hall> hallId,
+        EntityId<SeatType> seatTypeId)
+    {
+        Id = id;
+        RowLabel = rowLabel;
+        Number = number;
+        GridX = gridX;
+        GridY = gridY;
+        Status = status;
+        HallId = hallId;
+        SeatTypeId = seatTypeId;
+    }
+
+    public static Seat New(
+        EntityId<Seat> id,
+        string rowLabel,
+        int number,
+        int gridX,
+        int gridY,
+        SeatStatus status,
+        EntityId<Hall> hallId,
+        EntityId<SeatType> seatTypeId) => new(id, rowLabel, number, gridX, gridY, status, hallId, seatTypeId);
+
+    public void UpdateStatus(SeatStatus status) => Status = status;
 }

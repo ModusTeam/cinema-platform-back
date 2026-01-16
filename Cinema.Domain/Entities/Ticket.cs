@@ -3,17 +3,43 @@ using Cinema.Domain.Enums;
 
 namespace Cinema.Domain.Entities;
 
-public class Ticket : BaseEntity
+public class Ticket
 {
-    public decimal PriceSnapshot { get; set; }
-    public TicketStatus TicketStatus { get; set; }
+    public EntityId<Ticket> Id { get; }
+    public decimal PriceSnapshot { get; private set; }
+    public TicketStatus TicketStatus { get; private set; }
 
-    public Guid OrderId { get; set; }
-    public Order Order { get; set; } = null!;
+    public EntityId<Order> OrderId { get; private set; }
+    public Order? Order { get; private set; }
 
-    public Guid SessionId { get; set; }
-    public Session Session { get; set; } = null!;
+    public EntityId<Session> SessionId { get; private set; }
+    public Session? Session { get; private set; }
 
-    public Guid SeatId { get; set; }
-    public Seat Seat { get; set; } = null!;
+    public EntityId<Seat> SeatId { get; private set; }
+
+    public Seat? Seat { get; private set; }
+
+
+    private Ticket(EntityId<Ticket> id,
+        decimal priceSnapshot,
+        TicketStatus ticketStatus,
+        EntityId<Order> orderId,
+        EntityId<Session> sessionId,
+        EntityId<Seat> seatId)
+    {
+        Id = id;
+        PriceSnapshot = priceSnapshot;
+        TicketStatus = ticketStatus;
+        OrderId = orderId;
+        SessionId = sessionId;
+        SeatId = seatId;
+    }
+
+    public static Ticket New(
+        EntityId<Ticket> id,
+        decimal priceSnapshot,
+        TicketStatus ticketStatus,
+        EntityId<Order> orderId,
+        EntityId<Session> sessionId,
+        EntityId<Seat> seatId) => new(id, priceSnapshot, ticketStatus, orderId, sessionId, seatId);
 }

@@ -3,19 +3,51 @@ using Cinema.Domain.Enums;
 
 namespace Cinema.Domain.Entities;
 
-public class Session : BaseEntity
+public class Session
 {
-    public DateTime StartTime { get; set; }
-    public DateTime EndTime { get; set; }
-    public SessionStatus Status { get; set; }
+    public EntityId<Session> Id { get; }
 
-    public Guid MovieId { get; set; }
-    public Movie Movie { get; set; } = null!;
+    public DateTime StartTime { get; private set; }
+    public DateTime EndTime { get; private set; }
+    public SessionStatus Status { get; private set; }
 
-    public Guid HallId { get; set; }
-    public Hall Hall { get; set; } = null!;
+    public EntityId<Movie> MovieId { get; private set; }
+    public Movie? Movie { get; private set; }
 
-    public ICollection<SessionPricing> SessionPricings { get; set; } = new List<SessionPricing>();
-    
-    public ICollection<Ticket> Tickets { get; set; } = new List<Ticket>();
+    public EntityId<Hall> HallId { get; private set; }
+    public Hall? Hall { get; private set; }
+
+    public EntityId<Pricing> PricingId { get; private set; }
+    public Pricing? Pricing { get; private set; }
+
+    public ICollection<Ticket> Tickets { get; private set; } = [];
+
+
+    private Session(
+        EntityId<Session> id,
+        DateTime startTime,
+        DateTime endTime,
+        SessionStatus status,
+        EntityId<Movie> movieId,
+        EntityId<Hall> hallId,
+        EntityId<Pricing> pricingId)
+    {
+        Id = id;
+        StartTime = startTime;
+        EndTime = endTime;
+        Status = status;
+        MovieId = movieId;
+        HallId = hallId;
+        PricingId = pricingId;
+    }
+
+    public static Session New(
+        EntityId<Session> id,
+        DateTime startTime,
+        DateTime endTime,
+        SessionStatus status,
+        EntityId<Movie> movieId,
+        EntityId<Hall> hallId,
+        EntityId<Pricing> pricingId
+    ) => new(id, startTime, endTime, status, movieId, hallId, pricingId);
 }

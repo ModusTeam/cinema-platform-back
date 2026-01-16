@@ -1,0 +1,17 @@
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+.idea/
+.idea.*/
+*.sln.iml
+*.DotSettings.user
+.vs/
+*.user
+*.suo
+*.cache
+*.pdb
+.vscode/
+.DS_Store
+Thumbs.db
+*.log

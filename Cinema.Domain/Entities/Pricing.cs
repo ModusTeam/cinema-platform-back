@@ -2,10 +2,22 @@ using Cinema.Domain.Common;
 
 namespace Cinema.Domain.Entities;
 
-public class Pricing : BaseEntity
+public class Pricing
 {
-    public required string Name { get; set; }
-    
-    public ICollection<PricingItem> PricingItems { get; set; } = new List<PricingItem>();
-    public ICollection<SessionPricing> SessionPricings { get; set; } = new List<SessionPricing>();
+    public EntityId<Pricing> Id { get; }
+    public string Name { get; private set; }
+
+    public ICollection<PricingItem>? PricingItems { get; private set; } = [];
+
+    private Pricing(
+        EntityId<Pricing> id,
+        string name)
+    {
+        Id = id;
+        Name = name;
+    }
+
+    public static Pricing New(
+        EntityId<Pricing> id,
+        string name) => new(id, name);
 }
