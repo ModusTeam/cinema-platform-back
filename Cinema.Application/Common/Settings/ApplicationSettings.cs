@@ -2,7 +2,7 @@
 
 public class ApplicationSettings
 {
-    public ConectionStrings? ConnectionStrings { get; set; }
+    public ConectionStrings? ConnectionStrings { get; set; } 
 }
 
 public class ConectionStrings

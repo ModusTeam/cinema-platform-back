@@ -1,30 +1,41 @@
 using Cinema.Api.Modules;
-using Cinema.Infrastructure;
+using Cinema.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
-
-
-builder.Services.SetupServices(builder.Configuration);
-builder.Services.AddInfrastructureServices();
-
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddWebServices(builder.Configuration);
 
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
+    using (var scope = app.Services.CreateScope())
+    {
+        {
+            try 
+            {
+                var initialiser = scope.ServiceProvider.GetRequiredService<ApplicationDbContextInitializer>();
+                await initialiser.InitialiseAsync();
+                await initialiser.SeedAsync();
+            }
+            catch (Exception ex)
+            {
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+                logger.LogError(ex, "An error occurred during database initialisation.");
+            }
+        }
+    }
+    
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-await app.InitialiseDatabaseAsync();
-
 app.UseHttpsRedirection();
 
+app.UseCors("AllowAll");
+
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.UseCors();
 app.MapControllers();
 
 app.Run();

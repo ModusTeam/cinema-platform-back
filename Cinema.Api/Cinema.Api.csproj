@@ -21,9 +21,4 @@
     <ProjectReference Include="..\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Modules\Errors\" />
-    <Folder Include="Modules\Validators\" />
-  </ItemGroup>
-
 </Project>
