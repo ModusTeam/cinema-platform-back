@@ -27,7 +27,7 @@ public class CreateSessionCommandHandler : IRequestHandler<CreateSessionCommand,
         if (movie == null)
             return Result<Guid>.Failure(new Error("Session.MovieNotFound", "Movie not found."));
         
-        var pricingExists = await _context.Pricing.AnyAsync(p => p.Id == pricingId, cancellationToken);
+        var pricingExists = await _context.Pricings.AnyAsync(p => p.Id == pricingId, cancellationToken);
         if (!pricingExists)
             return Result<Guid>.Failure(new Error("Session.InvalidPricing", "Pricing policy not found."));
         

@@ -1,6 +1,6 @@
 using Cinema.Domain.Entities;
 
-namespace Cinema.Application.Sessions.Queries;
+namespace Cinema.Application.Sessions.Dtos;
 
 public record SessionDto(
     Guid Id,

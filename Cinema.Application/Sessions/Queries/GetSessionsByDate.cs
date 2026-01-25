@@ -1,4 +1,5 @@
 using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Sessions.Dtos;
 using Cinema.Domain.Shared;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +19,7 @@ public class GetSessionsByDateQueryHandler : IRequestHandler<GetSessionsByDateQu
 
     public async Task<Result<List<SessionDto>>> Handle(GetSessionsByDateQuery request, CancellationToken cancellationToken)
     {
-        var startOfDay = request.Date.Date.ToUniversalTime();
+        var startOfDay = DateTime.SpecifyKind(request.Date.Date, DateTimeKind.Utc);
         var endOfDay = startOfDay.AddDays(1).AddTicks(-1);
 
         var sessions = await _context.Sessions
