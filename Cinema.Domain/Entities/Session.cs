@@ -62,4 +62,25 @@ public class Session
 
         Status = SessionStatus.Cancelled;
     }
+    
+    public void Reschedule(DateTime newStartTime, DateTime newEndTime)
+    {
+        if (Status == SessionStatus.Cancelled)
+        {
+            throw new DomainException("Cannot reschedule a cancelled session.");
+        }
+
+        if (newStartTime < DateTime.UtcNow)
+        {
+            throw new DomainException("Cannot reschedule to the past.");
+        }
+        
+        if (StartTime < DateTime.UtcNow)
+        {
+            throw new DomainException("Cannot reschedule a session that has already started.");
+        }
+
+        StartTime = newStartTime;
+        EndTime = newEndTime;
+    }
 }
