@@ -1,3 +1,4 @@
+using Cinema.Application.Sessions.Commands.CancelSession;
 using Cinema.Application.Sessions.Commands.CreateSession;
 using Cinema.Application.Sessions.Queries;
 using MediatR;
@@ -27,6 +28,21 @@ public class SessionsController : ControllerBase
             return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
         }
         return CreatedAtAction(nameof(GetByDate), new { date = DateTime.UtcNow }, result.Value);
+    }
+    
+    // DELETE api/sessions/{id}
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Cancel(Guid id)
+    {
+        var command = new CancelSessionCommand(id);
+        var result = await _mediator.Send(command);
+
+        if (result.IsFailure)
+        {
+            return BadRequest(new { result.Error.Code, result.Error.Description });
+        }
+
+        return NoContent();
     }
 
     // GET: api/sessions?date=2026-01-22
