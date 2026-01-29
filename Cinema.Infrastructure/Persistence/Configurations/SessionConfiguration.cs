@@ -50,5 +50,7 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
             .HasForeignKey(x => x.PricingId)
             .OnDelete(DeleteBehavior.Restrict);
         builder.HasQueryFilter(s => s.Hall!.IsActive);
+        builder.HasIndex(s => new { s.HallId, s.StartTime, s.EndTime })
+            .HasDatabaseName("IX_Sessions_Hall_Time_Overlap");
     }
 }

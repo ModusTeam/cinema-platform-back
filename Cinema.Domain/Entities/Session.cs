@@ -21,8 +21,8 @@ public class Session
     public EntityId<Pricing> PricingId { get; private set; }
     public Pricing? Pricing { get; private set; }
 
-    public ICollection<Ticket> Tickets { get; private set; } = [];
-
+    private readonly List<Ticket> _tickets = new();
+    public IReadOnlyCollection<Ticket> Tickets => _tickets.AsReadOnly();
 
     private Session(
         EntityId<Session> id,
@@ -41,28 +41,52 @@ public class Session
         HallId = hallId;
         PricingId = pricingId;
     }
-
-    public static Session New(
+    
+    public static Session Create(
         EntityId<Session> id,
         DateTime startTime,
         DateTime endTime,
-        SessionStatus status,
         EntityId<Movie> movieId,
         EntityId<Hall> hallId,
-        EntityId<Pricing> pricingId
-    ) => new(id, startTime, endTime, status, movieId, hallId, pricingId);
-    
+        EntityId<Pricing> pricingId)
+    {
+        if (startTime < DateTime.UtcNow)
+        {
+            throw new DomainException("Cannot create a session in the past.");
+        }
+
+        if (endTime <= startTime)
+        {
+            throw new DomainException("Session end time must be after start time.");
+        }
+
+        return new Session(
+            id, 
+            startTime, 
+            endTime, 
+            SessionStatus.Scheduled, 
+            movieId, 
+            hallId, 
+            pricingId
+        );
+    }
+
     public void Cancel(DateTime cancellationTime)
     {
         if (Status == SessionStatus.Cancelled) return;
-        if (StartTime < cancellationTime)
+        
+        if (Status == SessionStatus.Ended)
         {
-            throw new DomainException("Cannot cancel a session that has already started.");
+            throw new DomainException("Cannot cancel a session that has already ended.");
+        }
+        if (StartTime < cancellationTime && EndTime > cancellationTime)
+        {
+             throw new DomainException("Cannot cancel a session that is currently running.");
         }
 
         Status = SessionStatus.Cancelled;
     }
-    
+
     public void Reschedule(DateTime newStartTime, DateTime newEndTime)
     {
         if (Status == SessionStatus.Cancelled)
@@ -75,12 +99,16 @@ public class Session
             throw new DomainException("Cannot reschedule to the past.");
         }
         
-        if (StartTime < DateTime.UtcNow)
+        if (newEndTime <= newStartTime)
         {
-            throw new DomainException("Cannot reschedule a session that has already started.");
+             throw new DomainException("New end time must be greater than start time.");
         }
 
         StartTime = newStartTime;
         EndTime = newEndTime;
+        if (Status == SessionStatus.SoldOut)
+        {
+            Status = SessionStatus.OpenForSales;
+        }
     }
 }
