@@ -1,3 +1,4 @@
+using System.Data;
 using System.Reflection;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
@@ -32,7 +33,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         return base.SaveChangesAsync(cancellationToken);
     }
     
-    public async Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken)
+    public async Task<IDbContextTransaction> BeginTransactionAsync(IsolationLevel serializable,
+        CancellationToken cancellationToken)
     {
         return await Database.BeginTransactionAsync(cancellationToken);
     }

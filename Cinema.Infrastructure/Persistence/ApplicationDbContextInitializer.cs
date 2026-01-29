@@ -14,7 +14,10 @@ public class ApplicationDbContextInitializer(
     {
         try
         {
-            await dbContext.Database.MigrateAsync();
+            if (dbContext.Database.IsRelational())
+            {
+                await dbContext.Database.MigrateAsync();
+            }
         }
         catch (Exception exception)
         {
@@ -38,51 +41,55 @@ public class ApplicationDbContextInitializer(
 
     public async Task TrySeedAsync()
     {
-        // (Seat Types)
+        // 1. SEAT TYPES
         var standardTypeId = new EntityId<SeatType>(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         var vipTypeId = new EntityId<SeatType>(Guid.Parse("22222222-2222-2222-2222-222222222222"));
 
         if (!await dbContext.SeatTypes.AnyAsync())
         {
-            var standard = SeatType.New(
-                standardTypeId, 
-                "Standard", 
-                "Звичайне зручне крісло"
+            await dbContext.SeatTypes.AddRangeAsync(
+                SeatType.New(standardTypeId, "Standard", "Звичайне зручне крісло"),
+                SeatType.New(vipTypeId, "VIP", "Шкіряне крісло-реклайнер")
             );
-            
-            var vip = SeatType.New(
-                vipTypeId, 
-                "VIP", 
-                "Шкіряне крісло-реклайнер"
-            );
-
-            await dbContext.SeatTypes.AddRangeAsync(standard, vip);
             await dbContext.SaveChangesAsync();
         }
 
-        // (Genres)
+        // 2. TECHNOLOGIES
+        var imaxId = new EntityId<Technology>(Guid.Parse("88888888-8888-8888-8888-888888888888"));
+        var dolbyId = new EntityId<Technology>(Guid.Parse("99999999-9999-9999-9999-999999999999"));
+
+        if (!await dbContext.Technologies.AnyAsync())
+        {
+            await dbContext.Technologies.AddRangeAsync(
+                Technology.New(imaxId, "IMAX", "Visual"),
+                Technology.New(dolbyId, "Dolby Atmos", "Audio"),
+                Technology.New(new EntityId<Technology>(Guid.NewGuid()), "3D", "Visual"),
+                Technology.New(new EntityId<Technology>(Guid.NewGuid()), "4DX", "Experience")
+            );
+            await dbContext.SaveChangesAsync();
+        }
+
+        // 3. GENRES
         if (!await dbContext.Genres.AnyAsync())
         {
-            var action = Genre.New(new EntityId<Genre>(Guid.NewGuid()), 28, "Action", "action");
-            var sciFi = Genre.New(new EntityId<Genre>(Guid.NewGuid()), 878, "Sci-Fi", "sci-fi");
-            var drama = Genre.New(new EntityId<Genre>(Guid.NewGuid()), 18, "Drama", "drama");
-
-            await dbContext.Genres.AddRangeAsync(action, sciFi, drama);
+            await dbContext.Genres.AddRangeAsync(
+                Genre.New(new EntityId<Genre>(Guid.NewGuid()), 28, "Action", "action"),
+                Genre.New(new EntityId<Genre>(Guid.NewGuid()), 878, "Sci-Fi", "sci-fi"),
+                Genre.New(new EntityId<Genre>(Guid.NewGuid()), 18, "Drama", "drama")
+            );
             await dbContext.SaveChangesAsync();
         }
 
-        // (Movies)
-        var inceptionId = new EntityId<Movie>(Guid.Parse("33333333-3333-3333-3333-333333333333"));
-        
+        // 4. MOVIES
         if (!await dbContext.Movies.AnyAsync())
         {
             var inception = Movie.New(
-                inceptionId,
+                new EntityId<Movie>(Guid.Parse("33333333-3333-3333-3333-333333333333")),
                 27205,
                 "Inception",
                 148,
                 8.8m,
-                "https://image.tmdb.org/t/p/w500/9gk7admal4zl67YrxIo16EO00ww.jpg",
+                "https://www.themoviedb.org/t/p/w600_and_h900_face/9gk7adHYeDvHkCSEqAvQNLV5Uge.jpg",
                 "https://www.youtube.com/watch?v=YoHD9XEInc0"
             );
 
@@ -92,7 +99,7 @@ public class ApplicationDbContextInitializer(
                 "The Matrix",
                 136,
                 8.7m,
-                "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpFfCHG.jpg",
+                "https://www.themoviedb.org/t/p/w600_and_h900_face/ahxs2iYHjp6dMHjJORdF5K0deHm.jpg",
                 "https://www.youtube.com/watch?v=vKQi3bBA1y8"
             );
 
@@ -100,73 +107,53 @@ public class ApplicationDbContextInitializer(
             await dbContext.SaveChangesAsync();
         }
 
-        // (Pricing)
-        var defaultPricingId = new EntityId<Pricing>(Guid.Parse("44444444-4444-4444-4444-444444444444"));
+        // 5. PRICING
         if (!await dbContext.Pricings.AnyAsync())
         {
-            var pricing = Pricing.New(
-                defaultPricingId, 
-                "Base Tariff 2026"
-            );
+            var defaultPricingId = new EntityId<Pricing>(Guid.Parse("44444444-4444-4444-4444-444444444444"));
+            var pricing = Pricing.New(defaultPricingId, "Base Tariff 2026");
             
-            await dbContext.Pricings.AddAsync(pricing);
+            dbContext.Pricings.Add(pricing);
+            await dbContext.SaveChangesAsync();
+
+            var pricingItems = new List<PricingItem>();
+
+            foreach (DayOfWeek day in Enum.GetValues(typeof(DayOfWeek)))
+            {
+                pricingItems.Add(PricingItem.New(
+                    new EntityId<PricingItem>(Guid.NewGuid()),
+                    120.00m,
+                    defaultPricingId,
+                    standardTypeId,
+                    day,
+                    null, null
+                ));
+
+                pricingItems.Add(PricingItem.New(
+                    new EntityId<PricingItem>(Guid.NewGuid()),
+                    250.00m,
+                    defaultPricingId,
+                    vipTypeId,
+                    day,
+                    null, null
+                ));
+            }
+            
+            dbContext.PricingItems.AddRange(pricingItems);
             await dbContext.SaveChangesAsync();
         }
 
-        // (Halls & Seats)
+        // 6. HALLS & SEATS
         if (!await dbContext.Halls.AnyAsync())
         {
             var hallId = new EntityId<Hall>(Guid.Parse("55555555-5555-5555-5555-555555555555"));
-            var rows = 10;
-            var seatsPerRow = 15;
-            var capacity = rows * seatsPerRow;
-
-            var hall = Hall.New(
-                hallId, 
-                "IMAX Hall 1", 
-                capacity, 
-                new List<HallTechnology>()
-            );
-
+            var hall = Hall.Create(hallId, "IMAX Hall 1");
+            hall.GenerateSeatsGrid(10, 15, standardTypeId);
+            
+            hall.UpdateTechnologies(new List<EntityId<Technology>> { imaxId, dolbyId });
+            
             dbContext.Halls.Add(hall);
 
-            var seats = new List<Seat>();
-            for (int r = 1; r <= rows; r++)
-            {
-                for (int n = 1; n <= seatsPerRow; n++)
-                {
-                    var typeId = (r == rows) ? vipTypeId : standardTypeId;
-
-                    var seat = Seat.New(
-                        id: new EntityId<Seat>(Guid.NewGuid()),
-                        rowLabel: r.ToString(),
-                        number: n,
-                        gridX: n,
-                        gridY: r,
-                        status: SeatStatus.Active,
-                        hallId: hallId,
-                        seatTypeId: typeId
-                    );
-                    seats.Add(seat);
-                }
-            }
-            
-            // (Technologies)
-            if (!dbContext.Technologies.Any())
-            {
-                dbContext.Technologies.AddRange(new List<Technology>
-                {
-                    Technology.New(new EntityId<Technology>(Guid.Parse("88888888-8888-8888-8888-888888888888")), "IMAX", "Visual"),
-                    Technology.New(new EntityId<Technology>(Guid.Parse("99999999-9999-9999-9999-999999999999")), "Dolby Atmos", "Audio"),
-                    Technology.New(new EntityId<Technology>(Guid.Parse("77777777-7777-7777-7777-777777777777")), "3D", "Visual"),
-                    Technology.New(new EntityId<Technology>(Guid.Parse("66666666-6666-6666-6666-666666666666")), "4DX", "Experience")
-                });
-
-                await dbContext.SaveChangesAsync();
-            }
-            
-
-            dbContext.Seats.AddRange(seats);
             await dbContext.SaveChangesAsync();
         }
     }
