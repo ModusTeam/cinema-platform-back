@@ -8,6 +8,12 @@ public record SeatTypeDto(Guid Id, string Name, string? Description)
         => new(seatType.Id.Value, seatType.Name, seatType.Description);
 }
 
+public record TechnologyDto(Guid Id, string Name, string Type)
+{
+    public static TechnologyDto FromDomainModel(Technology tech)
+        => new(tech.Id.Value, tech.Name, tech.Type);
+}
+
 public record SeatDto(
     Guid Id, 
     string Row, 
@@ -32,13 +38,22 @@ public record SeatDto(
         );
 }
 
-public record HallDto(Guid Id, string Name, int Capacity, List<SeatDto>? Seats = null)
+public record HallDto(
+    Guid Id, 
+    string Name, 
+    int Capacity, 
+    List<SeatDto>? Seats = null,
+    List<TechnologyDto>? Technologies = null
+)
 {
     public static HallDto FromDomainModel(Hall hall)
         => new(
             hall.Id.Value, 
             hall.Name, 
             hall.TotalCapacity,
-            hall.Seats?.Select(SeatDto.FromDomainModel).ToList()
+            hall.Seats?.Select(SeatDto.FromDomainModel).ToList(),
+            hall.Technologies?
+                .Select(ht => TechnologyDto.FromDomainModel(ht.Technology!))
+                .ToList() ?? []
         );
 }

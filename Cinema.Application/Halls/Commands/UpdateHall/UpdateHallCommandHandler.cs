@@ -8,36 +8,32 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cinema.Application.Halls.Commands.UpdateHall;
 
-public class UpdateHallCommandHandler : IRequestHandler<UpdateHallCommand, Result>
+public class UpdateHallCommandHandler(IApplicationDbContext context) : IRequestHandler<UpdateHallCommand, Result>
 {
-    private readonly IApplicationDbContext _context;
-
-    public UpdateHallCommandHandler(IApplicationDbContext context)
-    {
-        _context = context;
-    }
-
     public async Task<Result> Handle(UpdateHallCommand request, CancellationToken cancellationToken)
     {
         var hallId = new EntityId<Hall>(request.HallId);
-
-        var hall = await _context.Halls
+        
+        var hall = await context.Halls
             .FirstOrDefaultAsync(h => h.Id == hallId, cancellationToken);
 
         if (hall == null)
-        {
             return Result.Failure(new Error("Hall.NotFound", "Hall not found."));
-        }
+        
+        var nameTaken = await context.Halls
+            .AnyAsync(h => h.Name == request.Name && h.Id != hallId && h.IsActive, cancellationToken);
+
+        if (nameTaken)
+            return Result.Failure(new Error("Hall.NameExists", "Another hall with this name already exists."));
 
         try
         {
-            hall.Update(request.Name);
-            
-            await _context.SaveChangesAsync(cancellationToken);
+            hall.UpdateDetails(request.Name);
+            await context.SaveChangesAsync(cancellationToken);
         }
         catch (DomainException ex)
         {
-            return Result.Failure(new Error("Hall.UpdateFailed", ex.Message));
+            return Result.Failure(new Error("Hall.Validation", ex.Message));
         }
 
         return Result.Success();

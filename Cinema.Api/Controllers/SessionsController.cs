@@ -1,77 +1,55 @@
 using Cinema.Application.Sessions.Commands.CancelSession;
 using Cinema.Application.Sessions.Commands.CreateSession;
 using Cinema.Application.Sessions.Commands.RescheduleSession;
-using Cinema.Application.Sessions.Queries;
-using MediatR;
+using Cinema.Application.Sessions.Dtos;
+using Cinema.Application.Sessions.Queries.GetSessionById;
+using Cinema.Application.Sessions.Queries.GetSessionsByDateQuery;
+using Cinema.Application.Sessions.Queries.GetSessionsWithPaginationQuery;
+using Cinema.Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Cinema.Api.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
-public class SessionsController : ControllerBase
+public class SessionsController : ApiController
 {
-    private readonly IMediator _mediator;
-
-    public SessionsController(IMediator mediator)
+    [HttpGet]
+    public async Task<ActionResult<PaginatedList<SessionDto>>> GetAll([FromQuery] GetSessionsWithPaginationQuery query)
     {
-        _mediator = mediator;
+        return HandleResult(await Mediator.Send(query));
     }
-
-    // POST: api/sessions
+    
+    [HttpGet("by-date")]
+    public async Task<ActionResult<List<SessionDto>>> GetByDate([FromQuery] DateTime? date)
+    {
+        return HandleResult(await Mediator.Send(new GetSessionsByDateQuery(date)));
+    }
+    
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<SessionDto>> GetById(Guid id)
+    {
+        return HandleResult(await Mediator.Send(new GetSessionByIdQuery(id)));
+    }
+    
     [HttpPost]
     public async Task<IActionResult> Create(CreateSessionCommand command)
     {
-        var result = await _mediator.Send(command);
+        var result = await Mediator.Send(command);
 
-        if (result.IsFailure)
-        {
-            return BadRequest(new { code = result.Error.Code, message = result.Error.Description });
-        }
-        return CreatedAtAction(nameof(GetByDate), new { date = DateTime.UtcNow }, result.Value);
+        if (result.IsFailure) return HandleResult(result);
+
+        return CreatedAtAction(nameof(GetById), new { id = result.Value }, result.Value);
     }
     
-    // DELETE api/sessions/{id}
-    [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Cancel(Guid id)
-    {
-        var command = new CancelSessionCommand(id);
-        var result = await _mediator.Send(command);
-
-        if (result.IsFailure)
-        {
-            return BadRequest(new { result.Error.Code, result.Error.Description });
-        }
-
-        return NoContent();
-    }
-    
-    // PUT: api/sessions/{id}/reschedule
     [HttpPut("{id:guid}/reschedule")]
     public async Task<IActionResult> Reschedule(Guid id, [FromBody] RescheduleSessionCommand command)
     {
-        if (id != command.SessionId)
-        {
-            return BadRequest("ID mismatch");
-        }
-
-        var result = await _mediator.Send(command);
-
-        if (result.IsFailure)
-        {
-            return BadRequest(new { result.Error.Code, result.Error.Description });
-        }
-
-        return NoContent();
+        if (id != command.SessionId) return BadRequest("Session ID mismatch");
+        return HandleResult(await Mediator.Send(command));
     }
-
-    // GET: api/sessions?date=2026-01-22
-    [HttpGet]
-    public async Task<IActionResult> GetByDate([FromQuery] DateTime date)
+    
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Cancel(Guid id)
     {
-        var query = new GetSessionsByDateQuery(date); 
-        var result = await _mediator.Send(query);
-
-        return Ok(result.Value);
+        return HandleResult(await Mediator.Send(new CancelSessionCommand(id)));
     }
 }

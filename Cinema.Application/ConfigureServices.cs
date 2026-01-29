@@ -1,5 +1,6 @@
 using System.Reflection;
 using Cinema.Application.Common.Behaviours;
+using Cinema.Application.Services;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,7 +19,8 @@ public static class ConfigureServices
             cfg.RegisterServicesFromAssembly(assembly);
             cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
         });
-
+        
+        services.AddScoped<SessionSchedulingService>();
         return services;
     }
 }

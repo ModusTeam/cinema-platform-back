@@ -1,4 +1,6 @@
 ﻿using Cinema.Application.Common.Interfaces;
+using Cinema.Domain.Interfaces;
+using Cinema.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
@@ -32,6 +34,7 @@ public static class ConfigurePersistenceServices
         services.AddScoped<ApplicationDbContextInitializer>();
         services.AddScoped<IApplicationDbContext>(provider => 
             provider.GetRequiredService<ApplicationDbContext>());
+        services.AddScoped<IMovieInfoProvider, EfMovieInfoProvider>();
 
         return services;
     }

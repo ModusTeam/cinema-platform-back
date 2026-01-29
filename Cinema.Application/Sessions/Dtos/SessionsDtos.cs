@@ -2,26 +2,33 @@ using Cinema.Domain.Entities;
 
 namespace Cinema.Application.Sessions.Dtos;
 
-public record SessionDto(
-    Guid Id,
-    DateTime StartTime,
-    DateTime EndTime,
-    string Status,
-    Guid MovieId,
-    string MovieTitle,
-    Guid HallId,
-    string HallName
-)
+public record SessionDto
 {
+    public Guid Id { get; init; }
+    public DateTime StartTime { get; init; }
+    public DateTime EndTime { get; init; }
+    public string Status { get; init; } = string.Empty;
+    public Guid MovieId { get; init; }
+    public string MovieTitle { get; init; } = string.Empty;
+    public Guid HallId { get; init; }
+    public string HallName { get; init; } = string.Empty;
+    public Guid PricingId { get; init; }
+    public string PricingName { get; init; } = string.Empty;
+    
     public static SessionDto FromDomainModel(Session session)
-        => new(
-            session.Id.Value,
-            session.StartTime,
-            session.EndTime,
-            session.Status.ToString(),
-            session.MovieId.Value,
-            session.Movie?.Title ?? "Unknown Movie",
-            session.HallId.Value,
-            session.Hall?.Name ?? "Unknown Hall"
-        );
+    {
+        return new SessionDto
+        {
+            Id = session.Id.Value,
+            StartTime = session.StartTime,
+            EndTime = session.EndTime,
+            Status = session.Status.ToString(),
+            MovieId = session.MovieId.Value,
+            MovieTitle = session.Movie?.Title ?? "Unknown Movie",
+            HallId = session.HallId.Value,
+            HallName = session.Hall?.Name ?? "Unknown Hall",
+            PricingId = session.PricingId.Value,
+            PricingName = session.Pricing?.Name ?? "Unknown Pricing"
+        };
+    }
 }

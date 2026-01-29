@@ -1,65 +1,54 @@
 using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Services;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
-using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cinema.Application.Sessions.Commands.CreateSession;
 
-public class CreateSessionCommandHandler : IRequestHandler<CreateSessionCommand, Result<Guid>>
+public class CreateSessionCommandHandler(
+    SessionSchedulingService schedulingService, 
+    IApplicationDbContext context) 
+    : IRequestHandler<CreateSessionCommand, Result<Guid>>
 {
-    private readonly IApplicationDbContext _context;
-
-    public CreateSessionCommandHandler(IApplicationDbContext context)
-    {
-        _context = context;
-    }
-
-    public async Task<Result<Guid>> Handle(CreateSessionCommand request, CancellationToken cancellationToken)
+    public async Task<Result<Guid>> Handle(CreateSessionCommand request, CancellationToken ct)
     {
         var hallId = new EntityId<Hall>(request.HallId);
         var movieId = new EntityId<Movie>(request.MovieId);
         var pricingId = new EntityId<Pricing>(request.PricingId);
+        
+        var hallExists = await context.Halls.AnyAsync(h => h.Id == hallId && h.IsActive, ct);
+        if (!hallExists) return Result.Failure<Guid>(new Error("Session.HallNotFound", "Hall not found or inactive."));
 
-        var movie = await _context.Movies.FirstOrDefaultAsync(m => m.Id == movieId, cancellationToken);
-        if (movie == null)
-            return Result<Guid>.Failure(new Error("Session.MovieNotFound", "Movie not found."));
-        
-        var pricingExists = await _context.Pricings.AnyAsync(p => p.Id == pricingId, cancellationToken);
-        if (!pricingExists)
-            return Result<Guid>.Failure(new Error("Session.InvalidPricing", "Pricing policy not found."));
-        
-        var endTime = request.StartTime.AddMinutes(movie.DurationMinutes + 10);
-        
-        var isOverlapping = await _context.Sessions
-            .AnyAsync(s =>
-                s.HallId == hallId &&
-                s.Status != SessionStatus.Cancelled &&
-                s.StartTime < endTime && 
-                s.EndTime > request.StartTime,
-                cancellationToken);
+        var pricingExists = await context.Pricings.AnyAsync(p => p.Id == pricingId, ct);
+        if (!pricingExists) return Result.Failure<Guid>(new Error("Session.PricingNotFound", "Pricing policy not found."));
 
-        if (isOverlapping)
+        try 
         {
-            return Result<Guid>.Failure(new Error("Session.Overlap", "This time slot is already booked in this hall."));
+            var session = await schedulingService.ScheduleSessionAsync(
+                hallId, movieId, pricingId, request.StartTime, 15, ct
+            );
+
+            context.Sessions.Add(session);
+            
+            await context.SaveChangesAsync(ct);
+
+            return Result.Success(session.Id.Value);
         }
-        
-        var sessionId = new EntityId<Session>(Guid.NewGuid());
-        var session = Session.New(
-            sessionId,
-            request.StartTime,
-            endTime,
-            SessionStatus.Scheduled, 
-            movieId,
-            hallId,
-            pricingId
-        );
-
-        _context.Sessions.Add(session);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return Result<Guid>.Success(sessionId.Value);
+        catch (DbUpdateException ex)
+        {
+            if (ex.InnerException != null && ex.InnerException.Message.Contains("no_overlapping_sessions"))
+            {
+                return Result.Failure<Guid>(new Error("Session.Overlap", 
+                    "Unable to schedule session. The time slot overlaps with an existing session in this hall."));
+            }
+            return Result.Failure<Guid>(new Error("Session.DbError", ex.Message));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<Guid>(new Error("Session.GeneralError", ex.Message));
+        }
     }
 }

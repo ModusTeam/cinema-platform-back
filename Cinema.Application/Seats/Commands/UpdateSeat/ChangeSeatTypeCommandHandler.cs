@@ -2,25 +2,10 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
-using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Cinema.Application.Seats.Commands;
-
-public record ChangeSeatTypeCommand(
-    Guid SeatId,
-    Guid NewSeatTypeId
-) : IRequest<Result>;
-
-public class ChangeSeatTypeValidator : AbstractValidator<ChangeSeatTypeCommand>
-{
-    public ChangeSeatTypeValidator()
-    {
-        RuleFor(x => x.SeatId).NotEmpty();
-        RuleFor(x => x.NewSeatTypeId).NotEmpty();
-    }
-}
+namespace Cinema.Application.Seats.Commands.UpdateSeat;
 
 public class ChangeSeatTypeHandler : IRequestHandler<ChangeSeatTypeCommand, Result>
 {
@@ -35,12 +20,13 @@ public class ChangeSeatTypeHandler : IRequestHandler<ChangeSeatTypeCommand, Resu
     {
         var seatId = new EntityId<Seat>(request.SeatId);
         var newTypeId = new EntityId<SeatType>(request.NewSeatTypeId);
-        
+
         var seat = await _context.Seats
             .FirstOrDefaultAsync(s => s.Id == seatId, cancellationToken);
 
         if (seat == null)
             return Result.Failure(new Error("Seat.NotFound", "Seat not found."));
+        
         var typeExists = await _context.SeatTypes
             .AnyAsync(t => t.Id == newTypeId, cancellationToken);
 
