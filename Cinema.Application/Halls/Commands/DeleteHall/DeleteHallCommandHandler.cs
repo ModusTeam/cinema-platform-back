@@ -7,31 +7,27 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cinema.Application.Halls.Commands.DeleteHall;
 
-public class DeleteHallCommandHandler : IRequestHandler<DeleteHallCommand, Result>
+public class DeleteHallCommandHandler(IApplicationDbContext context) : IRequestHandler<DeleteHallCommand, Result>
 {
-    private readonly IApplicationDbContext _context;
-
-    public DeleteHallCommandHandler(IApplicationDbContext context)
-    {
-        _context = context;
-    }
-
     public async Task<Result> Handle(DeleteHallCommand request, CancellationToken cancellationToken)
     {
         var hallId = new EntityId<Hall>(request.HallId);
+        
+        var hall = await context.Halls.FirstOrDefaultAsync(h => h.Id == hallId, cancellationToken);
+        if (hall == null) return Result.Failure(new Error("Hall.NotFound", "Hall not found."));
+        
+        var hasActiveSessions = await context.Sessions
+            .AnyAsync(s => s.HallId == hallId && s.EndTime > DateTime.UtcNow, cancellationToken);
 
-        var hall = await _context.Halls
-            .FirstOrDefaultAsync(h => h.Id == hallId, cancellationToken);
-
-        if (hall == null)
+        if (hasActiveSessions)
         {
-            return Result.Failure(new Error("Hall.NotFound", "Hall not found."));
+            return Result.Failure(new Error("Hall.CannotDelete", 
+                "Cannot delete hall with active or future sessions. Please cancel or reschedule sessions first."));
         }
 
         hall.Deactivate();
 
-        await _context.SaveChangesAsync(cancellationToken);
-
+        await context.SaveChangesAsync(cancellationToken);
         return Result.Success();
     }
 }

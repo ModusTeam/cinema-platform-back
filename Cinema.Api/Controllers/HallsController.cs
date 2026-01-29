@@ -1,89 +1,62 @@
 using Cinema.Application.Halls.Commands.CreateHall;
 using Cinema.Application.Halls.Commands.DeleteHall;
 using Cinema.Application.Halls.Commands.UpdateHall;
-using Cinema.Application.Halls.Queries;
-using MediatR;
+using Cinema.Application.Halls.Dtos;
+using Cinema.Application.Halls.Queries.GetHallById;
+using Cinema.Application.Halls.Queries.GetHallLookups;
+using Cinema.Application.Halls.Queries.GetHallsWithPagination;
+using Cinema.Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Cinema.Api.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
-public class HallsController : ControllerBase
+public class HallsController : ApiController
 {
-    private readonly IMediator _mediator;
-
-    public HallsController(IMediator mediator)
-    {
-        _mediator = mediator;
-    }
-    
-    // GET: api/halls
     [HttpGet]
-    public async Task<IActionResult> GetAll()
+    public async Task<ActionResult<PaginatedList<HallDto>>> GetAll([FromQuery] GetHallsWithPaginationQuery query)
     {
-        var result = await _mediator.Send(new GetAllHallsQuery());
-        return Ok(result.Value);
+        return HandleResult(await Mediator.Send(query));
     }
 
-    // POST: api/halls
-    [HttpPost]
-    public async Task<IActionResult> Create(CreateHallCommand command)
+    [HttpGet("lookups")]
+    public async Task<ActionResult<List<HallLookupDto>>> GetLookups()
     {
-        var result = await _mediator.Send(command);
-
-        if (result.IsFailure)
-        {
-            return BadRequest(new { result.Error.Code, result.Error.Description });
-        }
-        return Ok(result.Value);
-    }
-    
-    // PUT: api/halls/{id}
-    [HttpPut("{id:guid}")]
-    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateHallCommand command)
-    {
-        if (id != command.HallId)
-        {
-            return BadRequest("ID mismatch");
-        }
-
-        var result = await _mediator.Send(command);
-
-        if (result.IsFailure)
-        {
-            return BadRequest(new { result.Error.Code, result.Error.Description });
-        }
-
-        return NoContent();
+        return HandleResult(await Mediator.Send(new GetActiveHallsLookupQuery()));
     }
 
-    // GET: api/halls/{id}
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
-        var query = new GetHallByIdQuery(id);
-        var result = await _mediator.Send(query);
+        return HandleResult(await Mediator.Send(new GetHallByIdQuery(id)));
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create(CreateHallCommand command)
+    {
+        var result = await Mediator.Send(command);
 
         if (result.IsFailure)
-        {
-            return NotFound(new { result.Error.Code, result.Error.Description });
-        }
-
-        return Ok(result.Value);
+            return HandleResult(result);
+        return CreatedAtAction(nameof(GetById), new { id = result.Value }, result.Value);
     }
     
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateHallCommand command)
+    {
+        if (id != command.HallId) return BadRequest("ID mismatch");
+        return HandleResult(await Mediator.Send(command));
+    }
+    
+    [HttpPut("{id:guid}/technologies")]
+    public async Task<IActionResult> UpdateTechnologies(Guid id, [FromBody] UpdateHallTechnologiesCommand command)
+    {
+        if (id != command.HallId) return BadRequest("ID mismatch");
+        return HandleResult(await Mediator.Send(command));
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
-        var command = new DeleteHallCommand(id);
-        var result = await _mediator.Send(command);
-
-        if (result.IsFailure)
-        {
-            return NotFound(new { result.Error.Code, result.Error.Description });
-        }
-
-        return NoContent();
+        return HandleResult(await Mediator.Send(new DeleteHallCommand(id)));
     }
 }
