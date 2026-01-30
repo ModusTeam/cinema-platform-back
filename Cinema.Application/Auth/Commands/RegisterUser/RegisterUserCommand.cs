@@ -1,8 +1,8 @@
+using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Shared;
 using MediatR;
-using Cinema.Application.Common.Interfaces;
 
-namespace Cinema.Application.Auth.Commands;
+namespace Cinema.Application.Auth.Commands.RegisterUser;
 
 public record RegisterUserCommand(string Email, string Password, string FirstName, string LastName) 
     : IRequest<Result<Guid>>;
