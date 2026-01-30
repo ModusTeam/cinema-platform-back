@@ -1,6 +1,8 @@
 using Cinema.Application.Auth.Commands.LoginUser;
+using Cinema.Application.Auth.Commands.RefreshToken;
 using Cinema.Application.Auth.Commands.RegisterUser;
 using Microsoft.AspNetCore.Mvc;
+using Cinema.Application.Auth.Dtos;
 
 namespace Cinema.Api.Controllers;
 
@@ -20,7 +22,17 @@ public class AuthController : ApiController
     {
         var result = await Mediator.Send(command);
         if (result.IsFailure) return HandleResult(result);
+        return Ok(result.Value);
+    }
+    
+    [HttpPost("refresh-token")]
+    public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
+    {
+        var command = new RefreshTokenCommand(request.Token);
+        var result = await Mediator.Send(command);
 
-        return Ok(new { Token = result.Value });
+        if (result.IsFailure) return HandleResult(result);
+
+        return Ok(result.Value);
     }
 }

@@ -1,10 +1,13 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
+using Cinema.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 
@@ -12,6 +15,7 @@ namespace Cinema.Infrastructure.Services;
 
 public class IdentityService(
     UserManager<User> userManager,
+    ApplicationDbContext context,
     IConfiguration configuration) : IIdentityService
 {
     public async Task<Result<Guid>> RegisterAsync(string email, string password, string firstName, string lastName)
@@ -37,20 +41,67 @@ public class IdentityService(
         return Result.Success(user.Id);
     }
 
-    public async Task<Result<string>> LoginAsync(string email, string password)
+    public async Task<Result<(string AccessToken, string RefreshToken)>> LoginAsync(string email, string password)
     {
         var user = await userManager.FindByEmailAsync(email);
         if (user == null)
-            return Result.Failure<string>(new Error("Identity.LoginFailed", "Invalid email or password."));
+            return Result.Failure<(string, string)>(new Error("Identity.LoginFailed", "Invalid email or password."));
 
         var checkPassword = await userManager.CheckPasswordAsync(user, password);
         if (!checkPassword)
-            return Result.Failure<string>(new Error("Identity.LoginFailed", "Invalid email or password."));
-
+            return Result.Failure<(string, string)>(new Error("Identity.LoginFailed", "Invalid email or password."));
+        
         var roles = await userManager.GetRolesAsync(user);
+        var accessToken = GenerateJwtToken(user, roles);
+        var refreshToken = GenerateRefreshToken();
+        
+        var refreshTokenEntity = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            Token = refreshToken,
+            UserId = user.Id,
+            ExpiryDate = DateTime.UtcNow.AddDays(7),
+            IsRevoked = false
+        };
 
-        var token = GenerateJwtToken(user, roles);
-        return Result.Success(token);
+        await context.RefreshTokens.AddAsync(refreshTokenEntity);
+        await context.SaveChangesAsync();
+
+        return Result.Success((accessToken, refreshToken));
+    }
+
+    public async Task<Result<(string AccessToken, string RefreshToken)>> RefreshTokenAsync(string requestRefreshToken)
+    {
+        var storedToken = await context.RefreshTokens
+            .Include(x => x.User)
+            .FirstOrDefaultAsync(x => x.Token == requestRefreshToken);
+
+        if (storedToken == null || storedToken.IsRevoked)
+            return Result.Failure<(string, string)>(new Error("Token.Invalid", "Invalid token"));
+
+        if (storedToken.ExpiryDate < DateTime.UtcNow)
+            return Result.Failure<(string, string)>(new Error("Token.Expired", "Token expired"));
+
+        var user = storedToken.User;
+        var roles = await userManager.GetRolesAsync(user);
+        
+        var newAccessToken = GenerateJwtToken(user, roles);
+        var newRefreshToken = GenerateRefreshToken();
+        
+        storedToken.IsRevoked = true; 
+        
+        var newTokenEntity = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            Token = newRefreshToken,
+            UserId = user.Id,
+            ExpiryDate = DateTime.UtcNow.AddDays(7)
+        };
+        
+        await context.RefreshTokens.AddAsync(newTokenEntity);
+        await context.SaveChangesAsync();
+
+        return Result.Success((newAccessToken, newRefreshToken));
     }
 
     private string GenerateJwtToken(User user, IList<string> roles)
@@ -84,5 +135,13 @@ public class IdentityService(
         var tokenHandler = new JwtSecurityTokenHandler();
         var token = tokenHandler.CreateToken(tokenDescriptor);
         return tokenHandler.WriteToken(token);
+    }
+
+    private static string GenerateRefreshToken()
+    {
+        var randomNumber = new byte[32];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(randomNumber);
+        return Convert.ToBase64String(randomNumber);
     }
 }

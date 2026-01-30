@@ -21,6 +21,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Technology> Technologies { get; init; }
     public DbSet<Seat> Seats { get; init; }
     public DbSet<SeatType> SeatTypes { get; init; }
+    public DbSet<RefreshToken> RefreshTokens { get; init; }
     public DbSet<Session> Sessions { get; init; }
     public DbSet<Pricing> Pricings { get; init; }
     public DbSet<PricingItem> PricingItems { get; init; }

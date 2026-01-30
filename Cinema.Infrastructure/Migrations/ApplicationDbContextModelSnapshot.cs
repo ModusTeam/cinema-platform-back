@@ -273,6 +273,39 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("pricing_items", (string)null);
                 });
 
+            modelBuilder.Entity("Cinema.Domain.Entities.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("ExpiryDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expiry_date");
+
+                    b.Property<bool>("IsRevoked")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_revoked");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("token");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_refresh_tokens");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_refresh_tokens_user_id");
+
+                    b.ToTable("refresh_tokens", (string)null);
+                });
+
             modelBuilder.Entity("Cinema.Domain.Entities.Seat", b =>
                 {
                     b.Property<Guid>("Id")
@@ -826,6 +859,18 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Pricing");
 
                     b.Navigation("SeatType");
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.RefreshToken", b =>
+                {
+                    b.HasOne("Cinema.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_refresh_tokens_users_user_id");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.Seat", b =>
