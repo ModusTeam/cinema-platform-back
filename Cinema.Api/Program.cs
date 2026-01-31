@@ -1,7 +1,13 @@
+using Cinema.Api.Middleware;
 using Cinema.Api.Modules;
 using Cinema.Infrastructure.Persistence;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((context, configuration) =>
+    configuration.ReadFrom.Configuration(context.Configuration));
+
 builder.Services.AddWebServices(builder.Configuration);
 
 var app = builder.Build();
@@ -15,7 +21,7 @@ if (app.Environment.IsDevelopment())
             {
                 var initialiser = scope.ServiceProvider.GetRequiredService<ApplicationDbContextInitializer>();
                 await initialiser.InitialiseAsync();
-                await initialiser.SeedAsync();
+                //await initialiser.SeedAsync();
             }
             catch (Exception ex)
             {
@@ -27,11 +33,17 @@ if (app.Environment.IsDevelopment())
     
     
 }
+
+app.UseExceptionHandler();
+app.UseSerilogRequestLogging();
+app.UseMiddleware<RequestLogContextMiddleware>();
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
