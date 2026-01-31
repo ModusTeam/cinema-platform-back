@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>b1e5606e-e3f1-44e4-a955-e0ff0eb7ebec</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +21,12 @@
   <ItemGroup>
     <ProjectReference Include="..\Cinema.Application\Cinema.Application.csproj" />
     <ProjectReference Include="..\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\.dockerignore">
+      <Link>.dockerignore</Link>
+    </Content>
   </ItemGroup>
 
 </Project>
