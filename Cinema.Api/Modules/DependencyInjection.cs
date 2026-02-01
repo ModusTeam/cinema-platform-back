@@ -1,7 +1,9 @@
 using System.Text;
 using System.Threading.RateLimiting;
 using Cinema.Api.ExceptionHandlers;
+using Cinema.Api.Services;
 using Cinema.Application;
+using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -24,6 +26,8 @@ public static class DependencyInjection
         }
     
         services.AddControllers();
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
         
         services.AddRateLimiter(options =>
         {
