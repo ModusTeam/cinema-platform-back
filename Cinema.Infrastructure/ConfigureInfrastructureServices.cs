@@ -37,7 +37,7 @@ public static class ConfigureInfrastructureServices
             options.Configuration = configuration.GetConnectionString("RedisConnection");
             options.InstanceName = "Cinema_";
         });
-        
+        services.AddHttpClient<ITmdbService, TmdbService>();
         services.AddTransient<ISeatLockingService, RedisSeatLockingService>();
         services.AddTransient<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddTransient<ITokenService, TokenService>();

@@ -110,6 +110,16 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("BackdropUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("backdrop_url");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("description");
+
                     b.Property<int>("DurationMinutes")
                         .HasColumnType("integer")
                         .HasColumnName("duration_minutes");
@@ -118,15 +128,19 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("external_id");
 
-                    b.Property<string>("ImgUrl")
+                    b.Property<string>("PosterUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
-                        .HasColumnName("img_url");
+                        .HasColumnName("poster_url");
 
                     b.Property<decimal>("Rating")
                         .HasPrecision(4, 2)
                         .HasColumnType("numeric(4,2)")
                         .HasColumnName("rating");
+
+                    b.Property<int>("ReleaseYear")
+                        .HasColumnType("integer")
+                        .HasColumnName("release_year");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -134,10 +148,10 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("title");
 
-                    b.Property<string>("VideoUrl")
+                    b.Property<string>("TrailerUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
-                        .HasColumnName("video_url");
+                        .HasColumnName("trailer_url");
 
                     b.HasKey("Id")
                         .HasName("pk_movies");
@@ -796,6 +810,46 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Hall");
 
                     b.Navigation("Technology");
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.Movie", b =>
+                {
+                    b.OwnsMany("Cinema.Domain.Entities.MovieCastMember", "Cast", b1 =>
+                        {
+                            b1.Property<Guid>("MovieId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("integer");
+
+                            b1.Property<int>("ExternalId")
+                                .HasColumnType("integer");
+
+                            b1.Property<string>("Name")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("PhotoUrl")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Role")
+                                .HasColumnType("text");
+
+                            b1.HasKey("MovieId", "__synthesizedOrdinal");
+
+                            b1.ToTable("movies");
+
+                            b1
+                                .ToJson("cast")
+                                .HasColumnType("jsonb");
+
+                            b1.WithOwner()
+                                .HasForeignKey("MovieId")
+                                .HasConstraintName("fk_movies_movies_movie_id");
+                        });
+
+                    b.Navigation("Cast");
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.MovieGenre", b =>
