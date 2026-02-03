@@ -73,6 +73,7 @@ public static class DependencyInjection
             };
         });
         
+        services.AddMemoryCache();
         services.AddExceptionHandler<GlobalExceptionHandler>();
         services.AddProblemDetails();
         services.AddEndpointsApiExplorer();

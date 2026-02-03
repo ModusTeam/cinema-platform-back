@@ -1,6 +1,7 @@
 using Cinema.Api.Middleware;
 using Cinema.Api.Modules;
 using Cinema.Infrastructure.Persistence;
+using Hangfire;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -47,6 +48,9 @@ app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.UseHangfireDashboard();
+app.MapHangfireDashboard();
 
 app.MapControllers();
 
