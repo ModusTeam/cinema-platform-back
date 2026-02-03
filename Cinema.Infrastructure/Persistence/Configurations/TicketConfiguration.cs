@@ -1,5 +1,6 @@
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
+using Cinema.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -45,5 +46,9 @@ public class TicketConfiguration : IEntityTypeConfiguration<Ticket>
             .HasForeignKey(x => x.SeatId)
             .OnDelete(DeleteBehavior.Restrict);
         builder.HasQueryFilter(t => t.Seat!.Hall!.IsActive);
+        
+        builder.HasIndex(t => new { t.SessionId, t.SeatId })
+            .IsUnique()
+            .HasFilter($"ticket_status IN ({(int)TicketStatus.Valid}, {(int)TicketStatus.Used})");
     }
 }

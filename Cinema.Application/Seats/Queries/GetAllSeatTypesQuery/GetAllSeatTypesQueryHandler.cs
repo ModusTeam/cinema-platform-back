@@ -1,6 +1,7 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Halls.Dtos;
 using Cinema.Domain.Shared;
+using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,7 +15,7 @@ public class GetAllSeatTypesQueryHandler(IApplicationDbContext context)
         var types = await context.SeatTypes
             .AsNoTracking()
             .OrderBy(x => x.Name)
-            .Select(x => new SeatTypeDto(x.Id.Value, x.Name, x.Description))
+            .ProjectToType<SeatTypeDto>()
             .ToListAsync(ct);
 
         return Result.Success(types);

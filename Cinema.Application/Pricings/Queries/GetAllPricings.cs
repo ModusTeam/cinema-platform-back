@@ -1,6 +1,7 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Pricings.Dtos;
 using Cinema.Domain.Shared;
+using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,22 +16,8 @@ public class GetAllPricingsQueryHandler(IApplicationDbContext context)
     {
         var pricings = await context.Pricings
             .AsNoTracking()
-            .Include(p => p.PricingItems!)
-            .ThenInclude(pi => pi.SeatType)
             .OrderBy(p => p.Name)
-            .Select(p => new PricingDetailsDto(
-                p.Id.Value,
-                p.Name,
-                p.PricingItems != null
-                    ? p.PricingItems.Select(pi => new PricingItemDto(
-                        pi.Id.Value,
-                        pi.DayOfWeek ?? DayOfWeek.Sunday,
-                        pi.SeatTypeId.Value,
-                        pi.SeatType!.Name,
-                        pi.Price
-                    )).ToList()
-                    : new List<PricingItemDto>()
-            ))
+            .ProjectToType<PricingDetailsDto>()
             .ToListAsync(ct);
 
         return Result.Success(pricings);

@@ -4,6 +4,7 @@ using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Infrastructure;
+using Mapster;
 using Microsoft.OpenApi.Models;
 
 namespace Cinema.Api.Modules;
@@ -23,8 +24,10 @@ public static class DependencyInjection
     
         services.AddControllers();
         services.AddHttpContextAccessor();
+        services.AddMemoryCache();
+        services.AddDataProtection();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
-
+        services.AddMapster();
         services.AddSignalR();
         services.AddTransient<ITicketNotifier, SignalRTicketNotifier>();
 
@@ -45,7 +48,6 @@ public static class DependencyInjection
 
         services.AddProblemDetails();
         services.AddEndpointsApiExplorer();
-        
         services.AddSwaggerConfiguration();
 
         return services;
@@ -55,11 +57,11 @@ public static class DependencyInjection
     {
         services.AddSwaggerGen(c =>
         {
-            c.SwaggerDoc("v1", new OpenApiInfo 
+            c.SwaggerDoc("v10.2", new OpenApiInfo 
             { 
                 Title = "Cinema API", 
-                Version = "v1",
-                Description = "Cinema Project API"
+                Version = "v1240",
+                Description = "Cinema Platform API"
             });
             
             c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme

@@ -3,6 +3,7 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Interfaces;
+using Cinema.Infrastructure.Authentication;
 using Cinema.Infrastructure.Persistence;
 using Cinema.Infrastructure.Services;
 using Hangfire;
@@ -92,6 +93,7 @@ public static class ConfigureInfrastructureServices
             })
             .AddPolicyHandler(retryPolicy);
         
+        services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));
         services.AddTransient<IPaymentService, MockPaymentService>();
         services.AddTransient<IPriceCalculator, PriceCalculator>();
         services.AddTransient<ISeatLockingService, RedisSeatLockingService>();

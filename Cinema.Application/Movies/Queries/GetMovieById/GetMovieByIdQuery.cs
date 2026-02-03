@@ -3,6 +3,7 @@ using Cinema.Application.Movies.Dtos;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
+using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,6 +27,6 @@ public class GetMovieByIdQueryHandler(IApplicationDbContext context)
         if (movie == null)
             return Result.Failure<MovieDto>(new Error("Movie.NotFound", "Movie not found."));
 
-        return Result.Success(MovieDto.FromDomain(movie));
+        return Result.Success(movie.Adapt<MovieDto>());
     }
 }

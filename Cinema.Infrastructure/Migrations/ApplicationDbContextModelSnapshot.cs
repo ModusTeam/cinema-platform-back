@@ -540,8 +540,10 @@ namespace Cinema.Infrastructure.Migrations
                     b.HasIndex("SeatId")
                         .HasDatabaseName("ix_tickets_seat_id");
 
-                    b.HasIndex("SessionId")
-                        .HasDatabaseName("ix_tickets_session_id");
+                    b.HasIndex("SessionId", "SeatId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tickets_session_id_seat_id")
+                        .HasFilter("ticket_status IN (0, 1)");
 
                     b.ToTable("tickets", (string)null);
                 });

@@ -1,6 +1,7 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Technologies.Dtos;
 using Cinema.Domain.Shared;
+using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,7 +15,7 @@ public class GetAllTechnologiesQueryHandler(IApplicationDbContext context)
         var technologies = await context.Technologies
             .AsNoTracking()
             .OrderBy(t => t.Name)
-            .Select(t => TechnologyDto.FromDomain(t))
+            .ProjectToType<TechnologyDto>()
             .ToListAsync(ct);
 
         return Result.Success(technologies);

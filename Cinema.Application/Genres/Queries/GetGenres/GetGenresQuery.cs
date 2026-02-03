@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Genres.Dtos;
+using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -21,7 +22,7 @@ public class GetGenresQueryHandler(
 
             return await context.Genres
                 .OrderBy(g => g.Name)
-                .Select(g => new GenreDto(g.ExternalId, g.Name)) 
+                .ProjectToType<GenreDto>() 
                 .ToListAsync(ct);
         }) ?? new List<GenreDto>();
     }

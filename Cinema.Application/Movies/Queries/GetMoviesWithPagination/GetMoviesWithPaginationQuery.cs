@@ -4,6 +4,7 @@ using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Mapster;
 
 namespace Cinema.Application.Movies.Queries.GetMoviesWithPagination;
 
@@ -39,7 +40,7 @@ public class GetMoviesWithPaginationQueryHandler(IApplicationDbContext context)
         
         query = query.OrderByDescending(m => m.ReleaseYear).ThenBy(m => m.Title);
         
-        var dtoQuery = query.Select(m => MovieDto.FromDomain(m));
+        var dtoQuery = query.ProjectToType<MovieDto>();
         
         var pagedList = await PaginatedList<MovieDto>.CreateAsync(
             dtoQuery, 

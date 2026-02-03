@@ -3,6 +3,7 @@ using Cinema.Application.Orders.Dtos;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
+using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,44 +20,23 @@ public class GetTicketDetailsQueryHandler(
     {
         var ticketId = new EntityId<Ticket>(request.TicketId);
         var userId = currentUser.UserId;
-        
-        var ticketData = await context.Tickets
-            .AsNoTracking()
-            .Where(t => t.Id == ticketId)
-            .Select(t => new 
-            {
-                Ticket = t,
-                UserId = t.Order!.UserId,
-                MovieTitle = t.Session!.Movie!.Title,
-                PosterUrl = t.Session.Movie.PosterUrl,
-                HallName = t.Session.Hall!.Name,
-                Row = t.Seat!.RowLabel,
-                Number = t.Seat.Number,
-                SeatType = t.Seat.SeatType!.Name,
-                SessionStart = t.Session.StartTime
-            })
-            .FirstOrDefaultAsync(ct);
 
-        if (ticketData == null)
+        var ticket = await context.Tickets
+            .AsNoTracking()
+            .Include(t => t.Order)
+            .Include(t => t.Session).ThenInclude(s => s.Movie)
+            .Include(t => t.Session).ThenInclude(s => s.Hall)
+            .Include(t => t.Seat).ThenInclude(s => s.SeatType)
+            .FirstOrDefaultAsync(t => t.Id == ticketId, ct);
+
+        if (ticket == null)
             return Result.Failure<TicketDto>(new Error("Ticket.NotFound", "Ticket not found."));
 
-        if (ticketData.UserId != userId)
-             return Result.Failure<TicketDto>(new Error("Ticket.AccessDenied", "This ticket belongs to another user."));
+        if (ticket.Order?.UserId != userId)
+            return Result.Failure<TicketDto>(new Error("Ticket.AccessDenied", "This ticket belongs to another user."));
 
-        var dto = new TicketDto(
-            ticketData.Ticket.Id.Value,
-            ticketData.MovieTitle,
-            ticketData.PosterUrl ?? "",
-            ticketData.HallName,
-            ticketData.Row,
-            ticketData.Number,
-            ticketData.SeatType,
-            ticketData.Ticket.PriceSnapshot,
-            ticketData.SessionStart,
-            ticketData.Ticket.TicketStatus.ToString(),
-            ticketData.Ticket.Id.Value.ToString()
-        );
-
+        var dto = ticket.Adapt<TicketDto>();
+        
         return Result.Success(dto);
     }
 }

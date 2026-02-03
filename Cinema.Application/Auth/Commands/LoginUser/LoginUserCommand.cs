@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Shared;
+using Mapster;
 using MediatR;
 
 namespace Cinema.Application.Auth.Commands.LoginUser;
@@ -16,6 +17,6 @@ public class LoginUserCommandHandler(IIdentityService identityService)
 
         if (result.IsFailure)
             return Result.Failure<LoginResponse>(result.Error);
-        return Result.Success(new LoginResponse(result.Value.AccessToken, result.Value.RefreshToken));
+        return Result.Success(result.Value.Adapt<LoginResponse>());
     }
 }
