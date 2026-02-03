@@ -1,4 +1,5 @@
 using Cinema.Domain.Common;
+using Cinema.Domain.Exceptions;
 
 namespace Cinema.Domain.Entities;
 
@@ -41,4 +42,10 @@ public class PricingItem
         DateTime? startTime,
         DateTime? endTime)
         => new(id, price, pricingId, seatTypeId, dayOfWeek, startTime, endTime);
+    
+    public void UpdatePrice(decimal newPrice)
+    {
+        if (newPrice <= 0) throw new DomainException("Price must be greater than zero.");
+        Price = newPrice;
+    }
 }
