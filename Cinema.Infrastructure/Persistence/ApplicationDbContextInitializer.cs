@@ -145,44 +145,5 @@ public class ApplicationDbContextInitializer
             await _context.Technologies.AddRangeAsync(technologies);
             await _context.SaveChangesAsync();
         }
-
-        // (Sessions)
-        if (!await _context.Sessions.AnyAsync())
-        {
-            _logger.LogInformation("Seeding Sessions...");
-
-            var hall = await _context.Halls.FirstAsync(h => h.Name == "IMAX Hall 1");
-            var movie = await _context.Movies.FirstAsync(m => m.Title == "Dune: Part Two");
-            var pricing = await _context.Pricings.FirstAsync();
-
-            var sessions = new List<Session>();
-            var today = DateTime.UtcNow.Date;
-
-            for (int day = 0; day < 3; day++)
-            {
-                var currentDate = today.AddDays(day);
-
-                var startTimes = new[] { 10, 14, 19 };
-
-                foreach (var hour in startTimes)
-                {
-                    var start = currentDate.AddHours(hour);
-                    var end = start.AddMinutes(movie.DurationMinutes);
-
-                    var session = Session.Create(
-                        EntityId<Session>.New(),
-                        start,
-                        end,
-                        movie.Id,
-                        hall.Id,
-                        pricing.Id
-                    );
-                    sessions.Add(session);
-                }
-            }
-
-            await _context.Sessions.AddRangeAsync(sessions);
-            await _context.SaveChangesAsync();
-        }
     }
 }
