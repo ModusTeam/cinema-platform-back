@@ -128,6 +128,10 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("external_id");
 
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
                     b.Property<string>("PosterUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -141,6 +145,10 @@ namespace Cinema.Infrastructure.Migrations
                     b.Property<int>("ReleaseYear")
                         .HasColumnType("integer")
                         .HasColumnName("release_year");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
 
                     b.Property<string>("Title")
                         .IsRequired()
