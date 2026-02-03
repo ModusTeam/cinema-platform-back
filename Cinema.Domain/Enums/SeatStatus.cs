@@ -2,6 +2,7 @@ namespace Cinema.Domain.Enums;
 
 public enum SeatStatus
 {
-    Active = 0,
-    Broken = 1,
+    Active = 1,
+    Maintenance = 2,
+    Reserved = 3
 }

@@ -14,6 +14,9 @@ public interface IApplicationDbContext
     DbSet<Session> Sessions { get; }
     DbSet<Movie> Movies { get; }
     DbSet<Genre> Genres { get; }
+    DbSet<PricingItem> PricingItems { get; }
+    DbSet<Order> Orders { get; }
+    DbSet<Ticket> Tickets { get; }
     DbSet<Pricing> Pricings { get; }
     DbSet<HallTechnology> HallTechnologies { get; } 
     DbSet<Technology> Technologies { get; }
