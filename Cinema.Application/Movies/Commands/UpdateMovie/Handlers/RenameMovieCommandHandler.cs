@@ -19,7 +19,6 @@ public class RenameMovieCommandHandler(IApplicationDbContext context)
         if (movie == null) return Result.Failure<Guid>(new Error("Movie.NotFound", "Movie not found"));
 
         movie.Rename(request.NewTitle);
-        
         await context.SaveChangesAsync(ct);
         return Result.Success(movie.Id.Value);
     }

@@ -23,7 +23,7 @@ public class UpdateMovieDetailsCommandHandler(IApplicationDbContext context)
         movie.UpdateSpecs(
             request.Description, 
             request.DurationMinutes, 
-            ratingDecimal,
+            ratingDecimal, 
             request.ReleaseYear
         );
 

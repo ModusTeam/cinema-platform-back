@@ -10,7 +10,8 @@ namespace Cinema.Application.Movies.Queries.GetMoviesWithPagination;
 public record GetMoviesWithPaginationQuery(
     int PageNumber = 1,
     int PageSize = 10,
-    string? SearchTerm = null
+    string? SearchTerm = null,
+    int? GenreId = null 
 ) : IRequest<Result<PaginatedList<MovieDto>>>;
 
 public class GetMoviesWithPaginationQueryHandler(IApplicationDbContext context) 
@@ -22,12 +23,18 @@ public class GetMoviesWithPaginationQueryHandler(IApplicationDbContext context)
             .AsNoTracking()
             .Include(m => m.MovieGenres)
             .ThenInclude(mg => mg.Genre)
+            .Where(m => !m.IsDeleted)
             .AsQueryable();
         
         if (!string.IsNullOrWhiteSpace(request.SearchTerm))
         {
             var term = request.SearchTerm.Trim().ToLower();
             query = query.Where(m => m.Title.ToLower().Contains(term));
+        }
+        
+        if (request.GenreId.HasValue)
+        {
+            query = query.Where(m => m.MovieGenres.Any(mg => mg.Genre.ExternalId == request.GenreId));
         }
         
         query = query.OrderByDescending(m => m.ReleaseYear).ThenBy(m => m.Title);
