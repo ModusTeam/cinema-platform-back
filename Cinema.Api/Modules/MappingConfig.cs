@@ -1,8 +1,11 @@
 using System.Reflection;
+using Cinema.Application.Genres.Dtos;
 using Cinema.Application.Halls.Dtos;
+using Cinema.Application.Movies.Dtos;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Mapster;
+using Cinema.Application;
 
 namespace Cinema.Api.Modules;
 
@@ -26,10 +29,20 @@ public class MappingConfig : IRegister
             configureMethod!.MakeGenericMethod(type)
                 .Invoke(null, new object[] { config });
         }
-
-        config.Scan(Assembly.GetExecutingAssembly());
+        
+        config.Scan(
+            Assembly.GetExecutingAssembly(), 
+            typeof(Cinema.Application.ConfigureServices).Assembly
+        );
+        
         config.NewConfig<HallTechnology, TechnologyDto>()
             .Map(dest => dest, src => src.Technology);
+
+        config.NewConfig<MovieGenre, GenreDto>()
+            .Map(dest => dest, src => src.Genre);
+
+        config.NewConfig<Guid, MovieGenre>()
+            .Map(dest => dest.GenreId, src => CreateEntityId<Genre>(src));
     }
 
     private static void ConfigureEntityId<T>(TypeAdapterConfig config)

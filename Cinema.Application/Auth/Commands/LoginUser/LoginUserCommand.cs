@@ -17,6 +17,9 @@ public class LoginUserCommandHandler(IIdentityService identityService)
 
         if (result.IsFailure)
             return Result.Failure<LoginResponse>(result.Error);
-        return Result.Success(result.Value.Adapt<LoginResponse>());
+        return Result.Success(new LoginResponse(
+            result.Value.AccessToken, 
+            result.Value.RefreshToken
+        ));
     }
 }

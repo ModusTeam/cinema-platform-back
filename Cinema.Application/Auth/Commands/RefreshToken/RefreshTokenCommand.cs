@@ -18,6 +18,9 @@ public class RefreshTokenCommandHandler(IIdentityService identityService)
         if (result.IsFailure)
             return Result.Failure<RefreshTokenResponse>(result.Error);
         
-        return Result.Success(new RefreshTokenResponse(result.Value.AccessToken, result.Value.RefreshToken));
+        return Result.Success(new RefreshTokenResponse(
+            result.Value.AccessToken, 
+            result.Value.RefreshToken
+        ));
     }
 }
