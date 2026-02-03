@@ -10,12 +10,16 @@ public class RedisSeatLockingService : ISeatLockingService
 {
     private readonly IConnectionMultiplexer _redis;
     private readonly ResiliencePipeline _resiliencePipeline;
+    private readonly ITicketNotifier _notifier;
+    
     private const int LockTimeMinutes = 10; 
-    // TODO: Винести в appsettings.json у майбутньому
 
-    public RedisSeatLockingService(IConnectionMultiplexer redis)
+    public RedisSeatLockingService(
+        IConnectionMultiplexer redis,
+        ITicketNotifier notifier)
     {
         _redis = redis;
+        _notifier = notifier;
         
         _resiliencePipeline = new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
@@ -23,7 +27,6 @@ public class RedisSeatLockingService : ISeatLockingService
                 ShouldHandle = new PredicateBuilder()
                     .Handle<RedisTimeoutException>()
                     .Handle<RedisConnectionException>(),
-                
                 MaxRetryAttempts = 3,
                 Delay = TimeSpan.FromMilliseconds(200),
                 BackoffType = DelayBackoffType.Exponential,
@@ -37,31 +40,25 @@ public class RedisSeatLockingService : ISeatLockingService
     {
         var db = _redis.GetDatabase();
         var key = GetKey(sessionId, seatId);
-        var value = userId.ToString();
         var expiry = TimeSpan.FromMinutes(LockTimeMinutes);
-        
-        try 
+
+        try
         {
-            bool wasSet = await _resiliencePipeline.ExecuteAsync(async token => 
-                await db.StringSetAsync(key, value, expiry, When.NotExists), ct);
+            var success = await _resiliencePipeline.ExecuteAsync(async token => 
+                await db.StringSetAsync(key, userId.ToString(), expiry, When.NotExists), ct);
 
-            if (!wasSet)
+            if (!success)
             {
-                var currentOwner = await db.StringGetAsync(key);
-                if (currentOwner == value)
-                {
-                    await db.KeyExpireAsync(key, expiry);
-                    return Result.Success();
-                }
-
-                return Result.Failure(new Error("Seat.Locked", "Seat is already locked by another user."));
+                return Result.Failure(new Error("Seat.Locked", "Seat is already locked."));
             }
+
+            await _notifier.NotifySeatLockedAsync(sessionId, seatId, userId, ct);
 
             return Result.Success();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return Result.Failure(new Error("Redis.Error", "Temporary system failure. Please try again later."));
+            return Result.Failure(new Error("Redis.Error", "Temporary system failure."));
         }
     }
 
@@ -79,8 +76,13 @@ public class RedisSeatLockingService : ISeatLockingService
 
         try
         {
-            await _resiliencePipeline.ExecuteAsync(async token => 
+            var result = await _resiliencePipeline.ExecuteAsync(async token => 
                 await db.ScriptEvaluateAsync(script, new RedisKey[] { key }, new RedisValue[] { userId.ToString() }), ct);
+            
+            if (!result.IsNull && (int)result == 1)
+            {
+                await _notifier.NotifySeatUnlockedAsync(sessionId, seatId, ct);
+            }
             
             return Result.Success();
         }
@@ -98,6 +100,6 @@ public class RedisSeatLockingService : ISeatLockingService
         
         return lockValue.HasValue && lockValue == userId.ToString();
     }
-    private static string GetKey(Guid sessionId, Guid seatId) 
-        => $"lock:s:{sessionId}:st:{seatId}";
+
+    private static string GetKey(Guid sessionId, Guid seatId) => $"lock:session:{sessionId}:seat:{seatId}";
 }
