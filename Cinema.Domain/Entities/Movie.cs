@@ -1,4 +1,6 @@
 using Cinema.Domain.Common;
+using Cinema.Domain.Enums;
+using Cinema.Domain.Exceptions;
 
 namespace Cinema.Domain.Entities;
 
@@ -12,8 +14,8 @@ public class MovieCastMember
 
 public class Movie
 {
-    public EntityId<Movie> Id { get; }
-    public int ExternalId { get; private set; }
+    public EntityId<Movie> Id { get; private set; }
+    public int? ExternalId { get; private set; }
     public string Title { get; private set; }
     public string? Description { get; private set; }
     public int DurationMinutes { get; private set; }
@@ -23,17 +25,50 @@ public class Movie
     public string? PosterUrl { get; private set; }
     public string? BackdropUrl { get; private set; }
     public string? TrailerUrl { get; private set; }
-
+    
+    public MovieStatus Status { get; private set; } = MovieStatus.ComingSoon;
+    public bool IsDeleted { get; private set; } = false;
+    
     public List<MovieCastMember> Cast { get; set; } = new();
 
     public ICollection<MovieGenre> MovieGenres { get; private set; } = [];
     public ICollection<Session> Sessions { get; private set; } = [];
-
+    
     private Movie() { }
 
+    public static Movie CreateManual(
+        string title, 
+        string description, 
+        int durationMinutes, 
+        int releaseYear,
+        MovieStatus status)
+    {
+        return new Movie
+        {
+            Id = new EntityId<Movie>(Guid.NewGuid()),
+            Title = title,
+            Description = description,
+            DurationMinutes = durationMinutes,
+            ReleaseYear = releaseYear,
+            Status = status,
+            ExternalId = null,
+            Rating = 0
+        };
+    }
+    
+    public void ChangeStatus(MovieStatus newStatus)
+    {
+        Status = newStatus;
+    }
+    
+    public void Delete()
+    {
+        IsDeleted = true;
+    }
+    
     private Movie(
         EntityId<Movie> id,
-        int externalId,
+        int? externalId,
         string title,
         string? description,
         int durationMinutes,
@@ -88,12 +123,24 @@ public class Movie
         }
     }
 
-    public void UpdateDetails(string title, string? description, string? posterUrl, string? backdropUrl, string? trailerUrl)
+    public void Rename(string newTitle)
     {
-        Title = title;
-        Description = description;
+        if (string.IsNullOrWhiteSpace(newTitle)) throw new DomainException("Title cannot be empty.");
+        Title = newTitle;
+    }
+
+    public void UpdateImages(string? posterUrl, string? backdropUrl, string? trailerUrl)
+    {
         PosterUrl = posterUrl;
         BackdropUrl = backdropUrl;
         TrailerUrl = trailerUrl;
+    }
+    
+    public void UpdateSpecs(string? description, int? durationMinutes, decimal? rating, int? releaseYear)
+    {
+        if (description is not null) Description = description;
+        if (durationMinutes.HasValue) DurationMinutes = durationMinutes.Value;
+        if (rating.HasValue) Rating = rating.Value;
+        if (releaseYear.HasValue) ReleaseYear = releaseYear.Value;
     }
 }
