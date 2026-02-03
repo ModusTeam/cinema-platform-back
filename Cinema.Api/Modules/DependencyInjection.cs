@@ -57,10 +57,10 @@ public static class DependencyInjection
     {
         services.AddSwaggerGen(c =>
         {
-            c.SwaggerDoc("v10.2", new OpenApiInfo 
+            c.SwaggerDoc("v1", new OpenApiInfo 
             { 
                 Title = "Cinema API", 
-                Version = "v1240",
+                Version = "v1",
                 Description = "Cinema Platform API"
             });
             
