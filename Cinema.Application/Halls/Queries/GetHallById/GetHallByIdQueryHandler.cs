@@ -19,7 +19,7 @@ public class GetHallByIdQueryHandler(IApplicationDbContext context)
         var hall = await context.Halls
             .AsNoTracking()
             .AsSplitQuery()
-            .Include(h => h.Seats).ThenInclude(s => s.SeatType)
+            .Include(h => h.Seats).ThenInclude(s => s.SeatType) 
             .Include(h => h.Technologies).ThenInclude(ht => ht.Technology)
             .FirstOrDefaultAsync(h => h.Id == hallId, ct);
 
@@ -27,11 +27,12 @@ public class GetHallByIdQueryHandler(IApplicationDbContext context)
         {
             return Result.Failure<HallDto>(new Error("Hall.NotFound", "Hall not found"));
         }
-        
+
         var config = TypeAdapterConfig.GlobalSettings.Fork(c => 
         {
-            c.ForType<Hall, HallDto>()
-                .Map(dest => dest.Seats, src => src.Seats);
+            c.NewConfig<Hall, HallDto>()
+                .Map(dest => dest.Seats, src => src.Seats)
+                .Map(dest => dest.Technologies, src => src.Technologies.Select(t => t.Technology));
         });
         
         var hallDto = hall.Adapt<HallDto>(config);

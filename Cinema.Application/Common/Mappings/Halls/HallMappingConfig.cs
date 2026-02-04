@@ -16,6 +16,7 @@ public class HallMappingConfig : IRegister
             .Map(dest => dest, src => src.Technology);
 
         config.NewConfig<Seat, SeatDto>()
+            .Map(dest => dest.Row, src => src.RowLabel)
             .Map(dest => dest.SeatTypeName, src => src.SeatType.Name);
     }
 }

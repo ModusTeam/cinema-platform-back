@@ -9,6 +9,10 @@ public class SessionMappingConfig : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.NewConfig<Session, SessionDto>()
+            .Map(dest => dest.Id, src => src.Id.Value)
+            .Map(dest => dest.MovieId, src => src.MovieId.Value)
+            .Map(dest => dest.HallId, src => src.HallId.Value)
+            .Map(dest => dest.PricingId, src => src.PricingId.Value)
             .Map(dest => dest.Status, src => src.Status.ToString())
             .Map(dest => dest.MovieTitle, src => src.Movie.Title)
             .Map(dest => dest.HallName, src => src.Hall.Name)
