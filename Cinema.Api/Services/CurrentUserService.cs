@@ -3,23 +3,19 @@ using Cinema.Application.Common.Interfaces;
 
 namespace Cinema.Api.Services;
 
-public class CurrentUserService : ICurrentUserService
+public class CurrentUserService(IHttpContextAccessor httpContextAccessor) : ICurrentUserService
 {
-    private readonly IHttpContextAccessor _httpContextAccessor;
-
-    public CurrentUserService(IHttpContextAccessor httpContextAccessor)
-    {
-        _httpContextAccessor = httpContextAccessor;
-    }
-
     public Guid? UserId
     {
         get
         {
-            var idClaim = _httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier);
-            if (idClaim == null) return null;
-            
-            return Guid.TryParse(idClaim.Value, out var userId) ? userId : null;
+            var id = httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+            return id == null ? null : Guid.Parse(id);
         }
+    }
+
+    public bool IsInRole(string role)
+    {
+        return httpContextAccessor.HttpContext?.User?.IsInRole(role) ?? false;
     }
 }

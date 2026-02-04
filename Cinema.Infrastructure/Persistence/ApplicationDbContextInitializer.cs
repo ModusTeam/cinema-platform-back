@@ -99,44 +99,6 @@ public class ApplicationDbContextInitializer
             await _context.Halls.AddRangeAsync(grandHall, cozyHall);
             await _context.SaveChangesAsync();
         }
-
-        if (!await _context.Movies.AnyAsync())
-        {
-            _logger.LogInformation("Seeding Movies...");
-            var movies = new[]
-            {
-                Movie.New(
-                    EntityId<Movie>.New(),
-                    externalId: 693134,
-                    title: "Dune: Part Two",
-                    durationMinutes: 166,
-                    rating: 8.5m,
-                    imgUrl: "https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg",
-                    videoUrl: null
-                ),
-                Movie.New(
-                    EntityId<Movie>.New(),
-                    externalId: 872585, // Oppenheimer
-                    title: "Oppenheimer",
-                    durationMinutes: 180,
-                    rating: 8.9m,
-                    imgUrl: "https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg",
-                    videoUrl: null
-                ),
-                Movie.New(
-                    EntityId<Movie>.New(),
-                    externalId: 1011985, // Kung Fu Panda 4
-                    title: "Kung Fu Panda 4",
-                    durationMinutes: 94,
-                    rating: 7.6m,
-                    imgUrl: "https://image.tmdb.org/t/p/w500/kDp1vUBnMpe8ak4rjgl3cLELqjU.jpg",
-                    videoUrl: null
-                )
-            };
-
-            await _context.Movies.AddRangeAsync(movies);
-            await _context.SaveChangesAsync();
-        }
         
         if (!await _context.Pricings.AnyAsync())
         {
@@ -181,45 +143,6 @@ public class ApplicationDbContextInitializer
             };
 
             await _context.Technologies.AddRangeAsync(technologies);
-            await _context.SaveChangesAsync();
-        }
-
-        // (Sessions)
-        if (!await _context.Sessions.AnyAsync())
-        {
-            _logger.LogInformation("Seeding Sessions...");
-
-            var hall = await _context.Halls.FirstAsync(h => h.Name == "IMAX Hall 1");
-            var movie = await _context.Movies.FirstAsync(m => m.Title == "Dune: Part Two");
-            var pricing = await _context.Pricings.FirstAsync();
-
-            var sessions = new List<Session>();
-            var today = DateTime.UtcNow.Date;
-
-            for (int day = 0; day < 3; day++)
-            {
-                var currentDate = today.AddDays(day);
-
-                var startTimes = new[] { 10, 14, 19 };
-
-                foreach (var hour in startTimes)
-                {
-                    var start = currentDate.AddHours(hour);
-                    var end = start.AddMinutes(movie.DurationMinutes);
-
-                    var session = Session.Create(
-                        EntityId<Session>.New(),
-                        start,
-                        end,
-                        movie.Id,
-                        hall.Id,
-                        pricing.Id
-                    );
-                    sessions.Add(session);
-                }
-            }
-
-            await _context.Sessions.AddRangeAsync(sessions);
             await _context.SaveChangesAsync();
         }
     }

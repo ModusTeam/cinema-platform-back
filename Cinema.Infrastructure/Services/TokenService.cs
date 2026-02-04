@@ -4,17 +4,19 @@ using System.Security.Cryptography;
 using System.Text;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
-using Microsoft.Extensions.Configuration;
+using Cinema.Infrastructure.Authentication;     
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Cinema.Infrastructure.Services;
 
-public class TokenService(IConfiguration configuration) : ITokenService
+public class TokenService(IOptions<JwtSettings> jwtOptions) : ITokenService
 {
+    private readonly JwtSettings _settings = jwtOptions.Value;
+
     public string GenerateAccessToken(User user, IList<string> roles)
     {
-        var jwtSettings = configuration.GetSection("JwtSettings");
-        var secretKey = Encoding.UTF8.GetBytes(jwtSettings["Secret"]!);
+        var secretKey = Encoding.UTF8.GetBytes(_settings.Secret);
 
         var claims = new List<Claim>
         {
@@ -33,10 +35,10 @@ public class TokenService(IConfiguration configuration) : ITokenService
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(int.Parse(jwtSettings["ExpirationInMinutes"]!)),
+            Expires = DateTime.UtcNow.AddMinutes(_settings.ExpirationInMinutes),
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(secretKey), SecurityAlgorithms.HmacSha256Signature),
-            Issuer = jwtSettings["Issuer"],
-            Audience = jwtSettings["Audience"]
+            Issuer = _settings.Issuer,
+            Audience = _settings.Audience
         };
 
         var tokenHandler = new JwtSecurityTokenHandler();

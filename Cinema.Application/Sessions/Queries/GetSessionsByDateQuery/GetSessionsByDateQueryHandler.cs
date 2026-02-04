@@ -1,6 +1,7 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Sessions.Dtos;
 using Cinema.Domain.Shared;
+using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,19 +19,7 @@ public class GetSessionsByDateQueryHandler(IApplicationDbContext context)
             .AsNoTracking()
             .Where(s => s.StartTime >= date && s.StartTime < nextDay)
             .OrderBy(s => s.StartTime)
-            .Select(s => new SessionDto
-            {
-                Id = s.Id.Value,
-                StartTime = s.StartTime,
-                EndTime = s.EndTime,
-                Status = s.Status.ToString(),
-                MovieId = s.MovieId.Value,
-                MovieTitle = s.Movie != null ? s.Movie.Title : "Unknown", 
-                HallId = s.HallId.Value,
-                HallName = s.Hall != null ? s.Hall.Name : "Unknown",
-                PricingId = s.PricingId.Value,
-                PricingName = s.Pricing != null ? s.Pricing.Name : "No Pricing"
-            })
+            .ProjectToType<SessionDto>()
             .ToListAsync(cancellationToken);
 
         return Result.Success(sessions);

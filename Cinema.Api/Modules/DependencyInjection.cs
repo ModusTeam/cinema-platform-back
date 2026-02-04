@@ -1,13 +1,10 @@
-using System.Text;
+using System.Reflection;
 using System.Threading.RateLimiting;
-using Cinema.Api.ExceptionHandlers;
 using Cinema.Api.Services;
 using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Infrastructure;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 namespace Cinema.Api.Modules;
@@ -21,78 +18,81 @@ public static class DependencyInjection
 
         var appSettings = configuration.Get<ApplicationSettings>();
         if (appSettings != null)
-        {
             services.AddSingleton(appSettings);
-        }
-    
+
         services.AddControllers();
         services.AddHttpContextAccessor();
-        services.AddScoped<ICurrentUserService, CurrentUserService>();
         
+        services.AddCors(options =>
+        {
+            options.AddPolicy("AllowAll", policy =>
+            {
+                policy
+                    .AllowAnyOrigin()
+                    .AllowAnyMethod()
+                    .AllowAnyHeader();
+            });
+        });
+        
+        services.AddOutputCache(options =>
+        {
+            options.AddBasePolicy(builder => builder.Expire(TimeSpan.FromSeconds(60)));
+        });
+        
+        services.AddStackExchangeRedisOutputCache(options =>
+        {
+            options.Configuration = configuration.GetConnectionString("RedisConnection");
+            options.InstanceName = "Cinema_OutputCache_";
+        });
+
+        services.AddMemoryCache();
+        services.AddDataProtection();
+        
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
+
+        services.AddTransient<ITicketNotifier, SignalRTicketNotifier>();
+        services.AddSignalR();
+
         services.AddRateLimiter(options =>
         {
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                    factory: partition => new FixedWindowRateLimiterOptions
+                    factory: _ => new FixedWindowRateLimiterOptions
                     {
                         AutoReplenishment = true,
-                        PermitLimit = 10,
-                        QueueLimit = 0,
-                        Window = TimeSpan.FromSeconds(10)
+                        PermitLimit = 100,
+                        Window = TimeSpan.FromMinutes(1)
                     }));
-            
+
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
         });
-        
-        services.AddCors(options =>
-        {
-            options.AddPolicy("AllowAll", policy =>
-                policy.AllowAnyOrigin()
-                    .AllowAnyMethod()
-                    .AllowAnyHeader());
-        });
-        
-        services.AddAuthentication(options =>
-        {
-            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-            options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-        })
-        .AddJwtBearer(options =>
-        {
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidateAudience = true,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                ValidIssuer = configuration["JwtSettings:Issuer"],
-                ValidAudience = configuration["JwtSettings:Audience"],
-                IssuerSigningKey = new SymmetricSecurityKey(
-                    Encoding.UTF8.GetBytes(configuration["JwtSettings:Secret"]!))
-            };
-        });
-        
-        services.AddExceptionHandler<GlobalExceptionHandler>();
+
         services.AddProblemDetails();
         services.AddEndpointsApiExplorer();
-        
+        services.AddSwaggerConfiguration();
+
+        return services;
+    }
+
+    private static void AddSwaggerConfiguration(this IServiceCollection services)
+    {
         services.AddSwaggerGen(c =>
         {
-            c.SwaggerDoc("v1", new OpenApiInfo 
-            { 
-                Title = "Cinema API", 
+            c.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Title = "Cinema API",
                 Version = "v1",
-                Description = "Cinema Project API"
+                Description = "Cinema Platform API"
             });
-            
+
             c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
-                Description = "Введіть токен у форматі: Bearer {ващ_токен}",
+                Description = "JWT Authorization header using the Bearer scheme.",
                 Name = "Authorization",
                 In = ParameterLocation.Header,
-                Type = SecuritySchemeType.ApiKey,
-                Scheme = "Bearer"
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer"
             });
 
             c.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -104,16 +104,11 @@ public static class DependencyInjection
                         {
                             Type = ReferenceType.SecurityScheme,
                             Id = "Bearer"
-                        },
-                        Scheme = "oauth2",
-                        Name = "Bearer",
-                        In = ParameterLocation.Header,
+                        }
                     },
                     new List<string>()
                 }
             });
         });
-
-        return services;
     }
 }

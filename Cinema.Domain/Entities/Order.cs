@@ -1,5 +1,6 @@
 using Cinema.Domain.Common;
 using Cinema.Domain.Enums;
+using Cinema.Domain.Exceptions;
 
 namespace Cinema.Domain.Entities;
 
@@ -16,7 +17,9 @@ public class Order
 
     public User? User { get; private set; }
     public Session? Session { get; private set; }
-    public ICollection<Ticket>? Tickets { get; private set; } = [];
+    private readonly List<Ticket> _tickets = new();
+    public IReadOnlyCollection<Ticket> Tickets => _tickets.AsReadOnly();
+    
 
     private Order(
         EntityId<Order> id,
@@ -51,6 +54,58 @@ public class Order
             userId,
             sessionId
         );
+    }
+    
+    public static Order Create(
+        Guid userId,
+        Session session,
+        List<Seat> seats,
+        Dictionary<EntityId<Seat>, decimal> prices)
+    {
+        if (session.StartTime <= DateTime.UtcNow)
+            throw new DomainException("Cannot create order for a started session.");
+
+        if (seats.Any(s => s.HallId != session.HallId))
+            throw new DomainException("Seats belong to a different hall.");
+
+        if (seats.Any(s => s.Status != SeatStatus.Active))
+            throw new DomainException("One or more seats are not active.");
+
+        decimal totalAmount = 0;
+        foreach (var seat in seats)
+        {
+            if (!prices.TryGetValue(seat.Id, out var price))
+                throw new DomainException($"Price not found for seat {seat.Id}");
+            totalAmount += price;
+        }
+
+        var orderId = EntityId<Order>.New();
+        
+        var order = new Order(
+            orderId,
+            totalAmount,
+            DateTime.UtcNow,
+            OrderStatus.Pending,
+            null,
+            userId,
+            session.Id
+        );
+        
+        foreach (var seat in seats)
+        {
+            var ticket = Ticket.New(
+                EntityId<Ticket>.New(),
+                prices[seat.Id],
+                TicketStatus.Valid,
+                orderId,
+                session.Id,
+                seat.Id
+            );
+
+            order._tickets.Add(ticket);
+        }
+
+        return order;
     }
 
     public void MarkAsPaid(string externalTransactionId)

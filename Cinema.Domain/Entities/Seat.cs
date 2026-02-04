@@ -47,17 +47,16 @@ public class Seat
         int gridY,
         SeatStatus status,
         EntityId<Hall> hallId,
-        EntityId<SeatType> seatTypeId) => new(id, rowLabel, number, gridX, gridY, status, hallId, seatTypeId);
+        EntityId<SeatType> seatTypeId) => new(id, rowLabel, number, gridX, gridY, SeatStatus.Active, hallId, seatTypeId);
     
     public void ChangeType(EntityId<SeatType> newSeatTypeId)
     {
         SeatTypeId = newSeatTypeId;
     }
 
-    public void MarkAsBroken()
+    public void SetStatus(SeatStatus status)
     {
-        if (Status == SeatStatus.Broken) return;
-        Status = SeatStatus.Broken;
+        Status = status;
     }
 
     public void MarkAsActive()

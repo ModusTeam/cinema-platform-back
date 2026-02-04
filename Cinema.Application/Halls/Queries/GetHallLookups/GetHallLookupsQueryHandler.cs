@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Shared;
+using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,7 +15,7 @@ public class GetHallLookupsQueryHandler(IApplicationDbContext context)
             .AsNoTracking()
             .Where(h => h.IsActive)
             .OrderBy(h => h.Name)
-            .Select(h => new HallLookupDto(h.Id.Value, h.Name, h.TotalCapacity))
+            .ProjectToType<HallLookupDto>()
             .ToListAsync(cancellationToken);
 
         return Result.Success(lookups);
