@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Cinema.Api.Controllers;
 
-[Authorize(Roles = "Admin")]
+[Authorize]
 public class PricingsController : ApiController
 {
     [HttpGet]
@@ -17,6 +17,7 @@ public class PricingsController : ApiController
         return HandleResult(result);
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreatePricingCommand command)
     {
@@ -31,6 +32,7 @@ public class PricingsController : ApiController
         return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("{id:guid}/rules")]
     public async Task<IActionResult> SetRules(Guid id, [FromBody] List<SetPricingRuleDto> rules)
     {
