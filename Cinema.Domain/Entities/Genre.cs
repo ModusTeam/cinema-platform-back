@@ -5,13 +5,13 @@ namespace Cinema.Domain.Entities;
 public class Genre
 {
     public EntityId<Genre> Id { get; private set; }
-    public int ExternalId { get; private set; }
+    public int? ExternalId { get; private set; }
     public string Name { get; private set; }
     public string? Slug { get; private set; }
     
     public ICollection<MovieGenre> MovieGenres { get; private set; } = [];
 
-    private Genre(EntityId<Genre> id, int externalId, string name, string slug)
+    private Genre(EntityId<Genre> id, int? externalId, string name, string slug)
     {
         Id = id;
         ExternalId = externalId;
@@ -25,7 +25,7 @@ public class Genre
         return new Genre(EntityId<Genre>.New(), externalId, name, slug);
     }
 
-    public static Genre Create(int externalId, string name)
+    public static Genre Create(int? externalId, string name)
     {
         var slug = GenerateSlug(name);
         return new Genre(EntityId<Genre>.New(), externalId, name, slug);

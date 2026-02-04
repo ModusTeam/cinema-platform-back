@@ -28,7 +28,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<int>("ExternalId")
+                    b.Property<int?>("ExternalId")
                         .HasColumnType("integer")
                         .HasColumnName("external_id");
 

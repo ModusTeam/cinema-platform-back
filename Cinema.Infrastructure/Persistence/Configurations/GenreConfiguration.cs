@@ -21,11 +21,11 @@ public class GenreConfiguration : IEntityTypeConfiguration<Genre>
         builder.Property(x => x.Slug)
             .IsRequired(false)
             .HasMaxLength(100);
-            
-        builder.Property(x => x.ExternalId)
-            .IsRequired();
               
         builder.HasIndex(x => x.ExternalId)
             .IsUnique();
+        
+        builder.Property(x => x.ExternalId).IsRequired(false);
+        builder.HasIndex(x => x.ExternalId).IsUnique();
     }
 }
