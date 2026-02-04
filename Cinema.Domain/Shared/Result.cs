@@ -1,44 +1,49 @@
+using System.Text.Json.Serialization;
+
 namespace Cinema.Domain.Shared;
 
 public class Result
 {
+    public bool IsSuccess { get; }
     public Error Error { get; }
-    public bool IsSuccess => Error == Error.None;
     public bool IsFailure => !IsSuccess;
 
-    protected Result(Error error)
+    [JsonConstructor]
+    protected Result(bool isSuccess, Error error)
     {
+        if (isSuccess && error != Error.None)
+            throw new InvalidOperationException();
+
+        if (!isSuccess && error == Error.None)
+            throw new InvalidOperationException();
+
+        IsSuccess = isSuccess;
         Error = error;
     }
 
-    public static Result Success() => new(Error.None);
-
-    public static Result Failure(Error error) => new(error);
-    
-    public static Result<TValue> Success<TValue>(TValue value) => new(value, Error.None);
-    
-    public static Result<TValue> Failure<TValue>(Error error) => new(default, error);
+    public static Result Success() => new(true, Error.None);
+    public static Result Failure(Error error) => new(false, error);
+    public static Result<T> Success<T>(T value) => new(value, true, Error.None);
+    public static Result<T> Failure<T>(Error error) => new(default, false, error);
+    public static Result<T> Create<T>(T? value) => value is not null ? Success(value) : Failure<T>(Error.NullValue);
 }
 
-public class Result<TValue> : Result
+public class Result<T> : Result
 {
-    private readonly TValue? _value;
+    [JsonInclude]
+    [JsonPropertyName("value")]
+    private readonly T? _value;
 
-    public Result(TValue? value, Error error) : base(error)
+    [JsonConstructor]
+    protected internal Result(T? value, bool isSuccess, Error error) : base(isSuccess, error)
     {
         _value = value;
     }
 
-    public TValue Value => IsSuccess
+    [JsonIgnore] 
+    public T Value => IsSuccess
         ? _value!
         : throw new InvalidOperationException("The value of a failure result can not be accessed.");
-    
-    public static Result<TValue> Success(TValue value) => new(value, Error.None);
-    
-    public static new Result<TValue> Failure(Error error) => new(default, error);
-    
-    public static implicit operator Result<TValue>(TValue? value) => Create(value);
 
-    public static Result<TValue> Create(TValue? value) =>
-        value is not null ? Success(value) : Failure(Error.NullValue);
+    public static implicit operator Result<T>(T? value) => Create(value);
 }
