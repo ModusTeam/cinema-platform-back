@@ -28,7 +28,7 @@ public record SeatDto(
 public record HallDto(
     Guid Id,
     string Name,
-    int Capacity,
+    int TotalCapacity,
     List<SeatDto>? Seats = null,
     List<TechnologyDto>? Technologies = null
 );

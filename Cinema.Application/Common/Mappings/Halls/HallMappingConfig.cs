@@ -10,7 +10,8 @@ public class HallMappingConfig : IRegister
     {
         config.NewConfig<Hall, HallDto>()
             .Map(dest => dest.Seats, src => (List<SeatDto>)null)
-            .Map(dest => dest.Technologies, src => src.Technologies.Select(t => t.Technology));
+            .Map(dest => dest.Technologies, src => src.Technologies.Select(t => t.Technology))
+            .Map(dest => dest.TotalCapacity, src => src.TotalCapacity);
 
         config.NewConfig<HallTechnology, TechnologyDto>()
             .Map(dest => dest, src => src.Technology);
