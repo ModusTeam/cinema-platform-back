@@ -1,7 +1,4 @@
-using Cinema.Application.Genres.Dtos;
-using Cinema.Application.Movies.Dtos;
 using Cinema.Application.Pricings.Dtos;
-using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Mapster;
 
