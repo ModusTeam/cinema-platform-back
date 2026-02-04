@@ -23,3 +23,5 @@ public record SetPricingRuleDto(
     Guid SeatTypeId,
     decimal Price
 );
+
+public record PricingLookupDto(Guid Id, string Name);

@@ -23,6 +23,13 @@ public class PricingsController : ApiController
         var result = await Mediator.Send(command);
         return HandleResult(result);
     }
+    
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id)
+    {
+        var result = await Mediator.Send(new GetPricingByIdQuery(id));
+        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
+    }
 
     [HttpPost("{id:guid}/rules")]
     public async Task<IActionResult> SetRules(Guid id, [FromBody] List<SetPricingRuleDto> rules)
