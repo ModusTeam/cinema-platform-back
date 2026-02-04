@@ -2,6 +2,8 @@ using System.Reflection;
 using Cinema.Application.Common.Behaviours;
 using Cinema.Application.Services;
 using FluentValidation;
+using Mapster;
+using MapsterMapper;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -19,6 +21,12 @@ public static class ConfigureServices
             cfg.RegisterServicesFromAssembly(assembly);
             cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
         });
+        
+        var config = TypeAdapterConfig.GlobalSettings;
+        
+        config.Scan(assembly);
+        services.AddSingleton(config);
+        services.AddScoped<IMapper, ServiceMapper>();
         
         services.AddScoped<SessionSchedulingService>();
         return services;

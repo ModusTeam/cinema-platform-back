@@ -5,8 +5,6 @@ using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Infrastructure;
-using Mapster;
-using MapsterMapper;
 using Microsoft.OpenApi.Models;
 
 namespace Cinema.Api.Modules;
@@ -43,15 +41,6 @@ public static class DependencyInjection
 
         services.AddTransient<ITicketNotifier, SignalRTicketNotifier>();
         services.AddSignalR();
-        
-        var typeAdapterConfig = TypeAdapterConfig.GlobalSettings;
-        typeAdapterConfig.Scan(
-            Assembly.GetExecutingAssembly(),
-            typeof(Cinema.Application.ConfigureServices).Assembly
-        );
-
-        services.AddSingleton(typeAdapterConfig);
-        services.AddScoped<IMapper, ServiceMapper>();
 
         services.AddRateLimiter(options =>
         {
