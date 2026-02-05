@@ -8,4 +8,5 @@ public interface ITicketNotifier
     Task NotifyOrderCompleted(Guid userId, Guid orderId);
     Task NotifyOrderFailed(Guid userId, Guid orderId, string reason);
     Task NotifySeatUnlockedAsync(Guid sessionId, Guid seatId, CancellationToken ct = default);
+    Task NotifySeatLockedAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default);
 }

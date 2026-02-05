@@ -7,21 +7,28 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace Cinema.Api.Services;
 
-public class SignalRTicketNotifier(IHubContext<TicketHub> hubContext) : ITicketNotifier
+public class SignalRTicketNotifier(IHubContext<TicketHub, ITicketClient> hubContext) : ITicketNotifier
 {
     public async Task NotifyOrderCompleted(Guid userId, Guid orderId)
     {
-        await hubContext.Clients.User(userId.ToString()).SendAsync("OrderCompleted", orderId);
+        await hubContext.Clients.User(userId.ToString()).OrderCompleted(orderId);
     }
-
+    
+    public async Task NotifySeatLockedAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default)
+    {
+        await hubContext.Clients.Group(sessionId.ToString())
+            .ReceiveSeatStatusChange(seatId, "Locked", userId);
+    }
+    
     public async Task NotifyOrderFailed(Guid userId, Guid orderId, string reason)
     {
-        await hubContext.Clients.User(userId.ToString()).SendAsync("OrderFailed", new { OrderId = orderId, Reason = reason });
+        await hubContext.Clients.User(userId.ToString())
+            .OrderFailed(new { OrderId = orderId, Reason = reason });
     }
 
     public async Task NotifySeatUnlockedAsync(Guid sessionId, Guid seatId, CancellationToken ct = default)
     {
         await hubContext.Clients.Group(sessionId.ToString())
-            .SendAsync("SeatUnlocked", seatId, cancellationToken: ct);
+            .ReceiveSeatStatusChange(seatId, "Available", null); 
     }
 }

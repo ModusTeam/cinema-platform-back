@@ -24,7 +24,7 @@ app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
-
+app.MapHub<Cinema.Api.Hubs.TicketHub>("/ticketHub"); 
 app.UseOutputCache();
 app.UseHangfireDashboard();
 

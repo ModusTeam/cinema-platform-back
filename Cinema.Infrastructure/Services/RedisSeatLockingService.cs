@@ -15,6 +15,9 @@ public class RedisSeatLockingService : ISeatLockingService
     private readonly ResiliencePipeline _resiliencePipeline;
     
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(10);
+    private const string KeyPrefix = "lock:session";
+
+    private string GetKey(Guid sessionId, Guid seatId) => $"{KeyPrefix}:{sessionId}:{seatId}";
 
     public RedisSeatLockingService(
         IConnectionMultiplexer redis,
@@ -40,6 +43,24 @@ public class RedisSeatLockingService : ISeatLockingService
             .Build();
     }
 
+    public async Task<IEnumerable<Guid>> GetLockedSeatsBySessionAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        var server = _redis.GetServer(_redis.GetEndPoints().First());
+        var pattern = $"{KeyPrefix}:{sessionId}:*";
+        var lockedSeatIds = new List<Guid>();
+        
+        await foreach (var key in server.KeysAsync(pattern: pattern))
+        {
+            var parts = key.ToString().Split(':');
+            if (parts.Length == 4 && Guid.TryParse(parts[3], out var seatId))
+            {
+                lockedSeatIds.Add(seatId);
+            }
+        }
+        
+        return lockedSeatIds;
+    }
+    
     public async Task<Result> LockSeatAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default)
     {
         var db = _redis.GetDatabase();
@@ -151,5 +172,4 @@ public class RedisSeatLockingService : ISeatLockingService
         return lockedSeats;
     }
     
-    private static string GetKey(Guid sessionId, Guid seatId) => $"lock:session:{sessionId}:seat:{seatId}";
 }

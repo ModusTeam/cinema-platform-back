@@ -14,7 +14,9 @@ public record SessionDto
     public string HallName { get; init; } = string.Empty;
     public Guid PricingId { get; init; }
     public string PricingName { get; init; } = string.Empty;
-    
+
+    public List<Guid> OccupiedSeatIds { get; init; } = [];
+
     public static SessionDto FromDomainModel(Session session)
     {
         return new SessionDto
@@ -28,7 +30,8 @@ public record SessionDto
             HallId = session.HallId.Value,
             HallName = session.Hall?.Name ?? "Unknown Hall",
             PricingId = session.PricingId.Value,
-            PricingName = session.Pricing?.Name ?? "Unknown Pricing"
+            PricingName = session.Pricing?.Name ?? "Unknown Pricing",
+            OccupiedSeatIds = []
         };
     }
 }

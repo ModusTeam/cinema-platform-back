@@ -30,7 +30,7 @@ public class SeatsController : ApiController
     [Authorize] 
     public async Task<IActionResult> LockSeat([FromBody] LockSeatRequest request)
     {
-        var command = new LockSeatCommand(request.SessionId, request.SeatId, UserId);
+        var command = new LockSeatCommand(request.SessionId, request.SeatId); 
         return HandleResult(await Mediator.Send(command));
     }
 

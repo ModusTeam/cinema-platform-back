@@ -19,7 +19,8 @@ public static class DependencyInjection
         var appSettings = configuration.Get<ApplicationSettings>();
         if (appSettings != null)
             services.AddSingleton(appSettings);
-
+        
+        
         services.AddControllers();
         services.AddHttpContextAccessor();
         
