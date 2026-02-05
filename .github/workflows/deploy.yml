@@ -21,10 +21,21 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore ./Cinema.Api/Cinema.Api.csproj
 
+    - name: Check file existence
+      run: |
+        echo "Listing files in Cinema.Api folder:"
+        ls -la ./Cinema.Api/
+        if [ -f "./Cinema.Api/appsettings.json" ]; then
+            echo "✅ FOUND: appsettings.json exists!"
+        else
+            echo "❌ ERROR: appsettings.json NOT found!"
+            exit 1
+        fi
+
     - name: Apply Production Settings
       uses: microsoft/variable-substitution@v1
       with:
-        files: 'Cinema.Api/appsettings.json'
+        files: './Cinema.Api/appsettings.json'
       env:
         ConnectionStrings.DefaultConnection: ${{ secrets.CONNECTION_STRING }}
         JwtSettings.Secret: ${{ secrets.JWT_SECRET }}
