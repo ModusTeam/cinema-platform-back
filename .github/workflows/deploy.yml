@@ -21,35 +21,25 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore ./Cinema.Api/Cinema.Api.csproj
 
-    - name: Check file existence
-      run: |
-        echo "Listing files in Cinema.Api folder:"
-        ls -la ./Cinema.Api/
-        if [ -f "./Cinema.Api/appsettings.json" ]; then
-            echo "✅ FOUND: appsettings.json exists!"
-        else
-            echo "❌ ERROR: appsettings.json NOT found!"
-            exit 1
-        fi
-
     - name: Apply Production Settings
       uses: microsoft/variable-substitution@v1
       with:
         files: './Cinema.Api/appsettings.json'
       env:
         ConnectionStrings.DefaultConnection: ${{ secrets.CONNECTION_STRING }}
+        ConnectionStrings.RedisConnection: ${{ secrets.REDIS_CONN }}
         JwtSettings.Secret: ${{ secrets.JWT_SECRET }}
-        Redis.Configuration: ${{ secrets.REDIS_CONN }}
+        Tmdb.ApiKey: ${{ secrets.TMDB_API_KEY }}
 
     - name: Build and Publish
       run: dotnet publish ./Cinema.Api/Cinema.Api.csproj -c Release -o ./publish
 
-    - name: FTP Deploy
-      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+    - name: Web Deploy
+      uses: takubokudori/deploy-webdeploy@v1
       with:
-        server: ${{ secrets.FTP_SERVER }}
-        username: ${{ secrets.FTP_USERNAME }}
-        password: ${{ secrets.FTP_PASSWORD }}
-        local-dir: ./publish/
-        server-dir: /wwwroot/
-        dangerous-clean-slate: true
+        website-name: ${{ secrets.WEBDEPLOY_SITE }}
+        publish-url: ${{ secrets.WEBDEPLOY_URL }}
+        username: ${{ secrets.WEBDEPLOY_USERNAME }}
+        password: ${{ secrets.WEBDEPLOY_PASSWORD }}
+        package: ./publish
+        options: "-verbose -allowUntrusted"
