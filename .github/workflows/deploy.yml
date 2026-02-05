@@ -80,11 +80,14 @@ jobs:
             exit 1
         }
         
+        $sourceParam = "contentPath=$sourcePath"
+        $destParam = "contentPath=$siteName,ComputerName=$publishUrl,UserName=$userName,Password=$password,AuthType=Basic"
+        
         try {
             & $msdeployPath `
                 -verb:sync `
-                -source:contentPath="$sourcePath" `
-                -dest:contentPath="$siteName",ComputerName="$publishUrl",UserName="$userName",Password="$password",AuthType='Basic' `
+                "-source:$sourceParam" `
+                "-dest:$destParam" `
                 -enableRule:AppOffline `
                 -allowUntrusted `
                 -verbose `
