@@ -35,14 +35,24 @@ jobs:
       run: dotnet publish ./Cinema.Api/Cinema.Api.csproj -c Release -o ./publish
 
     - name: Web Deploy to MonsterASP
+      shell: pwsh
+      env:
+        WEBDEPLOY_URL: ${{ secrets.WEBDEPLOY_URL }}
+        WEBDEPLOY_USERNAME: ${{ secrets.WEBDEPLOY_USERNAME }}
+        WEBDEPLOY_PASSWORD: ${{ secrets.WEBDEPLOY_PASSWORD }}
+        WEBDEPLOY_SITE: ${{ secrets.WEBDEPLOY_SITE }}
       run: |
-        $publishUrl = "${{ secrets.WEBDEPLOY_URL }}" 
-        $userName = "${{ secrets.WEBDEPLOY_USERNAME }}" 
-        $password = "${{ secrets.WEBDEPLOY_PASSWORD }}" 
-        $siteName = "${{ secrets.WEBDEPLOY_SITE }}"
+        $publishUrl = $env:WEBDEPLOY_URL
+        $userName = $env:WEBDEPLOY_USERNAME
+        $password = $env:WEBDEPLOY_PASSWORD
+        $siteName = $env:WEBDEPLOY_SITE
         $sourcePath = "${{ github.workspace }}\publish"
 
-        # Викликаємо msdeploy.exe
+        Write-Host "Starting Web Deploy..."
+        Write-Host "Source: $sourcePath"
+        Write-Host "Destination Site: $siteName"
+        Write-Host "Server: $publishUrl"
+
         & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
             -verb:sync `
             -source:contentPath=$sourcePath `
