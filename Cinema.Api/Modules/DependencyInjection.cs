@@ -5,6 +5,7 @@ using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Infrastructure;
+using Cinema.Infrastructure.Services;
 using Microsoft.OpenApi.Models;
 
 namespace Cinema.Api.Modules;
@@ -52,6 +53,7 @@ public static class DependencyInjection
         services.AddScoped<ICurrentUserService, CurrentUserService>();
 
         services.AddTransient<ITicketNotifier, SignalRTicketNotifier>();
+        services.AddScoped<IAnalyticsService, AnalyticsService>();
         services.AddSignalR();
 
         services.AddRateLimiter(options =>
