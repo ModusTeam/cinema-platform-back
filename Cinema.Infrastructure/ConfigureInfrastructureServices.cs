@@ -6,7 +6,7 @@ using Cinema.Domain.Entities;
 using Cinema.Domain.Interfaces;
 using Cinema.Infrastructure.Authentication;
 using Cinema.Infrastructure.Persistence;
-using Cinema.Infrastructure.Persistence.Interceptors; // Переконайся, що папка створена
+using Cinema.Infrastructure.Persistence.Interceptors;
 using Cinema.Infrastructure.Services;
 using Hangfire;
 using Hangfire.PostgreSql;
@@ -18,6 +18,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using Refit;
 using StackExchange.Redis;
 
@@ -70,6 +71,7 @@ public static class ConfigureInfrastructureServices
         
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(dbConnectionString);
         dataSourceBuilder.EnableDynamicJson();
+        dataSourceBuilder.UseVector();
         var dataSource = dataSourceBuilder.Build();
         services.AddSingleton(dataSource);
 
@@ -77,16 +79,17 @@ public static class ConfigureInfrastructureServices
         {
             var interceptor = sp.GetRequiredService<ISaveChangesInterceptor>();
 
-            options.UseNpgsql(dataSource, builder => 
-            { 
-                builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName);
-                builder.EnableRetryOnFailure(
-                    maxRetryCount: 3,
-                    maxRetryDelay: TimeSpan.FromSeconds(10),
-                    errorCodesToAdd: null);
-            })
-            .UseSnakeCaseNamingConvention()
-            .AddInterceptors(interceptor);
+            options.UseNpgsql(dbConnectionString, builder =>
+                {
+                    builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName);
+                    builder.UseVector();
+                    builder.EnableRetryOnFailure(
+                        maxRetryCount: 3,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorCodesToAdd: null);
+                })
+                .UseSnakeCaseNamingConvention()
+                .AddInterceptors(interceptor);
         });
         
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
@@ -143,6 +146,7 @@ public static class ConfigureInfrastructureServices
             })
             .AddStandardResilienceHandler();
         
+        services.AddHttpClient<IAiEmbeddingService, GeminiEmbeddingService>();
         services.AddTransient<IPaymentService, MockPaymentService>();
         services.AddSingleton<ISeatTypeProvider, SeatTypeProvider>();
         services.AddTransient<IPriceCalculator, PriceCalculator>();
