@@ -3,59 +3,91 @@ using System.Text.Json.Serialization;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
-using Microsoft.Extensions.Configuration;
+using Cinema.Domain.Shared;
+using Cinema.Infrastructure.Options;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Cinema.Infrastructure.Services;
 
-public class GeminiEmbeddingService(HttpClient httpClient, IConfiguration configuration, IServiceScopeFactory scopeFactory) : IAiEmbeddingService
+public class GeminiEmbeddingService(
+    HttpClient httpClient, 
+    IOptions<GeminiOptions> options,
+    IServiceScopeFactory scopeFactory,
+    ILogger<GeminiEmbeddingService> logger) : IAiEmbeddingService
 {
-    private readonly string _apiKey = configuration["Gemini:ApiKey"]!;
-    private readonly string _modelId = configuration["Gemini:EmbeddingModelId"] ?? "text-embedding-004";
+    private readonly GeminiOptions _settings = options.Value;
 
-    public async Task<float[]> GenerateEmbeddingAsync(string text, CancellationToken ct = default)
+    public async Task<Result<float[]>> GenerateEmbeddingAsync(string text, CancellationToken ct = default)
     {
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_modelId}:embedContent?key={_apiKey}";
+        var requestUrl = $"/v1beta/models/{_settings.EmbeddingModelId}:embedContent?key={_settings.ApiKey}";
 
         var requestBody = new
         {
-            model = $"models/{_modelId}",
-            content = new
-            {
-                parts = new[]
-                {
-                    new { text = text }
-                }
-            },
+            model = $"models/{_settings.EmbeddingModelId}",
+            content = new { parts = new[] { new { text } } },
             outputDimensionality = 768
         };
 
-        var response = await httpClient.PostAsJsonAsync(url, requestBody, ct);
-        
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var error = await response.Content.ReadAsStringAsync(ct);
-            throw new Exception($"Gemini API Error: {response.StatusCode}, Details: {error}");
-        }
+            var response = await httpClient.PostAsJsonAsync(requestUrl, requestBody, ct);
 
-        var result = await response.Content.ReadFromJsonAsync<GeminiResponse>(cancellationToken: ct);
-        
-        return result?.Embedding?.Values ?? Array.Empty<float>();
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(ct);
+                logger.LogError("Gemini API Error. Status: {Status}, Details: {Details}", response.StatusCode, errorContent);
+                
+                return Result.Failure<float[]>(new Error(
+                    "Gemini.ApiError", 
+                    $"External API call failed with status {response.StatusCode}"));
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<GeminiResponse>(cancellationToken: ct);
+            
+            if (result?.Embedding?.Values is null)
+            {
+                logger.LogWarning("Gemini API returned success but no embedding data.");
+                return Result.Failure<float[]>(new Error("Gemini.EmptyResponse", "API returned empty embedding"));
+            }
+
+            return Result.Success(result.Embedding.Values);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Exception during Gemini embedding generation");
+            return Result.Failure<float[]>(new Error("Gemini.Exception", "An error occurred while calling AI service"));
+        }
     }
-    
+
     public async Task UpdateMovieEmbeddingAsync(Guid movieId, CancellationToken ct)
     {
         using var scope = scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-
+        
         var movie = await context.Movies.FindAsync(new object[] { new EntityId<Movie>(movieId) }, ct);
-        if (movie == null) return;
+        
+        if (movie == null)
+        {
+            logger.LogWarning("Movie with ID {MovieId} not found for embedding update.", movieId);
+            return;
+        }
         
         var text = $"Movie: {movie.Title}. Description: {movie.Description}";
-        var embedding = await GenerateEmbeddingAsync(text, ct);
+        var embeddingResult = await GenerateEmbeddingAsync(text, ct);
         
-        movie.SetEmbedding(embedding);
+        if (embeddingResult.IsFailure)
+        {
+            logger.LogError("Failed to update embedding for movie {MovieId}. Error: {Error}", movieId, embeddingResult.Error);
+            return;
+        }
+        
+        movie.SetEmbedding(embeddingResult.Value);
         await context.SaveChangesAsync(ct);
+        
+        logger.LogInformation("Successfully updated embedding for movie {MovieId}", movieId);
     }
     
     private class GeminiResponse
