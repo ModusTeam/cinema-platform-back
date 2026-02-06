@@ -1,4 +1,4 @@
-name: Deploy to MonsterASP
+name: Deploy to MonsterASP via Web Deploy
 
 on:
   push:
@@ -7,38 +7,112 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
-
+    runs-on: windows-latest
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
+    
     - name: Setup .NET Core
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
-
+    
     - name: Restore dependencies
       run: dotnet restore ./Cinema.Api/Cinema.Api.csproj
-
+    
     - name: Apply Production Settings
       uses: microsoft/variable-substitution@v1
       with:
-        files: 'Cinema.Api/appsettings.json'
+        files: './Cinema.Api/appsettings.json'
       env:
         ConnectionStrings.DefaultConnection: ${{ secrets.CONNECTION_STRING }}
+        ConnectionStrings.RedisConnection: ${{ secrets.REDIS_CONN }}
         JwtSettings.Secret: ${{ secrets.JWT_SECRET }}
-        Redis.Configuration: ${{ secrets.REDIS_CONN }}
-
+        Tmdb.ApiKey: ${{ secrets.TMDB_API_KEY }}
+    
     - name: Build and Publish
       run: dotnet publish ./Cinema.Api/Cinema.Api.csproj -c Release -o ./publish
-
-    - name: FTP Deploy
-      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-      with:
-        server: ${{ secrets.FTP_SERVER }}
-        username: ${{ secrets.FTP_USERNAME }}
-        password: ${{ secrets.FTP_PASSWORD }}
-        local-dir: ./publish/
-        server-dir: /wwwroot/
-        dangerous-clean-slate: true
+    
+    - name: Install Web Deploy
+      shell: pwsh
+      run: |
+        Write-Host "Downloading Web Deploy..."
+        $url = "https://download.microsoft.com/download/0/1/D/01DC28EA-638C-4A22-A57B-4CEF97755C6C/WebDeploy_amd64_en-US.msi"
+        $output = "$env:TEMP\WebDeploy.msi"
+        
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $output -UseBasicParsing
+            Write-Host "Installing Web Deploy..."
+            Start-Process msiexec.exe -ArgumentList "/i `"$output`" /quiet /norestart" -Wait -NoNewWindow
+            Write-Host "Web Deploy installed successfully"
+        }
+        catch {
+            Write-Error "Failed to install Web Deploy: $_"
+            exit 1
+        }
+    
+    - name: Deploy to MonsterASP
+      shell: pwsh
+      env:
+        WEBDEPLOY_URL: ${{ secrets.WEBDEPLOY_URL }}
+        WEBDEPLOY_USERNAME: ${{ secrets.WEBDEPLOY_USERNAME }}
+        WEBDEPLOY_PASSWORD: ${{ secrets.WEBDEPLOY_PASSWORD }}
+        WEBDEPLOY_SITE: ${{ secrets.WEBDEPLOY_SITE }}
+      run: |
+        $publishUrl = $env:WEBDEPLOY_URL
+        $userName = $env:WEBDEPLOY_USERNAME
+        $password = $env:WEBDEPLOY_PASSWORD
+        $siteName = $env:WEBDEPLOY_SITE
+        $sourcePath = "${{ github.workspace }}\publish"
+        
+        Write-Host "========================================="
+        Write-Host "Starting Web Deploy..."
+        Write-Host "Source: $sourcePath"
+        Write-Host "Destination Site: $siteName"
+        Write-Host "Server: $publishUrl"
+        Write-Host "========================================="
+        
+        $msdeployPath = "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe"
+        
+        if (-Not (Test-Path $msdeployPath)) {
+            Write-Error "MSDeploy not found at $msdeployPath"
+            exit 1
+        }
+        
+        $args = @(
+            '-verb:sync'
+            ("-source:contentPath=`"$sourcePath`"")
+            ("-dest:contentPath=`"$siteName`",ComputerName=`"$publishUrl`",UserName=`"$userName`",Password=`"$password`",AuthType=`"Basic`"")
+            '-enableRule:AppOffline'
+            '-allowUntrusted'
+            '-verbose'
+            '-retryAttempts:3'
+            '-retryInterval:5000'
+        )
+        
+        try {
+            Write-Host "Running msdeploy..."
+            Write-Host "Executing: $msdeployPath with arguments (password hidden)"
+            
+            $proc = Start-Process -FilePath $msdeployPath `
+                                 -ArgumentList $args `
+                                 -Wait `
+                                 -NoNewWindow `
+                                 -PassThru
+            
+            if ($proc.ExitCode -ne 0) {
+                Write-Error "Deployment failed with exit code $($proc.ExitCode)"
+                exit $proc.ExitCode
+            }
+            
+            Write-Host "========================================="
+            Write-Host "Deployment completed successfully!"
+            Write-Host "========================================="
+        }
+        catch {
+            Write-Error "Deployment failed: $_"
+            Write-Error $_.Exception.Message
+            Write-Error $_.ScriptStackTrace
+            exit 1
+        }
