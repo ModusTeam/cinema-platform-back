@@ -1,4 +1,4 @@
-namespace Cinema.Infrastructure.Authentication;
+namespace Cinema.Infrastructure.Options;
 
 public class JwtSettings
 {

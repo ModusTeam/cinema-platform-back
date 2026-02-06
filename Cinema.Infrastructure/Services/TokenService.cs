@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
-using Cinema.Infrastructure.Authentication;     
+using Cinema.Infrastructure.Options;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
