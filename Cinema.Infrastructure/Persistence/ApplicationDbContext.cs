@@ -1,8 +1,7 @@
-using System.Data;
 using System.Reflection;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
-using Cinema.Infrastructure.Persistence.Converters;
+using Cinema.Infrastructure.Persistence.Converters; // Якщо використовуєш конвертери
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -34,7 +33,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         return base.SaveChangesAsync(cancellationToken);
     }
     
-    public async Task<IDbContextTransaction> BeginTransactionAsync(IsolationLevel serializable,
+    public async Task<IDbContextTransaction> BeginTransactionAsync(System.Data.IsolationLevel serializable,
         CancellationToken cancellationToken)
     {
         return await Database.BeginTransactionAsync(cancellationToken);
@@ -48,6 +47,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasPostgresExtension("vector");
+        
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
         base.OnModelCreating(modelBuilder);
     }
