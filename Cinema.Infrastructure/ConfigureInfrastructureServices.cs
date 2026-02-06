@@ -143,6 +143,7 @@ public static class ConfigureInfrastructureServices
             })
             .AddStandardResilienceHandler();
         
+        services.AddScoped<IAnalyticsService, AnalyticsService>();
         services.AddTransient<IPaymentService, MockPaymentService>();
         services.AddSingleton<ISeatTypeProvider, SeatTypeProvider>();
         services.AddTransient<IPriceCalculator, PriceCalculator>();
