@@ -23,6 +23,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<RefreshToken> RefreshTokens { get; init; }
     public DbSet<Session> Sessions { get; init; }
     public DbSet<Pricing> Pricings { get; init; }
+    public DbSet<User> Users { get; init; }
     public DbSet<PricingItem> PricingItems { get; init; }
     public DbSet<Order> Orders { get; init; }
     public DbSet<Ticket> Tickets { get; init; }

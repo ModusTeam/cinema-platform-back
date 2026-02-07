@@ -16,6 +16,7 @@ public interface IApplicationDbContext
     DbSet<Genre> Genres { get; }
     DbSet<PricingItem> PricingItems { get; }
     DbSet<Order> Orders { get; }
+    DbSet<User> Users { get; }
     DbSet<Ticket> Tickets { get; }
     DbSet<Pricing> Pricings { get; }
     DbSet<HallTechnology> HallTechnologies { get; } 
