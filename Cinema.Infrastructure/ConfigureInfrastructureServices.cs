@@ -7,7 +7,6 @@ using Cinema.Domain.Interfaces;
 using Cinema.Infrastructure.Messaging.Consumers;
 using Cinema.Infrastructure.Options;
 using Cinema.Infrastructure.Persistence;
-using Cinema.Infrastructure.Persistence.Interceptors;
 using Cinema.Infrastructure.Services;
 using Hangfire;
 using Hangfire.PostgreSql;
@@ -68,7 +67,6 @@ public static class ConfigureInfrastructureServices
         services.AddSingleton(dataSource);
 
         // Interceptors & DB Context
-        services.AddScoped<ISaveChangesInterceptor, DispatchDomainEventsInterceptor>();
         services.AddScoped<ApplicationDbContextInitializer>();
 
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
