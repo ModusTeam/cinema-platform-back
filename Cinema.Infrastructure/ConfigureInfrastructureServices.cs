@@ -166,14 +166,15 @@ public static class ConfigureInfrastructureServices
 
                 if (string.IsNullOrEmpty(rabbitHost)) return;
 
-                cfg.Host(rabbitHost, rabbitVHost ?? "/", h =>
+                cfg.Host(rabbitHost, 5671, rabbitVHost ?? "/", h =>
                 {
                     h.Username(rabbitUser);
                     h.Password(rabbitPass);
-                    if (rabbitHost.Contains("cloudamqp")) 
+
+                    h.UseSsl(s =>
                     {
-                        h.UseSsl(s => s.Protocol = System.Security.Authentication.SslProtocols.Tls12);
-                    }
+                        s.Protocol = System.Security.Authentication.SslProtocols.Tls12;
+                    });
                 });
 
                 cfg.ConfigureEndpoints(context);

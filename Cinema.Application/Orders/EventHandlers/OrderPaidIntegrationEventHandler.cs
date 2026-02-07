@@ -21,6 +21,8 @@ public class OrderPaidIntegrationEventHandler(
 
     public async Task Handle(OrderPaidEvent notification, CancellationToken cancellationToken)
     {
+        logger.LogInformation("🚀 [OrderPaidIntegrationEventHandler] START handling OrderPaidEvent for OrderId: {OrderId}", notification.Order.Id);
+
         var order = notification.Order;
         
         var user = await context.Users
@@ -29,7 +31,7 @@ public class OrderPaidIntegrationEventHandler(
 
         if (user == null || string.IsNullOrEmpty(user.Email))
         {
-            logger.LogWarning("Cannot send ticket email: User {UserId} not found or no email", order.UserId);
+            logger.LogWarning("❌ [OrderPaidIntegrationEventHandler] User {UserId} not found or no email. Aborting.", order.UserId);
             return; 
         }
 
@@ -44,15 +46,27 @@ public class OrderPaidIntegrationEventHandler(
         var relativePath = string.Format(_settings.TicketDownloadPath, order.Id.Value);
         var downloadUrl = $"{_settings.BaseUrl.TrimEnd('/')}/{relativePath.TrimStart('/')}";
 
-        logger.LogInformation("Publishing TicketPurchasedMessage for Order {OrderId} to {Email}", order.Id, user.Email);
+        logger.LogInformation("ℹ️ [OrderPaidIntegrationEventHandler] Preparing message for {Email}. Movie: {Movie}", user.Email, movieTitle);
 
-        await publishEndpoint.Publish(new TicketPurchasedMessage(
-            order.Id.Value,
-            user.Email,
-            $"{user.FirstName} {user.LastName}".Trim(),
-            movieTitle,
-            sessionDate,
-            downloadUrl
-        ), cancellationToken);
+        try 
+        {
+            await publishEndpoint.Publish(new TicketPurchasedMessage(
+                order.Id.Value,
+                user.Email,
+                $"{user.FirstName} {user.LastName}".Trim(),
+                movieTitle,
+                sessionDate,
+                downloadUrl
+            ), cancellationToken);
+
+            // ✅ ЛОГ 2: Успішна відправка в RabbitMQ
+            logger.LogInformation("✅ [OrderPaidIntegrationEventHandler] SUCCESS! Message published to RabbitMQ for Order {OrderId}", order.Id);
+        }
+        catch (Exception ex)
+        {
+            // ❌ ЛОГ 3: Помилка відправки
+            logger.LogError(ex, "💥 [OrderPaidIntegrationEventHandler] FAILED to publish message to RabbitMQ for Order {OrderId}", order.Id);
+            throw;
+        }
     }
 }
