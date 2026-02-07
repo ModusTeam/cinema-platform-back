@@ -4,12 +4,14 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Interfaces;
+using Cinema.Infrastructure.Messaging.Consumers;
 using Cinema.Infrastructure.Options;
 using Cinema.Infrastructure.Persistence;
 using Cinema.Infrastructure.Persistence.Interceptors;
 using Cinema.Infrastructure.Services;
 using Hangfire;
 using Hangfire.PostgreSql;
+using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +33,7 @@ public static class ConfigureInfrastructureServices
         services
             .AddPersistence(configuration)
             .AddAuthenticationAndIdentity(configuration)
+            .AddMessaging(configuration)
             .AddBackgroundJobs(configuration)
             .AddExternalServices(configuration)
             .AddDomainServices();
@@ -116,7 +119,7 @@ public static class ConfigureInfrastructureServices
             })
             .AddJwtBearer(options =>
             {
-                var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>() 
+                var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>()
                                   ?? throw new InvalidOperationException("JwtSettings are not configured");
 
                 options.SaveToken = true;
@@ -134,6 +137,48 @@ public static class ConfigureInfrastructureServices
             });
 
         services.AddAuthorization();
+
+        return services;
+    }
+
+    private static IServiceCollection AddMessaging(this IServiceCollection services, IConfiguration configuration)
+    {
+        // 1. Email Service
+        services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
+        services.AddTransient<IEmailService, SmtpEmailService>();
+
+        // 2. Frontend Settings
+        services.AddOptions<FrontendSettings>()
+            .Bind(configuration.GetSection(FrontendSettings.SectionName))
+            .ValidateDataAnnotations();
+
+        // 3. MassTransit (RabbitMQ)
+        services.AddMassTransit(x =>
+        {
+            x.AddConsumer<TicketPurchasedConsumer>();
+
+            x.UsingRabbitMq((context, cfg) =>
+            {
+                var rabbitHost = configuration["RabbitMq:Host"];
+                var rabbitUser = configuration["RabbitMq:Username"];
+                var rabbitPass = configuration["RabbitMq:Password"];
+                var rabbitVHost = configuration["RabbitMq:VirtualHost"];
+
+                if (string.IsNullOrEmpty(rabbitHost)) return;
+
+                cfg.Host(rabbitHost, rabbitVHost ?? "/", h =>
+                {
+                    h.Username(rabbitUser);
+                    h.Password(rabbitPass);
+                    if (rabbitHost.Contains("cloudamqp")) 
+                    {
+                        h.UseSsl(s => s.Protocol = System.Security.Authentication.SslProtocols.Tls12);
+                    }
+                });
+
+                cfg.ConfigureEndpoints(context);
+            });
+        });
 
         return services;
     }
@@ -157,7 +202,7 @@ public static class ConfigureInfrastructureServices
     {
         // TMDB (Refit)
         services.Configure<TmdbSettings>(configuration.GetSection(TmdbSettings.SectionName));
-        
+
         var refitSettings = new RefitSettings
         {
             ContentSerializer = new SystemTextJsonContentSerializer(new JsonSerializerOptions
@@ -178,7 +223,7 @@ public static class ConfigureInfrastructureServices
 
         // Gemini AI (Typed HttpClient)
         services.Configure<GeminiOptions>(configuration.GetSection(GeminiOptions.SectionName));
-        
+
         services.AddHttpClient<IAiEmbeddingService, GeminiEmbeddingService>((sp, client) =>
         {
             var settings = sp.GetRequiredService<IOptions<GeminiOptions>>().Value;
