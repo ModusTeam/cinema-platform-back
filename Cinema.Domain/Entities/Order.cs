@@ -1,10 +1,11 @@
 using Cinema.Domain.Common;
 using Cinema.Domain.Enums;
+using Cinema.Domain.Events;
 using Cinema.Domain.Exceptions;
 
 namespace Cinema.Domain.Entities;
 
-public class Order
+public class Order : BaseEntity
 {
     public EntityId<Order> Id { get; }
     public decimal TotalAmount { get; private set; }
@@ -115,6 +116,8 @@ public class Order
 
         PaymentTransactionId = externalTransactionId;
         Status = OrderStatus.Paid;
+        
+        AddDomainEvent(new OrderPaidEvent(this)); 
     }
 
     public void MarkAsFailed()
