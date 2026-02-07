@@ -30,6 +30,7 @@ public static class ConfigureInfrastructureServices
     public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, IConfiguration configuration)
     {
         services
+            .AddTransient<ITicketGenerator, QuestPdfTicketGenerator>()
             .AddPersistence(configuration)
             .AddAuthenticationAndIdentity(configuration)
             .AddMessaging(configuration)
@@ -71,7 +72,6 @@ public static class ConfigureInfrastructureServices
 
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
         {
-            var interceptor = sp.GetRequiredService<ISaveChangesInterceptor>();
 
             options.UseNpgsql(dataSource, builder =>
                 {
@@ -79,8 +79,7 @@ public static class ConfigureInfrastructureServices
                     builder.UseVector();
                     builder.EnableRetryOnFailure(maxRetryCount: 3);
                 })
-                .UseSnakeCaseNamingConvention()
-                .AddInterceptors(interceptor);
+                .UseSnakeCaseNamingConvention();
         });
 
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
