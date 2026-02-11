@@ -24,15 +24,15 @@ public class GenresController : ApiController
     }
 
     [Authorize(Roles = "Admin")]
-    [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] UpdateGenreDto dto)
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateGenreDto dto)
     {
         return HandleResult(await Mediator.Send(new UpdateGenreCommand(id, dto.Name)));
     }
 
     [Authorize(Roles = "Admin")]
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id) 
     {
         return HandleResult(await Mediator.Send(new DeleteGenreCommand(id)));
     }
