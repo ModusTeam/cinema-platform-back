@@ -24,8 +24,13 @@ public class CreateOrderCommandHandler(
         var userId = currentUser.UserId;
         if (userId == null) return Result.Failure<Guid>(new Error("Auth.Required", "User not authenticated"));
         
-        if (!await seatLockingService.ValidateLockAsync(request.SessionId, request.SeatIds.First(), userId.Value, ct))
-             return Result.Failure<Guid>(new Error("Order.LockExpired", "Seat lock expired."));
+        foreach (var seatId in request.SeatIds)
+        {
+            if (!await seatLockingService.ValidateAndExtendLockAsync(request.SessionId, seatId, userId.Value, ct))
+            {
+                 return Result.Failure<Guid>(new Error("Order.LockExpired", $"Lock expired for seat {seatId}."));
+            }
+        }
         
         var reservationResult = await reservationService.ReserveOrderAsync(userId.Value, request.SessionId, request.SeatIds, ct);
         
@@ -38,7 +43,7 @@ public class CreateOrderCommandHandler(
             .Where(o => o.Id == new EntityId<Order>(orderId))
             .Select(o => o.TotalAmount)
             .FirstOrDefaultAsync(ct);
-
+        
         PaymentResult paymentResult;
         try
         {
@@ -67,9 +72,16 @@ public class CreateOrderCommandHandler(
 
         order.MarkAsPaid(transactionId);
         await context.SaveChangesAsync(ct);
-        await publisher.Publish(new OrderPaidEvent(order), ct);
         
-        _ = Task.Run(() => seatLockingService.UnlockSeatAsync(sessionId, seatIds.First(), userId, default));
+        await publisher.Publish(new OrderPaidEvent(order), ct);
+
+        _ = Task.Run(async () => 
+        {
+            foreach (var seatId in seatIds)
+            {
+                await seatLockingService.UnlockSeatAsync(sessionId, seatId, userId, default);
+            }
+        });
         
         return Result.Success(order.Id.Value);
     }
