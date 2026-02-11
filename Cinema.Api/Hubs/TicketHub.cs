@@ -2,12 +2,6 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace Cinema.Api.Hubs;
 
-public interface ITicketClient
-{
-    Task ReceiveSeatStatusChange(Guid seatId, string status, Guid? userId);
-    Task OrderCompleted(Guid orderId);
-    Task OrderFailed(object errorData);
-}
 
 public class TicketHub : Hub<ITicketClient>
 {
@@ -20,4 +14,6 @@ public class TicketHub : Hub<ITicketClient>
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, sessionId);
     }
+    
+    public static string GroupName(string sessionId) => $"session:{sessionId}";
 }

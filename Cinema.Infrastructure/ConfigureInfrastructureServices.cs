@@ -14,7 +14,6 @@ using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -22,6 +21,7 @@ using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using Refit;
 using StackExchange.Redis;
+
 
 namespace Cinema.Infrastructure;
 
@@ -54,6 +54,11 @@ public static class ConfigureInfrastructureServices
             return ConnectionMultiplexer.Connect(options);
         });
 
+        services.AddSignalR()
+            .AddStackExchangeRedis(configuration.GetConnectionString("RedisConnection"), options => {
+                options.Configuration.ChannelPrefix = "CinemaPlatform";
+            });
+        
         services.AddStackExchangeRedisCache(options =>
         {
             options.Configuration = redisConnectionString;

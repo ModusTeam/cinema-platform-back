@@ -20,19 +20,23 @@ public static class DependencyInjection
         var appSettings = configuration.Get<ApplicationSettings>();
         if (appSettings != null)
             services.AddSingleton(appSettings);
-        
+        var allowedOrigins = configuration
+            .GetSection("Cors:AllowedOrigins")
+            .Get<string[]>() ?? Array.Empty<string>();
         
         services.AddControllers();
         services.AddHttpContextAccessor();
         
         services.AddCors(options =>
         {
-            options.AddPolicy("AllowAll", policy =>
+            options.AddPolicy("AllowClient", policy =>
             {
-                policy
-                    .AllowAnyOrigin()
+                policy.WithOrigins(
+                        allowedOrigins
+                    )
                     .AllowAnyMethod()
-                    .AllowAnyHeader();
+                    .AllowAnyHeader()
+                    .AllowCredentials();
             });
         });
         

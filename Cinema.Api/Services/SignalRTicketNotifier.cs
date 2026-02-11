@@ -16,8 +16,9 @@ public class SignalRTicketNotifier(IHubContext<TicketHub, ITicketClient> hubCont
     
     public async Task NotifySeatLockedAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default)
     {
-        await hubContext.Clients.Group(sessionId.ToString())
-            .ReceiveSeatStatusChange(seatId, "Locked", userId);
+        await hubContext.Clients
+            .Group(TicketHub.GroupName(sessionId.ToString()))
+            .SeatLocked(sessionId, seatId, userId);
     }
     
     public async Task NotifyOrderFailed(Guid userId, Guid orderId, string reason)
@@ -28,7 +29,8 @@ public class SignalRTicketNotifier(IHubContext<TicketHub, ITicketClient> hubCont
 
     public async Task NotifySeatUnlockedAsync(Guid sessionId, Guid seatId, CancellationToken ct = default)
     {
-        await hubContext.Clients.Group(sessionId.ToString())
-            .ReceiveSeatStatusChange(seatId, "Available", null); 
+        await hubContext.Clients
+            .Group(TicketHub.GroupName(sessionId.ToString()))
+            .SeatUnlocked(sessionId, seatId);
     }
 }

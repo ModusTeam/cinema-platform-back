@@ -19,12 +19,12 @@ app.UseSwagger();
 app.UseSwaggerUI();
 
 app.UseHttpsRedirection();
-app.UseCors("AllowAll");
+app.UseCors("AllowClient");
 app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapHub<Cinema.Api.Hubs.TicketHub>("/ticketHub"); 
+app.MapHub<Cinema.Api.Hubs.TicketHub>("/tickets"); 
 app.UseOutputCache();
 app.UseHangfireDashboard();
 

@@ -81,6 +81,8 @@ public class RedisSeatLockingService : ISeatLockingService
                     return Result.Success();
                 }
                 
+                await _notifier.NotifySeatLockedAsync(sessionId, seatId, userId, ct);
+                
                 return Result.Failure(new Error("Seat.Locked", "Seat is already reserved by another user."));
             }
 
