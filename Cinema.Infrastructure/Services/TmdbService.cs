@@ -1,50 +1,60 @@
-using System.Net.Http.Json;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Tmdb;
-using Microsoft.Extensions.Configuration;
+using Cinema.Application.Common.Settings;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Refit;
 
 namespace Cinema.Infrastructure.Services;
 
-public class TmdbService : ITmdbService
+public class TmdbService(
+    ITmdbApi tmdbApi, 
+    IOptions<TmdbSettings> settings, 
+    ILogger<TmdbService> logger) : ITmdbService
 {
-    private readonly HttpClient _httpClient;
-    private readonly string _apiKey;
-    private readonly ILogger<TmdbService> _logger;
-
-    public TmdbService(HttpClient httpClient, IConfiguration config, ILogger<TmdbService> logger)
-    {
-        _httpClient = httpClient;
-        _httpClient.BaseAddress = new Uri(config["Tmdb:BaseUrl"] ?? "https://api.themoviedb.org/3/");
-        _apiKey = config["Tmdb:ApiKey"]!;
-        _logger = logger;
-    }
+    private readonly TmdbSettings _settings = settings.Value;
 
     public async Task<TmdbSearchResponse?> SearchMoviesAsync(string query)
     {
-        var url = $"search/movie?api_key={_apiKey}&query={query}&language=uk-UA";
+        if (string.IsNullOrWhiteSpace(query))
+            return new TmdbSearchResponse();
+
         try
         {
-            return await _httpClient.GetFromJsonAsync<TmdbSearchResponse>(url);
+            return await tmdbApi.SearchMoviesAsync(query, _settings.ApiKey);
+        }
+        catch (ApiException ex)
+        {
+            logger.LogError(ex, "TMDB API Error: {StatusCode} - {Content}", ex.StatusCode, ex.Content);
+            return new TmdbSearchResponse();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "TMDB Search Failed");
+            logger.LogError(ex, "Unexpected error searching TMDB for query: {Query}", query);
             return new TmdbSearchResponse();
         }
     }
 
     public async Task<TmdbMovieDetails?> GetMovieDetailsAsync(int tmdbId)
     {
-        var url = $"movie/{tmdbId}?api_key={_apiKey}&language=uk-UA&append_to_response=credits,videos";
-        
         try
         {
-            return await _httpClient.GetFromJsonAsync<TmdbMovieDetails>(url);
+            return await tmdbApi.GetMovieDetailsAsync(tmdbId, _settings.ApiKey);
+        }
+        catch (ApiException ex)
+        {
+            if (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                logger.LogWarning("Movie with TMDB ID {Id} not found.", tmdbId);
+                return null;
+            }
+
+            logger.LogError(ex, "TMDB API Error fetching details for ID {Id}: {StatusCode}", tmdbId, ex.StatusCode);
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching TMDB movie details for ID {Id}", tmdbId);
+            logger.LogError(ex, "Unexpected error fetching TMDB details for ID {Id}", tmdbId);
             return null;
         }
     }
