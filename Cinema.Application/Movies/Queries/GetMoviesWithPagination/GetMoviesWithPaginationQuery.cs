@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Movies.Dtos;
+using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
 using MediatR;
@@ -12,7 +13,7 @@ public record GetMoviesWithPaginationQuery(
     int PageNumber = 1,
     int PageSize = 10,
     string? SearchTerm = null,
-    int? GenreId = null 
+    Guid? GenreId = null 
 ) : IRequest<Result<PaginatedList<MovieDto>>>;
 
 public class GetMoviesWithPaginationQueryHandler(IApplicationDbContext context) 
@@ -29,10 +30,11 @@ public class GetMoviesWithPaginationQueryHandler(IApplicationDbContext context)
             var term = $"%{request.SearchTerm.Trim()}%";
             query = query.Where(m => EF.Functions.ILike(m.Title, term));
         }
-        
+
         if (request.GenreId.HasValue)
         {
-            query = query.Where(m => m.MovieGenres.Any(mg => mg.Genre.ExternalId == request.GenreId));
+            var genreId = new EntityId<Genre>(request.GenreId.Value);
+            query = query.Where(m => m.MovieGenres.Any(mg => mg.GenreId == genreId));
         }
         
         var orderedQuery = query.OrderByDescending(m => m.ReleaseYear).ThenBy(m => m.Title);
