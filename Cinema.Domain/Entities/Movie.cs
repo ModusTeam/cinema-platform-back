@@ -57,8 +57,6 @@ public class Movie : BaseEntity
             ExternalId = null,
             Rating = 0
         };
-        
-        movie.AddDomainEvent(new MovieCreatedEvent(movie));
 
         return movie;
     }
@@ -120,8 +118,6 @@ public class Movie : BaseEntity
             backdropUrl,
             trailerUrl
         );
-
-        movie.AddDomainEvent(new MovieCreatedEvent(movie));
 
         return movie;
     }
