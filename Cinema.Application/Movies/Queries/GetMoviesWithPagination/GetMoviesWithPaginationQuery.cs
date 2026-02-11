@@ -26,8 +26,8 @@ public class GetMoviesWithPaginationQueryHandler(IApplicationDbContext context)
 
         if (!string.IsNullOrWhiteSpace(request.SearchTerm))
         {
-            var term = request.SearchTerm.Trim().ToLower();
-            query = query.Where(m => m.Title.ToLower().Contains(term));
+            var term = $"%{request.SearchTerm.Trim()}%";
+            query = query.Where(m => EF.Functions.ILike(m.Title, term));
         }
         
         if (request.GenreId.HasValue)
