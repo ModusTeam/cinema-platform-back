@@ -155,7 +155,7 @@ public class RedisSeatLockingService : ISeatLockingService
         }
     }
 
-    public async Task<bool> ValidateLockAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default)
+    /*public async Task<bool> ValidateLockAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default)
     {
         var key = GetKey(sessionId, seatId);
 
@@ -169,7 +169,7 @@ public class RedisSeatLockingService : ISeatLockingService
             _logger.LogError(ex, "Redis error while validating lock for seat {SeatId}", seatId);
             return false;
         }
-    }
+    }*/
     
     public async Task<IEnumerable<Guid>> GetLockedSeatsAsync(Guid sessionId, IEnumerable<Guid> seatIds, CancellationToken ct = default)
     {

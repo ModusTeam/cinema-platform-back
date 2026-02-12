@@ -4,11 +4,14 @@ using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Cinema.Application.Genres.Commands.UpdateGenre;
 
-public class UpdateGenreCommandHandler(IApplicationDbContext context) 
-    : IRequestHandler<UpdateGenreCommand, Result>
+public class UpdateGenreCommandHandler(
+    IApplicationDbContext context,
+    IMemoryCache cache
+) : IRequestHandler<UpdateGenreCommand, Result>
 {
     public async Task<Result> Handle(UpdateGenreCommand request, CancellationToken ct)
     {
@@ -21,6 +24,9 @@ public class UpdateGenreCommandHandler(IApplicationDbContext context)
         genre.Update(request.Name);
         
         await context.SaveChangesAsync(ct);
+
+        cache.Remove("all-genres"); 
+
         return Result.Success();
     }
 }
