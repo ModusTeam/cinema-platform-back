@@ -1,4 +1,3 @@
-// File: Cinema.Domain/Services/OrderingDomainService.cs
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;

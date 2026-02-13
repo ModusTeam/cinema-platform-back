@@ -4,6 +4,7 @@ using Cinema.Application.Sessions.Commands.RescheduleSession;
 using Cinema.Application.Sessions.Dtos;
 using Cinema.Application.Sessions.Queries.GetSessionById;
 using Cinema.Application.Sessions.Queries.GetSessionsByDateQuery;
+using Cinema.Application.Sessions.Queries.GetSessionSeats;
 using Cinema.Application.Sessions.Queries.GetSessionsWithPaginationQuery;
 using Cinema.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
@@ -55,5 +56,14 @@ public class SessionsController : ApiController
     public async Task<IActionResult> Cancel(Guid id)
     {
         return HandleResult(await Mediator.Send(new CancelSessionCommand(id)));
+    }
+    
+    [HttpGet("{id}/seats")]
+    [ProducesResponseType(typeof(SessionSeatsVm), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetSeats(Guid id)
+    {
+        var result = await Mediator.Send(new GetSessionSeatsQuery(id));
+        return HandleResult(result);
     }
 }
