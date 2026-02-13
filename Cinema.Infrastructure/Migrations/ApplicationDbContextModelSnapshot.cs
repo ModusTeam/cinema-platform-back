@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Pgvector;
 
 #nullable disable
 
@@ -20,6 +21,7 @@ namespace Cinema.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "9.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("Cinema.Domain.Entities.Genre", b =>
@@ -123,6 +125,10 @@ namespace Cinema.Infrastructure.Migrations
                     b.Property<int>("DurationMinutes")
                         .HasColumnType("integer")
                         .HasColumnName("duration_minutes");
+
+                    b.Property<Vector>("Embedding")
+                        .HasColumnType("vector")
+                        .HasColumnName("embedding");
 
                     b.Property<int>("ExternalId")
                         .HasColumnType("integer")
@@ -230,6 +236,9 @@ namespace Cinema.Infrastructure.Migrations
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_orders_user_id");
+
+                    b.HasIndex("Status", "BookingDate")
+                        .HasDatabaseName("ix_orders_status_booking_date");
 
                     b.ToTable("orders", (string)null);
                 });
@@ -373,43 +382,6 @@ namespace Cinema.Infrastructure.Migrations
                         .HasDatabaseName("ix_seats_seat_type_id");
 
                     b.ToTable("seats", (string)null);
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.SeatLock", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("ExpiryTime")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("expiry_time");
-
-                    b.Property<Guid>("SeatId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("seat_id");
-
-                    b.Property<Guid>("SessionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("session_id");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_seat_locks");
-
-                    b.HasIndex("SeatId")
-                        .HasDatabaseName("ix_seat_locks_seat_id");
-
-                    b.HasIndex("SessionId")
-                        .HasDatabaseName("ix_seat_locks_session_id");
-
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_seat_locks_user_id");
-
-                    b.ToTable("seat_locks", (string)null);
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.SeatType", b =>
@@ -897,7 +869,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_orders_users_user_id");
+                        .HasConstraintName("fk_orders_user_user_id");
 
                     b.Navigation("Session");
 
@@ -932,7 +904,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_refresh_tokens_users_user_id");
+                        .HasConstraintName("fk_refresh_tokens_user_user_id");
 
                     b.Navigation("User");
                 });
@@ -956,36 +928,6 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Hall");
 
                     b.Navigation("SeatType");
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.SeatLock", b =>
-                {
-                    b.HasOne("Cinema.Domain.Entities.Seat", "Seat")
-                        .WithMany()
-                        .HasForeignKey("SeatId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_seat_locks_seats_seat_id");
-
-                    b.HasOne("Cinema.Domain.Entities.Session", "Session")
-                        .WithMany()
-                        .HasForeignKey("SessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_seat_locks_sessions_session_id");
-
-                    b.HasOne("Cinema.Domain.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_seat_locks_users_user_id");
-
-                    b.Navigation("Seat");
-
-                    b.Navigation("Session");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.Session", b =>
