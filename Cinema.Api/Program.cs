@@ -11,7 +11,7 @@ builder.Host.UseSerilog((context, configuration) =>
 builder.Services.AddWebServices(builder.Configuration);
 
 var app = builder.Build();
-
+await app.InitialiseDatabaseAsync();
 app.UseExceptionHandler();
 app.UseSerilogRequestLogging();
 app.UseMiddleware<RequestLogContextMiddleware>();

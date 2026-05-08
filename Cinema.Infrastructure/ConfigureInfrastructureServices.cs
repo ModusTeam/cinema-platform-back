@@ -169,15 +169,15 @@ public static class ConfigureInfrastructureServices
 
                 if (string.IsNullOrEmpty(rabbitHost)) return;
 
-                cfg.Host(rabbitHost, 5671, rabbitVHost ?? "/", h =>
+                cfg.Host(rabbitHost, 5672, rabbitVHost ?? "/", h =>
                 {
                     h.Username(rabbitUser);
                     h.Password(rabbitPass);
 
-                    h.UseSsl(s =>
-                    {
-                        s.Protocol = System.Security.Authentication.SslProtocols.Tls12;
-                    });
+                    // h.UseSsl(s =>
+                    // {
+                    //     s.Protocol = System.Security.Authentication.SslProtocols.Tls12;
+                    // });
                 });
 
                 cfg.ConfigureEndpoints(context);
