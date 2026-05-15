@@ -906,7 +906,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_orders_user_user_id");
+                        .HasConstraintName("fk_orders_users_user_id");
 
                     b.Navigation("Session");
 
@@ -941,7 +941,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_refresh_tokens_user_user_id");
+                        .HasConstraintName("fk_refresh_tokens_users_user_id");
 
                     b.Navigation("User");
                 });
@@ -988,7 +988,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_seat_locks_user_user_id");
+                        .HasConstraintName("fk_seat_locks_users_user_id");
 
                     b.Navigation("Seat");
 
