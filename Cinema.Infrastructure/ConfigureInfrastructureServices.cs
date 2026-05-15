@@ -22,6 +22,8 @@ using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using Refit;
 using StackExchange.Redis;
+using Cinema.Infrastructure.Grpc.Loyalty;
+using Grpc.Net.Client;
 
 
 namespace Cinema.Infrastructure;
@@ -244,6 +246,11 @@ private static IServiceCollection AddExternalServices(this IServiceCollection se
             })
         };
 
+        services.AddGrpcClient<LoyaltyService.LoyaltyServiceClient>(o =>
+        {
+            o.Address = new Uri("http://localhost:50051");
+        });
+
         services.AddRefitClient<IGeminiApi>(geminiRefitSettings)
             .ConfigureHttpClient((sp, client) =>
             {
@@ -273,6 +280,7 @@ private static IServiceCollection AddExternalServices(this IServiceCollection se
         services.AddTransient<IUserService, UserService>();
         services.AddScoped<IMovieInfoProvider, EfMovieInfoProvider>();
         services.AddScoped<IOrderReservationService, OrderReservationService>();
+        services.AddScoped<ILoyaltyService, GrpcLoyaltyService>();
 
         return services;
     }
