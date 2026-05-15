@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # === ІНФРАСТРУКТУРА .NET МОНОЛІТУ ===
   cinema-db:
     image: pgvector/pgvector:pg16
     container_name: cinema-postgres
@@ -22,6 +23,7 @@ services:
     volumes:
       - redis_data:/data
 
+  # Спільний брокер для .NET та NestJS!
   cinema-rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: cinema-rabbitmq
@@ -32,6 +34,20 @@ services:
       - "5672:5672"
       - "15672:15672"
 
+  # === ІНФРАСТРУКТУРА NESTJS МІКРОСЕРВІСУ ===
+  loyalty-db:
+    image: postgres:15-alpine
+    container_name: cinema_loyalty_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cinema_loyalty_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - loyalty_pg_data:/var/lib/postgresql/data
+
 volumes:
   postgres_data:
   redis_data:
+  loyalty_pg_data:
