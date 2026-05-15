@@ -11,6 +11,7 @@ public class ApplicationDbContextInitializer
     private readonly ILogger<ApplicationDbContextInitializer> _logger;
     private readonly ApplicationDbContext _context;
     private readonly RoleManager<IdentityRole<Guid>> _roleManager;
+    private readonly UserManager<User> _userManager;
 
     public ApplicationDbContextInitializer(
         ILogger<ApplicationDbContextInitializer> logger, 
@@ -21,6 +22,7 @@ public class ApplicationDbContextInitializer
         _logger = logger;
         _context = context;
         _roleManager = roleManager;
+        _userManager = userManager;
     }
 
     public async Task InitialiseAsync()
@@ -54,7 +56,7 @@ public class ApplicationDbContextInitializer
 
     public async Task TrySeedAsync()
     {
-        // 1. ROles
+        // 1. Roles
         var roles = new[] { "Admin", "User" };
         foreach (var role in roles)
         {
@@ -64,63 +66,36 @@ public class ApplicationDbContextInitializer
             }
         }
 
-        // (Seat Types)
-        if (!await _context.SeatTypes.AnyAsync())
-        {
-            _logger.LogInformation("Seeding Seat Types...");
-            
-            var standard = SeatType.New(EntityId<SeatType>.New(), "Standard", "Звичайне місце");
-            var vip = SeatType.New(EntityId<SeatType>.New(), "VIP", "Місце підвищеного комфорту");
-            var sofa = SeatType.New(EntityId<SeatType>.New(), "Sofa", "Диван для двох");
+        // 2. ДОДАЄМО СІДИНГ АДМІНІСТРАТОРА <-- ОСЬ ЦЕЙ БЛОК
+        var adminEmail = "admin@cinema.com";
+        var adminUser = await _userManager.FindByEmailAsync(adminEmail);
 
-            await _context.SeatTypes.AddRangeAsync(standard, vip, sofa);
-            await _context.SaveChangesAsync();
-        }
-        
-        if (!await _context.Pricings.AnyAsync())
+        if (adminUser == null)
         {
-            _logger.LogInformation("Seeding Pricings...");
+            _logger.LogInformation("Seeding Default Admin User...");
             
-            var pricing = Pricing.New(EntityId<Pricing>.New(), "Standard Evening");
-            await _context.Pricings.AddAsync(pricing);
-            
-            var seatTypes = await _context.SeatTypes.ToListAsync();
-            var standardType = seatTypes.First(st => st.Name == "Standard");
-            var vipType = seatTypes.First(st => st.Name == "VIP");
-            var sofaType = seatTypes.First(st => st.Name == "Sofa");
-            
-            var items = new List<PricingItem>
+            var admin = new User
             {
-                PricingItem.New(EntityId<PricingItem>.New(), 150.0m, pricing.Id, standardType.Id, DayOfWeek.Friday, null, null),
-                PricingItem.New(EntityId<PricingItem>.New(), 150.0m, pricing.Id, standardType.Id, DayOfWeek.Saturday, null, null),
-                PricingItem.New(EntityId<PricingItem>.New(), 150.0m, pricing.Id, standardType.Id, DayOfWeek.Sunday, null, null),
-                
-                PricingItem.New(EntityId<PricingItem>.New(), 120.0m, pricing.Id, standardType.Id, DayOfWeek.Monday, null, null),
-
-                PricingItem.New(EntityId<PricingItem>.New(), 250.0m, pricing.Id, vipType.Id, DayOfWeek.Friday, null, null),
-                PricingItem.New(EntityId<PricingItem>.New(), 250.0m, pricing.Id, vipType.Id, DayOfWeek.Saturday, null, null),
-                
-                PricingItem.New(EntityId<PricingItem>.New(), 400.0m, pricing.Id, sofaType.Id, DayOfWeek.Saturday, null, null)
+                UserName = adminEmail,
+                Email = adminEmail,
+                FirstName = "System", // Заміни на свої властивості, якщо вони інші
+                LastName = "Admin",
+                EmailConfirmed = true // Щоб не вимагало підтвердження пошти при логіні
             };
 
-            await _context.PricingItems.AddRangeAsync(items);
-            await _context.SaveChangesAsync();
-        }
-        
-        if (!await _context.Technologies.AnyAsync())
-        {
-            _logger.LogInformation("Seeding Technologies...");
-            var technologies = new[]
-            {
-                Technology.New(EntityId<Technology>.New(), "IMAX", "Visual"),
-                Technology.New(EntityId<Technology>.New(), "Dolby Atmos", "Audio"),
-                Technology.New(EntityId<Technology>.New(), "3D", "Visual"),
-                Technology.New(EntityId<Technology>.New(), "4DX", "Experience"),
-                Technology.New(EntityId<Technology>.New(), "D-Box", "Seating")
-            };
+            // Створюємо юзера з дефолтним паролем (Має містити велику літеру, цифру і спецсимвол)
+            var result = await _userManager.CreateAsync(admin, "Admin123!");
 
-            await _context.Technologies.AddRangeAsync(technologies);
-            await _context.SaveChangesAsync();
+            if (result.Succeeded)
+            {
+                // Додаємо йому роль
+                await _userManager.AddToRoleAsync(admin, "Admin");
+            }
+            else
+            {
+                _logger.LogError("Failed to seed admin user: {Errors}", 
+                    string.Join(", ", result.Errors.Select(e => e.Description)));
+            }
         }
     }
 }
