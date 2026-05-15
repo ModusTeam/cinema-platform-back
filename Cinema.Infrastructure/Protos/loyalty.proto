@@ -1,0 +1,24 @@
+syntax = "proto3";
+package loyalty.v1;
+
+option csharp_namespace = "Cinema.Infrastructure.Grpc.Loyalty";
+
+enum Tier {
+  BRONZE = 0;
+  SILVER = 1;
+  GOLD = 2;
+  PLATINUM = 3;
+}
+
+service LoyaltyService {
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+}
+
+message GetBalanceRequest {
+  string user_id = 1;
+}
+
+message GetBalanceResponse {
+  int32 points = 1;
+  Tier tier = 2;
+}
