@@ -1,23 +1,11 @@
 namespace Cinema.Application.Common.Contracts;
 
-public class TicketPurchasedMessage
+public class TierUpgradedMessage
 {
-    public Guid OrderId { get; set; }
-    public string UserEmail { get; set; } = string.Empty;
+    public Guid UserId { get; set; }
+    public string UserEmail { get; set; } = string.Empty; 
     public string UserName { get; set; } = string.Empty;
-    public string MovieTitle { get; set; } = string.Empty;
-    public DateTime SessionDate { get; set; }
-    public string TicketDownloadUrl { get; set; } = string.Empty;
-
-    public TicketPurchasedMessage() { }
-    
-    public TicketPurchasedMessage(Guid orderId, string email, string name, string title, DateTime date, string url)
-    {
-        OrderId = orderId;
-        UserEmail = email;
-        UserName = name;
-        MovieTitle = title;
-        SessionDate = date;
-        TicketDownloadUrl = url;
-    }
+    public string OldTier { get; set; } = string.Empty;
+    public string NewTier { get; set; } = string.Empty;
+    public DateTime UpgradedAt { get; set; }
 }
