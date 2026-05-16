@@ -1,24 +1,101 @@
 syntax = "proto3";
+
 package loyalty.v1;
 
 option csharp_namespace = "Cinema.Infrastructure.Grpc.Loyalty";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
 enum Tier {
-  BRONZE = 0;
-  SILVER = 1;
-  GOLD = 2;
-  PLATINUM = 3;
+  TIER_UNSPECIFIED = 0;
+  TIER_BRONZE = 1;
+  TIER_SILVER = 2;
+  TIER_GOLD = 3;
 }
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_STANDARD = 1;
+  EVENT_TYPE_SPECIAL = 2;
+  EVENT_TYPE_PREMIERE = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service
+// ─────────────────────────────────────────────────────────────────────────────
 
 service LoyaltyService {
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  rpc GetFullProfile(GetFullProfileRequest) returns (GetFullProfileResponse);
+  rpc DeductPoints(DeductPointsRequest) returns (DeductPointsResponse);
+  rpc UseGoldUpgrade(UseGoldUpgradeRequest) returns (UseGoldUpgradeResponse);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetBalance
+// ─────────────────────────────────────────────────────────────────────────────
 
 message GetBalanceRequest {
   string user_id = 1;
 }
 
 message GetBalanceResponse {
-  int32 points = 1;
+  int32 balance = 1;
+  int32 lifetime_points = 2;
+  int32 year_points = 3;
+  Tier tier = 4;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetFullProfile
+// ─────────────────────────────────────────────────────────────────────────────
+
+message GetFullProfileRequest {
+  string user_id = 1;
+}
+
+message GetFullProfileResponse {
+  string user_id = 1;
   Tier tier = 2;
+  int32 balance = 3;
+  int32 lifetime_points = 4;
+  int32 year_points = 5;
+  int32 year_visits = 6;
+  string tier_expires_at = 7;
+  string balance_expires_at = 8;
+  bool is_birthday_week = 9;
+  bool gold_upgrade_available = 10;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DeductPoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+message DeductPointsRequest {
+  string user_id = 1;
+  int32 amount = 2;
+  string order_id = 3;
+  string idempotency_key = 4;
+}
+
+message DeductPointsResponse {
+  bool success = 1;
+  int32 balance_after = 2;
+  string error_message = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UseGoldUpgrade
+// ─────────────────────────────────────────────────────────────────────────────
+
+message UseGoldUpgradeRequest {
+  string user_id = 1;
+  string order_id = 2;
+}
+
+message UseGoldUpgradeResponse {
+  bool success = 1;
+  string error_message = 2;
 }
