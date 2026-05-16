@@ -57,6 +57,8 @@ public class OrderPaidIntegrationEventHandler(
                 movieTitle,
                 sessionDate,
                 downloadUrl
+                order.UserId, 
+                order.TotalAmount
             ), cancellationToken);
             
             logger.LogInformation("[OrderPaidIntegrationEventHandler] SUCCESS! Message published to RabbitMQ for Order {OrderId}", order.Id);
