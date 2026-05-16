@@ -162,6 +162,8 @@ public static class ConfigureInfrastructureServices
         {
             x.AddConsumer<TicketPurchasedConsumer>();
 
+            x.AddConsumer<TierUpgradedConsumer>();
+
             x.UsingRabbitMq((context, cfg) =>
             {
                 var rabbitHost = configuration["RabbitMq:Host"];
