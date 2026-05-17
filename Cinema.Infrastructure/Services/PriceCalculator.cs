@@ -8,8 +8,8 @@ namespace Cinema.Infrastructure.Services;
 public class PriceCalculator : IPriceCalculator
 {
     public decimal CalculatePrice(
-        Pricing pricing, 
-        EntityId<SeatType> seatTypeId, 
+        Pricing pricing,
+        EntityId<SeatType> seatTypeId,
         DateTime sessionStartTime)
     {
         var relevantItems = pricing.PricingItems?
@@ -20,24 +20,25 @@ public class PriceCalculator : IPriceCalculator
         {
             throw new PriceNotConfiguredException(pricing.Name, seatTypeId.ToString(), sessionStartTime);
         }
-        
+
         var requestTime = sessionStartTime.TimeOfDay;
         var requestDay = sessionStartTime.DayOfWeek;
 
         var bestMatch = relevantItems
-            .Where(item => item.DayOfWeek == requestDay)
+            .Where(item => item.DayOfWeek == null || item.DayOfWeek == requestDay)
             .Where(item => IsTimeApplicable(item, requestTime))
-            .OrderByDescending(item => item.StartTime.HasValue && item.EndTime.HasValue) 
+            .OrderByDescending(item => item.DayOfWeek.HasValue)
+            .ThenByDescending(item => item.StartTime.HasValue && item.EndTime.HasValue)
             .FirstOrDefault();
 
         if (bestMatch != null)
         {
             return bestMatch.Price;
         }
-        
+
         throw new PriceNotConfiguredException(pricing.Name, seatTypeId.ToString(), sessionStartTime);
     }
-    
+
     private static bool IsTimeApplicable(PricingItem item, TimeSpan sessionTime)
     {
         if (!item.StartTime.HasValue || !item.EndTime.HasValue)
@@ -45,7 +46,7 @@ public class PriceCalculator : IPriceCalculator
 
         var start = item.StartTime.Value.TimeOfDay;
         var end = item.EndTime.Value.TimeOfDay;
-        
+
         if (start <= end)
         {
             return sessionTime >= start && sessionTime <= end;
