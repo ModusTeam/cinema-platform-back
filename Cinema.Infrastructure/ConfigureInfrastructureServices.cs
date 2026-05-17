@@ -9,6 +9,7 @@ using Cinema.Infrastructure.Messaging.Consumers;
 using Cinema.Infrastructure.Options;
 using Cinema.Infrastructure.Persistence;
 using Cinema.Infrastructure.Services;
+using Cinema.Application.Common.Contracts;
 using Hangfire;
 using Hangfire.PostgreSql;
 using MassTransit;
@@ -182,6 +183,13 @@ public static class ConfigureInfrastructureServices
                     // {
                     //     s.Protocol = System.Security.Authentication.SslProtocols.Tls12;
                     // });
+                });
+
+                cfg.UseRawJsonSerializer();
+
+                cfg.Message<TicketPurchasedMessage>(m =>
+                {
+                    m.SetEntityName("TicketPurchased");
                 });
 
                 cfg.ConfigureEndpoints(context);
