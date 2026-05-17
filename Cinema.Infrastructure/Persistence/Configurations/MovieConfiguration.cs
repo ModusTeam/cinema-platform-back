@@ -13,8 +13,8 @@ public class MovieConfiguration : IEntityTypeConfiguration<Movie>
         builder.Property(x => x.Id)
             .HasConversion(x => x.Value, x => new EntityId<Movie>(x));
 
-        builder.Property(x => x.ExternalId).IsRequired();
-        builder.HasIndex(x => x.ExternalId).IsUnique();
+        builder.Property(x => x.ExternalId).IsRequired(false);
+        builder.HasIndex(x => x.ExternalId).IsUnique().HasFilter("external_id IS NOT NULL");
 
         builder.Property(x => x.Title).IsRequired().HasMaxLength(200);
         builder.Property(x => x.Description).IsRequired(false).HasMaxLength(2000);
