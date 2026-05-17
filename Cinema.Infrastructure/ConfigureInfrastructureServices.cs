@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
@@ -248,9 +248,14 @@ private static IServiceCollection AddExternalServices(this IServiceCollection se
             })
         };
 
+        // 3. gRPC Loyalty Service
         services.AddGrpcClient<LoyaltyService.LoyaltyServiceClient>(o =>
         {
-            o.Address = new Uri("http://localhost:50051");
+            var url = configuration["Grpc:LoyaltyServiceUrl"];
+            if (!string.IsNullOrEmpty(url))
+            {
+                o.Address = new Uri(url);
+            }
         });
 
         services.AddRefitClient<IGeminiApi>(geminiRefitSettings)
@@ -283,6 +288,7 @@ private static IServiceCollection AddExternalServices(this IServiceCollection se
         services.AddScoped<IMovieInfoProvider, EfMovieInfoProvider>();
         services.AddScoped<IOrderReservationService, OrderReservationService>();
         services.AddScoped<ILoyaltyService, GrpcLoyaltyService>();
+        
 
         return services;
     }
