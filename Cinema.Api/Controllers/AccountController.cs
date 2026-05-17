@@ -1,6 +1,7 @@
 using Cinema.Application.Account.Commands.ChangePassword;
 using Cinema.Application.Account.Commands.UpdateProfile;
 using Cinema.Application.Account.Queries.GetProfile;
+using Cinema.Application.Account.Queries.GetLoyaltyProfile;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -25,5 +26,11 @@ public class AccountController : ApiController
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordCommand command)
     {
         return HandleResult(await Mediator.Send(command));
+    }
+
+    [HttpGet("loyalty")]
+    public async Task<IActionResult> GetLoyaltyProfile()
+    {
+        return HandleResult(await Mediator.Send(new GetLoyaltyProfileQuery()));
     }
 }
