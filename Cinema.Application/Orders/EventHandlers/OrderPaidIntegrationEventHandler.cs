@@ -56,7 +56,7 @@ public class OrderPaidIntegrationEventHandler(
                 $"{user.FirstName} {user.LastName}".Trim(),
                 movieTitle,
                 sessionDate,
-                downloadUrl
+                downloadUrl,
                 order.UserId, 
                 order.TotalAmount
             ), cancellationToken);
