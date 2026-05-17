@@ -16,6 +16,8 @@ public class Order : BaseEntity
     public Guid UserId { get; private set; }
     public EntityId<Session> SessionId { get; private set; }
 
+    public int PointsUsed { get; private set; }
+
     public User? User { get; private set; }
     public Session? Session { get; private set; }
     private readonly List<Ticket> _tickets = new();
@@ -107,6 +109,13 @@ public class Order : BaseEntity
         }
 
         return order;
+    }
+
+    public void ApplyLoyaltyDiscount(int points)
+    {
+        if (points < 0) throw new ArgumentException("Points cannot be negative");
+        
+        PointsUsed = points;
     }
 
     public void MarkAsPaid(string externalTransactionId)
