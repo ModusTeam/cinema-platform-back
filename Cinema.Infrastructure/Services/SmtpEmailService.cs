@@ -13,6 +13,18 @@ public class SmtpEmailService(IOptions<SmtpSettings> options, ILogger<SmtpEmailS
 
     public async Task SendEmailAsync(string to, string subject, string body, byte[]? attachment = null, string? attachmentName = null)
     {
+        if (string.IsNullOrWhiteSpace(to))
+        {
+            logger.LogWarning("SendEmailAsync skipped: recipient address is empty.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.SenderEmail))
+        {
+            logger.LogWarning("SendEmailAsync skipped: SmtpSettings.SenderEmail is not configured.");
+            return;
+        }
+
         try
         {
             using var client = new SmtpClient(_settings.Host, _settings.Port)
@@ -29,19 +41,18 @@ public class SmtpEmailService(IOptions<SmtpSettings> options, ILogger<SmtpEmailS
                 IsBodyHtml = true
             };
             mailMessage.To.Add(to);
-            
+
             if (attachment != null && !string.IsNullOrEmpty(attachmentName))
             {
                 mailMessage.Attachments.Add(new Attachment(new MemoryStream(attachment), attachmentName));
             }
 
             await client.SendMailAsync(mailMessage);
-            logger.LogInformation("Email sent to {Email} with attachment: {HasAttachment}", to, attachment != null);
+            logger.LogInformation("Email sent to {Email}, attachment: {HasAttachment}", to, attachment != null);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to send email to {Email}", to);
-            throw;
         }
     }
 }
