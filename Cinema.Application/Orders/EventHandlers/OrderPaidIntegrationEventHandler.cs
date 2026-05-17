@@ -10,8 +10,28 @@ using Microsoft.Extensions.Options;
 
 namespace Cinema.Application.Orders.EventHandlers;
 
+public record NestJsTicketPurchasedDto(
+    Guid EventId,
+    Guid UserId,
+    Guid OrderId,
+    double TotalAmount,
+    double TicketAmount,
+    double FoodAmount,
+    string EventType,
+    DateTime PurchasedAt,
+    string UserEmail,
+    string UserName,
+    string MovieTitle,
+    DateTime SessionDate,
+    string DownloadUrl,
+    double TotalPrice
+);
+
+public record NestJsTicketPurchasedEvent(string Pattern, NestJsTicketPurchasedDto Data);
+
 public class OrderPaidIntegrationEventHandler(
     IPublishEndpoint publishEndpoint,
+    ISendEndpointProvider sendEndpointProvider,
     IApplicationDbContext context,
     IOptions<FrontendSettings> frontendSettings,
     ILogger<OrderPaidIntegrationEventHandler> logger) 
@@ -50,7 +70,7 @@ public class OrderPaidIntegrationEventHandler(
 
         try 
         {
-            await publishEndpoint.Publish(new TicketPurchasedMessage(
+            var message = new TicketPurchasedMessage(
                 order.Id.Value,
                 user.Email,
                 $"{user.FirstName} {user.LastName}".Trim(),
@@ -59,8 +79,38 @@ public class OrderPaidIntegrationEventHandler(
                 downloadUrl,
                 order.UserId, 
                 order.TotalAmount
-            ), cancellationToken);
+            );
+
+            // Publish for internal C# consumers (Email Service)
+            await publishEndpoint.Publish(message, cancellationToken);
             
+            // Send specifically formatted raw message to NestJS queue
+            logger.LogInformation("[OrderPaidIntegrationEventHandler] Connecting to NestJS queue 'loyalty_ticket_purchased'...");
+            var nestJsEndpoint = await sendEndpointProvider.GetSendEndpoint(new Uri("queue:loyalty_ticket_purchased"));
+            
+            var nestJsData = new NestJsTicketPurchasedDto(
+                EventId: Guid.NewGuid(),
+                UserId: order.UserId,
+                OrderId: order.Id.Value,
+                TotalAmount: (double)order.TotalAmount,
+                TicketAmount: (double)order.TotalAmount,
+                FoodAmount: 0.0,
+                EventType: "STANDARD",
+                PurchasedAt: DateTime.UtcNow,
+                UserEmail: user.Email,
+                UserName: $"{user.FirstName} {user.LastName}".Trim(),
+                MovieTitle: movieTitle,
+                SessionDate: sessionDate,
+                DownloadUrl: downloadUrl,
+                TotalPrice: (double)order.TotalAmount
+            );
+
+            var payload = new NestJsTicketPurchasedEvent("TicketPurchased", nestJsData);
+
+            logger.LogInformation("[OrderPaidIntegrationEventHandler] Sending RAW JSON to NestJS queue...");
+            await nestJsEndpoint.Send(payload, cancellationToken);
+            logger.LogInformation("[OrderPaidIntegrationEventHandler] Successfully sent RAW JSON to NestJS queue.");
+
             logger.LogInformation("[OrderPaidIntegrationEventHandler] SUCCESS! Message published to RabbitMQ for Order {OrderId}", order.Id);
         }
         catch (Exception ex)
