@@ -15,6 +15,7 @@ public class CreateOrderCommandHandler(
     ICurrentUserService currentUser,
     ISeatLockingService seatLockingService,
     IPaymentService paymentService,
+    ILoyaltyService loyaltyService,
     IApplicationDbContext context,
     IPublisher publisher,
     ILogger<CreateOrderCommandHandler> logger) : IRequestHandler<CreateOrderCommand, Result<Guid>>
@@ -33,7 +34,6 @@ public class CreateOrderCommandHandler(
         }
         
         var reservationResult = await reservationService.ReserveOrderAsync(userId.Value, request.SessionId, request.SeatIds, ct);
-        
         if (reservationResult.IsFailure)
             return reservationResult;
 
@@ -44,10 +44,25 @@ public class CreateOrderCommandHandler(
             .Select(o => o.TotalAmount)
             .FirstOrDefaultAsync(ct);
         
+        decimal amountToPay = orderAmount;
+        int pointsToDeduct = 0;
+
+        if (request.UseLoyaltyPoints) 
+        {
+            var (points, _) = await loyaltyService.GetUserLoyaltyAsync(userId.Value, ct);
+
+            if (points >= 75)
+            {
+                var maxAllowedDiscount = orderAmount * 0.5m;
+                pointsToDeduct = (int)Math.Min(points, maxAllowedDiscount);
+                amountToPay = orderAmount - pointsToDeduct; 
+            }
+        }
+
         PaymentResult paymentResult;
         try
         {
-            paymentResult = await paymentService.ProcessPaymentAsync(orderAmount, "UAH", request.PaymentToken, ct);
+            paymentResult = await paymentService.ProcessPaymentAsync(amountToPay, "UAH", request.PaymentToken, ct);
         }
         catch (Exception ex)
         {
@@ -57,7 +72,18 @@ public class CreateOrderCommandHandler(
         
         if (paymentResult.IsSuccess)
         {
-            return await ConfirmOrderAsync(orderId, paymentResult.TransactionId!, userId.Value, request.SessionId, request.SeatIds, ct);
+            if (pointsToDeduct > 0)
+            {
+                var idempotencyKey = Guid.NewGuid().ToString(); // Генеруємо ключ
+                var deductResult = await loyaltyService.DeductPointsAsync(userId.Value, pointsToDeduct, orderId, idempotencyKey, ct);
+                
+                if (!deductResult.Success)
+                {
+                    logger.LogCritical("CRITICAL: Failed to deduct {Points} points for Order {OrderId}. Error: {Error}", pointsToDeduct, orderId, deductResult.Error);
+                }
+            }
+
+            return await ConfirmOrderAsync(orderId, paymentResult.TransactionId!, userId.Value, request.SessionId, request.SeatIds, pointsToDeduct, ct);
         }
         else
         {
@@ -65,12 +91,17 @@ public class CreateOrderCommandHandler(
         }
     }
     
-    private async Task<Result<Guid>> ConfirmOrderAsync(Guid orderId, string transactionId, Guid userId, Guid sessionId, List<Guid> seatIds, CancellationToken ct)
+    private async Task<Result<Guid>> ConfirmOrderAsync(Guid orderId, string transactionId, Guid userId, Guid sessionId, List<Guid> seatIds, int pointsUsed, CancellationToken ct)
     {
         var order = await context.Orders.Include(o => o.Tickets).FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), ct);
         if (order == null) return Result.Failure<Guid>(new Error("Order.NotFound", "Order not found"));
 
         order.MarkAsPaid(transactionId);
+        if (pointsUsed > 0)
+        {
+            order.ApplyLoyaltyDiscount(pointsUsed);
+        }
+
         await context.SaveChangesAsync(ct);
         
         await publisher.Publish(new OrderPaidEvent(order), ct);
