@@ -13,8 +13,8 @@ using Pgvector;
 namespace Cinema.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260517132802_AddPointsUsedToOrder")]
-    partial class AddPointsUsedToOrder
+    [Migration("20260517145242_MakeExternalIdNullable")]
+    partial class MakeExternalIdNullable
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -133,7 +133,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("vector")
                         .HasColumnName("embedding");
 
-                    b.Property<int>("ExternalId")
+                    b.Property<int?>("ExternalId")
                         .HasColumnType("integer")
                         .HasColumnName("external_id");
 
@@ -175,7 +175,8 @@ namespace Cinema.Infrastructure.Migrations
 
                     b.HasIndex("ExternalId")
                         .IsUnique()
-                        .HasDatabaseName("ix_movies_external_id");
+                        .HasDatabaseName("ix_movies_external_id")
+                        .HasFilter("external_id IS NOT NULL");
 
                     b.ToTable("movies", (string)null);
                 });

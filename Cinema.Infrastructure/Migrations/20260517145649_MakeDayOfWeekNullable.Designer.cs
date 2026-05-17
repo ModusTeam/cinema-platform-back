@@ -6,14 +6,15 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Pgvector;
 
 #nullable disable
 
 namespace Cinema.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260130234836_AddRefreshTokenTable")]
-    partial class AddRefreshTokenTable
+    [Migration("20260517145649_MakeDayOfWeekNullable")]
+    partial class MakeDayOfWeekNullable
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -23,6 +24,7 @@ namespace Cinema.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "9.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("Cinema.Domain.Entities.Genre", b =>
@@ -31,7 +33,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<int>("ExternalId")
+                    b.Property<int?>("ExternalId")
                         .HasColumnType("integer")
                         .HasColumnName("external_id");
 
@@ -113,23 +115,49 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("BackdropUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("backdrop_url");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("description");
+
                     b.Property<int>("DurationMinutes")
                         .HasColumnType("integer")
                         .HasColumnName("duration_minutes");
 
-                    b.Property<int>("ExternalId")
+                    b.Property<Vector>("Embedding")
+                        .HasColumnType("vector")
+                        .HasColumnName("embedding");
+
+                    b.Property<int?>("ExternalId")
                         .HasColumnType("integer")
                         .HasColumnName("external_id");
 
-                    b.Property<string>("ImgUrl")
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("PosterUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
-                        .HasColumnName("img_url");
+                        .HasColumnName("poster_url");
 
                     b.Property<decimal>("Rating")
                         .HasPrecision(4, 2)
                         .HasColumnType("numeric(4,2)")
                         .HasColumnName("rating");
+
+                    b.Property<int>("ReleaseYear")
+                        .HasColumnType("integer")
+                        .HasColumnName("release_year");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -137,17 +165,18 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("title");
 
-                    b.Property<string>("VideoUrl")
+                    b.Property<string>("TrailerUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
-                        .HasColumnName("video_url");
+                        .HasColumnName("trailer_url");
 
                     b.HasKey("Id")
                         .HasName("pk_movies");
 
                     b.HasIndex("ExternalId")
                         .IsUnique()
-                        .HasDatabaseName("ix_movies_external_id");
+                        .HasDatabaseName("ix_movies_external_id")
+                        .HasFilter("external_id IS NOT NULL");
 
                     b.ToTable("movies", (string)null);
                 });
@@ -186,6 +215,10 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("payment_transaction_id");
 
+                    b.Property<int>("PointsUsed")
+                        .HasColumnType("integer")
+                        .HasColumnName("points_used");
+
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uuid")
                         .HasColumnName("session_id");
@@ -211,6 +244,9 @@ namespace Cinema.Infrastructure.Migrations
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_orders_user_id");
+
+                    b.HasIndex("Status", "BookingDate")
+                        .HasDatabaseName("ix_orders_status_booking_date");
 
                     b.ToTable("orders", (string)null);
                 });
@@ -239,7 +275,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<int>("DayOfWeek")
+                    b.Property<int?>("DayOfWeek")
                         .HasColumnType("integer")
                         .HasColumnName("day_of_week");
 
@@ -521,8 +557,10 @@ namespace Cinema.Infrastructure.Migrations
                     b.HasIndex("SeatId")
                         .HasDatabaseName("ix_tickets_seat_id");
 
-                    b.HasIndex("SessionId")
-                        .HasDatabaseName("ix_tickets_session_id");
+                    b.HasIndex("SessionId", "SeatId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tickets_session_id_seat_id")
+                        .HasFilter("ticket_status IN (0, 1)");
 
                     b.ToTable("tickets", (string)null);
                 });
@@ -799,6 +837,46 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Hall");
 
                     b.Navigation("Technology");
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.Movie", b =>
+                {
+                    b.OwnsMany("Cinema.Domain.Entities.MovieCastMember", "Cast", b1 =>
+                        {
+                            b1.Property<Guid>("MovieId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("integer");
+
+                            b1.Property<int>("ExternalId")
+                                .HasColumnType("integer");
+
+                            b1.Property<string>("Name")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("PhotoUrl")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Role")
+                                .HasColumnType("text");
+
+                            b1.HasKey("MovieId", "__synthesizedOrdinal");
+
+                            b1.ToTable("movies");
+
+                            b1
+                                .ToJson("cast")
+                                .HasColumnType("jsonb");
+
+                            b1.WithOwner()
+                                .HasForeignKey("MovieId")
+                                .HasConstraintName("fk_movies_movies_movie_id");
+                        });
+
+                    b.Navigation("Cast");
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.MovieGenre", b =>

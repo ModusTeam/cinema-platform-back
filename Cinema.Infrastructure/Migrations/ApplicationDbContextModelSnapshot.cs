@@ -130,7 +130,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("vector")
                         .HasColumnName("embedding");
 
-                    b.Property<int>("ExternalId")
+                    b.Property<int?>("ExternalId")
                         .HasColumnType("integer")
                         .HasColumnName("external_id");
 
@@ -172,7 +172,8 @@ namespace Cinema.Infrastructure.Migrations
 
                     b.HasIndex("ExternalId")
                         .IsUnique()
-                        .HasDatabaseName("ix_movies_external_id");
+                        .HasDatabaseName("ix_movies_external_id")
+                        .HasFilter("external_id IS NOT NULL");
 
                     b.ToTable("movies", (string)null);
                 });
@@ -271,7 +272,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<int>("DayOfWeek")
+                    b.Property<int?>("DayOfWeek")
                         .HasColumnType("integer")
                         .HasColumnName("day_of_week");
 

@@ -13,8 +13,8 @@ using Pgvector;
 namespace Cinema.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260513155054_SyncIdentitySnapshot")]
-    partial class SyncIdentitySnapshot
+    [Migration("20260517144644_AddMovieCastJsonColumn")]
+    partial class AddMovieCastJsonColumn
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -213,6 +213,10 @@ namespace Cinema.Infrastructure.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
                         .HasColumnName("payment_transaction_id");
+
+                    b.Property<int>("PointsUsed")
+                        .HasColumnType("integer")
+                        .HasColumnName("points_used");
 
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uuid")

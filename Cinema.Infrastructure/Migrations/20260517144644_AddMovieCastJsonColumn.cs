@@ -1,17 +1,21 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Pgvector;
 
 #nullable disable
 
 namespace Cinema.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class AddMovieCastJsonColumn : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AlterDatabase()
+                .Annotation("Npgsql:PostgresExtension:vector", ",,");
+
             migrationBuilder.CreateTable(
                 name: "AspNetRoles",
                 columns: table => new
@@ -58,7 +62,7 @@ namespace Cinema.Infrastructure.Migrations
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
-                    external_id = table.Column<int>(type: "integer", nullable: false),
+                    external_id = table.Column<int>(type: "integer", nullable: true),
                     name = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     slug = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true)
                 },
@@ -86,12 +90,19 @@ namespace Cinema.Infrastructure.Migrations
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
-                    title = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                     external_id = table.Column<int>(type: "integer", nullable: false),
+                    title = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    description = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
                     duration_minutes = table.Column<int>(type: "integer", nullable: false),
                     rating = table.Column<decimal>(type: "numeric(4,2)", precision: 4, scale: 2, nullable: false),
-                    img_url = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
-                    video_url = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true)
+                    release_year = table.Column<int>(type: "integer", nullable: false),
+                    poster_url = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
+                    backdrop_url = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
+                    trailer_url = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
+                    status = table.Column<int>(type: "integer", nullable: false),
+                    is_deleted = table.Column<bool>(type: "boolean", nullable: false),
+                    embedding = table.Column<Vector>(type: "vector", nullable: true),
+                    cast = table.Column<string>(type: "jsonb", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -236,6 +247,27 @@ namespace Cinema.Infrastructure.Migrations
                     table.PrimaryKey("pk_asp_net_user_tokens", x => new { x.user_id, x.login_provider, x.name });
                     table.ForeignKey(
                         name: "fk_asp_net_user_tokens_asp_net_users_user_id",
+                        column: x => x.user_id,
+                        principalTable: "AspNetUsers",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "refresh_tokens",
+                columns: table => new
+                {
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    token = table.Column<string>(type: "text", nullable: false),
+                    expiry_date = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    is_revoked = table.Column<bool>(type: "boolean", nullable: false),
+                    user_id = table.Column<Guid>(type: "uuid", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_refresh_tokens", x => x.id);
+                    table.ForeignKey(
+                        name: "fk_refresh_tokens_users_user_id",
                         column: x => x.user_id,
                         principalTable: "AspNetUsers",
                         principalColumn: "id",
@@ -394,7 +426,8 @@ namespace Cinema.Infrastructure.Migrations
                     status = table.Column<int>(type: "integer", nullable: false),
                     payment_transaction_id = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     user_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    session_id = table.Column<Guid>(type: "uuid", nullable: false)
+                    session_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    points_used = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -529,6 +562,12 @@ namespace Cinema.Infrastructure.Migrations
                 column: "technology_id");
 
             migrationBuilder.CreateIndex(
+                name: "ix_halls_name",
+                table: "halls",
+                column: "name",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "ix_movie_genres_genre_id",
                 table: "movie_genres",
                 column: "genre_id");
@@ -545,6 +584,11 @@ namespace Cinema.Infrastructure.Migrations
                 column: "session_id");
 
             migrationBuilder.CreateIndex(
+                name: "ix_orders_status_booking_date",
+                table: "orders",
+                columns: new[] { "status", "booking_date" });
+
+            migrationBuilder.CreateIndex(
                 name: "ix_orders_user_id",
                 table: "orders",
                 column: "user_id");
@@ -558,6 +602,11 @@ namespace Cinema.Infrastructure.Migrations
                 name: "ix_pricing_items_seat_type_id",
                 table: "pricing_items",
                 column: "seat_type_id");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_refresh_tokens_user_id",
+                table: "refresh_tokens",
+                column: "user_id");
 
             migrationBuilder.CreateIndex(
                 name: "ix_seat_locks_seat_id",
@@ -585,9 +634,9 @@ namespace Cinema.Infrastructure.Migrations
                 column: "seat_type_id");
 
             migrationBuilder.CreateIndex(
-                name: "ix_sessions_hall_id",
+                name: "IX_Sessions_Hall_Time_Overlap",
                 table: "sessions",
-                column: "hall_id");
+                columns: new[] { "hall_id", "start_time", "end_time" });
 
             migrationBuilder.CreateIndex(
                 name: "ix_sessions_movie_id",
@@ -610,9 +659,11 @@ namespace Cinema.Infrastructure.Migrations
                 column: "seat_id");
 
             migrationBuilder.CreateIndex(
-                name: "ix_tickets_session_id",
+                name: "ix_tickets_session_id_seat_id",
                 table: "tickets",
-                column: "session_id");
+                columns: new[] { "session_id", "seat_id" },
+                unique: true,
+                filter: "ticket_status IN (0, 1)");
         }
 
         /// <inheritdoc />
@@ -641,6 +692,9 @@ namespace Cinema.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "pricing_items");
+
+            migrationBuilder.DropTable(
+                name: "refresh_tokens");
 
             migrationBuilder.DropTable(
                 name: "seat_locks");
