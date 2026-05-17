@@ -20,7 +20,7 @@ public class PricingItemConfiguration : IEntityTypeConfiguration<PricingItem>
             .HasPrecision(18, 2);
 
         builder.Property(x => x.DayOfWeek)
-            .IsRequired()
+            .IsRequired(false)
             .HasConversion<int>();
 
         builder.Property(x => x.StartTime)
