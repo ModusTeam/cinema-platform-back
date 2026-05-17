@@ -39,7 +39,8 @@ public static class DependencyInjection
                     .AllowCredentials();
             });
         });
-        
+
+
         services.AddOutputCache(options =>
         {
             options.AddBasePolicy(builder => builder.Expire(TimeSpan.FromSeconds(60)));
