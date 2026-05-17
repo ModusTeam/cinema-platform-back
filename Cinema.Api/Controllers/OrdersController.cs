@@ -14,12 +14,13 @@ public class OrdersController : ApiController
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateOrderRequest request)
     {
-        var command = new CreateOrderCommand(
-            request.SessionId, 
-            request.SeatIds, 
-            request.PaymentToken, 
-            Guid.NewGuid()
-        );
+        var command = new CreateOrderCommand
+        {
+            SessionId = request.SessionId, 
+            SeatIds = request.SeatIds, 
+            PaymentToken = request.PaymentToken, 
+            UseLoyaltyPoints = request.UseLoyaltyPoints
+        };
         
         var result = await Mediator.Send(command);
         return HandleResult(result);
@@ -49,4 +50,4 @@ public class OrdersController : ApiController
     }
 }
 
-public record CreateOrderRequest(Guid SessionId, List<Guid> SeatIds, string PaymentToken);
+public record CreateOrderRequest(Guid SessionId, List<Guid> SeatIds, string PaymentToken, bool UseLoyaltyPoints);
