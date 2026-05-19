@@ -1,24 +1,45 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Infrastructure.Grpc.Loyalty;
+using Grpc.Core; 
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Cinema.Infrastructure.Services;
 
-public class GrpcLoyaltyService(
-    LoyaltyService.LoyaltyServiceClient client, 
-    ILogger<GrpcLoyaltyService> logger) : ILoyaltyService
+public class GrpcLoyaltyService : ILoyaltyService
 {
+    private readonly LoyaltyService.LoyaltyServiceClient _client;
+    private readonly ILogger<GrpcLoyaltyService> _logger;
+    private readonly string _apiKey;
+
+    public GrpcLoyaltyService(
+        LoyaltyService.LoyaltyServiceClient client, 
+        ILogger<GrpcLoyaltyService> logger,
+        IConfiguration config)
+    {
+        _client = client;
+        _logger = logger;
+        _apiKey = config["InternalServices:ApiKey"] 
+                  ?? throw new InvalidOperationException("InternalServices:ApiKey is not configured");
+    }
+
+    private Metadata BuildMetadata() => new()
+    {
+        { "x-api-key", _apiKey }
+    };
+
     public async Task<(int Points, string Tier)> GetUserLoyaltyAsync(Guid userId, CancellationToken ct = default)
     {
         try
         {
             var request = new GetBalanceRequest { UserId = userId.ToString() };
-            var response = await client.GetBalanceAsync(request, cancellationToken: ct);
+            
+            var response = await _client.GetBalanceAsync(request, headers: BuildMetadata(), cancellationToken: ct);
             return (response.Balance, response.Tier.ToString());
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to fetch loyalty for user {UserId}. Defaulting to 0/BRONZE.", userId);
+            _logger.LogWarning(ex, "Failed to fetch loyalty for user {UserId}. Defaulting to 0/BRONZE.", userId);
             return (0, "BRONZE");
         }
     }
@@ -36,12 +57,12 @@ public class GrpcLoyaltyService(
                 IdempotencyKey = idempotencyKey
             };
             
-            var response = await client.DeductPointsAsync(request, cancellationToken: ct);
+            var response = await _client.DeductPointsAsync(request, headers: BuildMetadata(), cancellationToken: ct);
             return (response.Success, response.BalanceAfter, response.ErrorMessage);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "gRPC DeductPoints failed for user {UserId}", userId);
+            _logger.LogError(ex, "gRPC DeductPoints failed for user {UserId}", userId);
             return (false, 0, "Internal Loyalty Service Error");
         }
     }
@@ -56,12 +77,12 @@ public class GrpcLoyaltyService(
                 OrderId = orderId.ToString()
             };
             
-            var response = await client.UseGoldUpgradeAsync(request, cancellationToken: ct);
+            var response = await _client.UseGoldUpgradeAsync(request, headers: BuildMetadata(), cancellationToken: ct);
             return (response.Success, response.ErrorMessage);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "gRPC UseGoldUpgrade failed for user {UserId}", userId);
+            _logger.LogError(ex, "gRPC UseGoldUpgrade failed for user {UserId}", userId);
             return (false, "Internal Loyalty Service Error");
         }
     }
