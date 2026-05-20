@@ -11,6 +11,56 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ─── ДІАГНОСТИКА ───────────────────────────────────────────────
+      - name: "[DEBUG] Show runner info"
+        run: |
+          echo "=========================================="
+          echo "Runner IP (IPv4):"
+          curl -s https://api.ipify.org
+          echo ""
+          echo "Runner OS: $(uname -a)"
+          echo "=========================================="
+
+      - name: "[DEBUG] Test TCP port 22"
+        run: |
+          echo "=========================================="
+          echo "Target host: ${{ secrets.HOST }}"
+          echo "Testing port 22 with nc (timeout 10s)..."
+          nc -zv -w 10 ${{ secrets.HOST }} 22 \
+            && echo "✅ PORT 22 IS OPEN" \
+            || echo "❌ PORT 22 IS CLOSED OR TIMEOUT"
+          echo "=========================================="
+
+      - name: "[DEBUG] Validate SSH key format"
+        run: |
+          echo "=========================================="
+          echo "Checking SSH key format..."
+          echo "${{ secrets.SSH_KEY }}" > /tmp/test_key
+          chmod 600 /tmp/test_key
+          ssh-keygen -l -f /tmp/test_key \
+            && echo "✅ SSH key is VALID" \
+            || echo "❌ SSH key is INVALID or wrong format"
+          rm -f /tmp/test_key
+          echo "=========================================="
+
+      - name: "[DEBUG] Test SSH handshake (verbose)"
+        run: |
+          echo "=========================================="
+          echo "Testing SSH connection with verbose output..."
+          echo "${{ secrets.SSH_KEY }}" > /tmp/test_key
+          chmod 600 /tmp/test_key
+          ssh -vvv \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=15 \
+            -o BatchMode=yes \
+            -i /tmp/test_key \
+            ${{ secrets.USERNAME }}@${{ secrets.HOST }} \
+            "echo '✅ SSH CONNECTION SUCCESSFUL'" \
+            2>&1 | head -50
+          rm -f /tmp/test_key
+          echo "=========================================="
+
+      # ─── ДЕПЛОЙ ────────────────────────────────────────────────────
       - name: Copy files via SSH
         uses: appleboy/scp-action@v0.1.4
         with:
@@ -28,5 +78,5 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd /root/cinema-platform
-            docker compose up -d --build cinema-api
+            docker compose up -d --build cinema-api # <--- Контейнер .NET
             docker image prune -f
