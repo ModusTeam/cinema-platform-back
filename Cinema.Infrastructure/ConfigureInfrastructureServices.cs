@@ -165,6 +165,8 @@ public static class ConfigureInfrastructureServices
 
             x.AddConsumer<TierUpgradedConsumer>();
 
+            x.AddConsumer<PointsExpiringConsumer>();
+
             x.UsingRabbitMq((context, cfg) =>
             {
                 var rabbitHost = configuration["RabbitMq:Host"];
@@ -183,6 +185,13 @@ public static class ConfigureInfrastructureServices
                     // {
                     //     s.Protocol = System.Security.Authentication.SslProtocols.Tls12;
                     // });
+                });
+
+                cfg.ReceiveEndpoint("loyalty.events", e =>
+                {
+                    e.ClearSerialization();
+                    e.UseRawJsonSerializer(); 
+                    e.ConfigureConsumer<PointsExpiringConsumer>(context);
                 });
 
                 cfg.UseRawJsonSerializer();
