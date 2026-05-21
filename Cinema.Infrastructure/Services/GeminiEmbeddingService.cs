@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Refit;
 using Cinema.Domain.Common;
+using Microsoft.EntityFrameworkCore;
 
 namespace Cinema.Infrastructure.Services;
 
@@ -35,7 +36,7 @@ public class GeminiEmbeddingService(
                 }
             };
             
-            var response = await geminiApi.GenerateEmbeddingAsync(_settings.ApiKey, request);
+            var response = await geminiApi.GenerateEmbeddingAsync(_settings.EmbeddingModelId, _settings.ApiKey, request);
 
             if (response?.Embedding?.Values == null || response.Embedding.Values.Length == 0)
             {
@@ -62,14 +63,17 @@ public class GeminiEmbeddingService(
         using var scope = scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-        var movie = await context.Movies.FindAsync([new EntityId<Movie>(movieId)], ct);
+        var movie = await context.Movies
+            .Include(m => m.MovieGenres)
+                .ThenInclude(mg => mg.Genre)
+            .FirstOrDefaultAsync(m => m.Id == new EntityId<Movie>(movieId), ct);
         if (movie == null)
         {
             logger.LogWarning("Movie with ID {MovieId} not found for embedding update.", movieId);
             return;
         }
         
-        var textToEmbed = $"{movie.Title}. {movie.Description}. Genres: {string.Join(", ", movie.MovieGenres.Select(mg => mg.Genre.Name))}";
+        var textToEmbed = $"{movie.Title}. {movie.Description}. Genres: {string.Join(", ", movie.MovieGenres.Where(mg => mg.Genre != null).Select(mg => mg.Genre!.Name))}";
 
         var embeddingResult = await GenerateEmbeddingAsync(textToEmbed, ct);
 
