@@ -20,13 +20,13 @@ public class OrderMappingConfig : IRegister
 
             .Map(dest => dest.Price, src => src.PriceSnapshot)
             .Map(dest => dest.Status, src => src.TicketStatus.ToString())
-            .Map(dest => dest.MovieTitle, src => src.Session.Movie.Title)
-            .Map(dest => dest.PosterUrl, src => src.Session.Movie.PosterUrl)
-            .Map(dest => dest.SessionStart, src => src.Session.StartTime)
-            .Map(dest => dest.HallName, src => src.Session.Hall.Name)
-            .Map(dest => dest.RowLabel, src => src.Seat.RowLabel)
-            .Map(dest => dest.SeatNumber, src => src.Seat.Number)
-            .Map(dest => dest.SeatType, src => src.Seat.SeatType.Name)
+            .Map(dest => dest.MovieTitle, src => src.Session != null && src.Session.Movie != null ? src.Session.Movie.Title : string.Empty)
+            .Map(dest => dest.PosterUrl, src => src.Session != null && src.Session.Movie != null ? src.Session.Movie.PosterUrl : null)
+            .Map(dest => dest.SessionStart, src => src.Session != null ? src.Session.StartTime : default)
+            .Map(dest => dest.HallName, src => src.Session != null && src.Session.Hall != null ? src.Session.Hall.Name : string.Empty)
+            .Map(dest => dest.RowLabel, src => src.Seat != null ? src.Seat.RowLabel : string.Empty)
+            .Map(dest => dest.SeatNumber, src => src.Seat != null ? src.Seat.Number : 0)
+            .Map(dest => dest.SeatType, src => src.Seat != null && src.Seat.SeatType != null ? src.Seat.SeatType.Name : string.Empty)
             .Map(dest => dest.SecretCode, src => src.Id.Value.ToString().Substring(0, 8).ToUpper());
     }
 }
