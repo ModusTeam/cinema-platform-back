@@ -13,6 +13,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cinema_local_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   cinema-redis:
     image: redis:alpine
@@ -46,6 +51,28 @@ services:
       - "5433:5432"
     volumes:
       - loyalty_pg_data:/var/lib/postgresql/data
+
+  # === СЕРВІС СІДИНГУ ===
+  cinema-seeder:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    container_name: cinema-seeder
+    restart: "no"
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - SEED__RUN=true
+      - SEED__MODE=true
+      - ConnectionStrings__DefaultConnection=Host=cinema-db;Port=5432;Database=cinema_local_db;Username=postgres;Password=postgres_password
+      - ConnectionStrings__RedisConnection=cinema-redis:6379,password=redis_password
+      - RabbitMQ__Host=cinema-rabbitmq
+      - SEED_ADMIN__EMAIL=admin@cinema.com
+      - SEED_ADMIN__PASSWORD=Admin123!
+    entrypoint: ["dotnet", "run", "--project", "Cinema.Api", "--", "--seed"]
+    depends_on:
+      cinema-db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
