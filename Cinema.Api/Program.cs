@@ -12,36 +12,12 @@ builder.Services.AddWebServices(builder.Configuration);
 
 var app = builder.Build();
 
-// Seed mode detection (either via CLI argument '--seed' or SEED__MODE environment variable)
-var isSeedMode = args.Contains("--seed") || 
-                 string.Equals(app.Configuration["SEED__MODE"], "true", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(app.Configuration["Seed__Mode"], "true", StringComparison.OrdinalIgnoreCase);
-
-if (isSeedMode)
-{
-    using (var scope = app.Services.CreateScope())
-    {
-        var sp = scope.ServiceProvider;
-        var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("SeederCommandLine");
-        try
-        {
-            logger.LogInformation("CLI/Env seed mode detected. Running identity seeding...");
-            await Cinema.Infrastructure.Seed.IdentitySeeder.SeedAsync(sp, app.Configuration, logger);
-            logger.LogInformation("Identity seeding completed successfully.");
-            Environment.Exit(0);
-        }
-        catch (Exception ex)
-        {
-            logger.LogCritical(ex, "An error occurred during CLI/Env identity seeding.");
-            Environment.Exit(1);
-        }
-    }
-}
-
 if (app.Environment.IsDevelopment())
 {
     await app.InitialiseDatabaseAsync();
 }
+
+await app.SeedIdentityIfEnabledAsync();
 
 app.UseExceptionHandler();
 app.UseSerilogRequestLogging();
