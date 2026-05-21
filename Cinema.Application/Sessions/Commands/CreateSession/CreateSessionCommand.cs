@@ -7,5 +7,6 @@ public record CreateSessionCommand(
     Guid MovieId,
     Guid HallId,
     Guid PricingId,
-    DateTime StartTime
+    DateTime StartTime,
+    bool IsLoyaltyPaymentAllowed = true
 ) : IRequest<Result<Guid>>;
