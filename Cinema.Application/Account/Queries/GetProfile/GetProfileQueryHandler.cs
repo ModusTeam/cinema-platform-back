@@ -29,6 +29,7 @@ public class GetProfileQueryHandler(
             user.Email!,
             user.FirstName ?? string.Empty,
             user.LastName ?? string.Empty,
+            user.DateOfBirth,
             points,
             tier
         ));
