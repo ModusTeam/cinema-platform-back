@@ -1,3 +1,4 @@
+using Cinema.Application.Common.Constants;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
@@ -58,7 +59,7 @@ public class ApplicationDbContextInitializer
     public async Task TrySeedAsync()
     {
         // 1. Roles
-        var roles = new[] { "Admin", "User" };
+        var roles = new[] { Roles.Admin, Roles.User };
         foreach (var role in roles)
         {
             if (!await _roleManager.RoleExistsAsync(role))
@@ -88,7 +89,7 @@ public class ApplicationDbContextInitializer
 
             if (result.Succeeded)
             {
-                await _userManager.AddToRoleAsync(admin, "Admin");
+                await _userManager.AddToRoleAsync(admin, Roles.Admin);
             }
             else
             {

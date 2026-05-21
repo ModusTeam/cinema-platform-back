@@ -1,3 +1,4 @@
+using Cinema.Application.Common.Constants;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
@@ -30,7 +31,7 @@ public class IdentityService(
             return Result.Failure<Guid>(new Error("Identity.RegisterFailed", errors));
         }
 
-        await userManager.AddToRoleAsync(user, "User");
+        await userManager.AddToRoleAsync(user, Roles.User);
 
         return Result.Success(user.Id);
     }

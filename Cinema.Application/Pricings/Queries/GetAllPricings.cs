@@ -16,10 +16,11 @@ public class GetAllPricingsQueryHandler(IApplicationDbContext context)
     {
         var pricings = await context.Pricings
             .AsNoTracking()
+            .Include(p => p.PricingItems!)
+                .ThenInclude(pi => pi.SeatType)
             .OrderBy(p => p.Name)
-            .ProjectToType<PricingDetailsDto>()
             .ToListAsync(ct);
 
-        return Result.Success(pricings);
+        return Result.Success(pricings.Adapt<List<PricingDetailsDto>>());
     }
 }

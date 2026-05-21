@@ -1,3 +1,4 @@
+using Cinema.Application.Common.Constants;
 using Cinema.Domain.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
@@ -13,7 +14,7 @@ public static class IdentitySeeder
         var roleManager = sp.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
         var userManager = sp.GetRequiredService<UserManager<User>>();
 
-        string[] roles = ["User", "Admin"];
+        string[] roles = [Roles.User, Roles.Admin];
         foreach (var roleName in roles)
         {
             if (!await roleManager.RoleExistsAsync(roleName))
@@ -58,9 +59,9 @@ public static class IdentitySeeder
             }
         }
 
-        if (!await userManager.IsInRoleAsync(adminUser, "Admin"))
+        if (!await userManager.IsInRoleAsync(adminUser, Roles.Admin))
         {
-            var roleResult = await userManager.AddToRoleAsync(adminUser, "Admin");
+            var roleResult = await userManager.AddToRoleAsync(adminUser, Roles.Admin);
             if (!roleResult.Succeeded)
             {
                 var errors = string.Join(", ", roleResult.Errors.Select(e => e.Description));
