@@ -2,7 +2,7 @@ namespace Cinema.Application.Common.Settings;
 
 public class TmdbSettings
 {
-    public const string SectionName = "Tmdb";
+    public const string SectionName = "TmdbSettings";
     public string BaseUrl { get; set; } = "https://api.themoviedb.org"; 
     
     public string ApiKey { get; set; } = string.Empty;
