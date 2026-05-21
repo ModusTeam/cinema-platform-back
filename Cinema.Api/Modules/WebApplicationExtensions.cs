@@ -24,8 +24,6 @@ public static class WebApplicationExtensions
 
             await initialiser.InitialiseAsync();
             await initialiser.SeedAsync();
-
-            await app.SeedIdentityAsync(scope.ServiceProvider);
         }
         catch (Exception ex)
         {
@@ -34,10 +32,30 @@ public static class WebApplicationExtensions
         }
     }
 
-    public static async Task SeedIdentityAsync(this WebApplication app, IServiceProvider sp)
+    public static async Task SeedIdentityIfEnabledAsync(this WebApplication app)
     {
-        var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("IdentitySeeder");
+        var enabledStr = app.Configuration["SeedIdentity:Enabled"] 
+                         ?? Environment.GetEnvironmentVariable("SeedIdentity__Enabled")
+                         ?? Environment.GetEnvironmentVariable("SEED_IDENTITY__ENABLED");
+                         
+        if (!string.Equals(enabledStr, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
 
-        await IdentitySeeder.SeedAsync(sp, app.Configuration, logger);
+        using var scope = app.Services.CreateScope();
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("IdentitySeeder");
+
+        try
+        {
+            logger.LogInformation("Identity seeding enabled, starting...");
+            await IdentitySeeder.SeedAsync(scope.ServiceProvider, app.Configuration, logger);
+            logger.LogInformation("Identity seeding completed.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An error occurred during identity seeding.");
+            throw;
+        }
     }
 }
