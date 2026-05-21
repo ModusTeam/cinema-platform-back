@@ -1,5 +1,6 @@
 using Cinema.Api.Hubs;
 using Cinema.Infrastructure.Persistence;
+using Cinema.Infrastructure.Seed;
 
 namespace Cinema.Api.Modules;
 
@@ -13,19 +14,30 @@ public static class WebApplicationExtensions
 
     public static async Task InitialiseDatabaseAsync(this WebApplication app)
     {
-        if (!app.Environment.IsDevelopment()) return;
-
         using var scope = app.Services.CreateScope();
-        try 
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("DatabaseInitialisation");
+
+        try
         {
             var initialiser = scope.ServiceProvider.GetRequiredService<ApplicationDbContextInitializer>();
+
             await initialiser.InitialiseAsync();
             await initialiser.SeedAsync();
+
+            await app.SeedIdentityAsync(scope.ServiceProvider);
         }
         catch (Exception ex)
         {
-            var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-            logger.LogError(ex, "An error occurred during database initialisation.");
+            logger.LogError(ex, "An error occurred during database initialisation/seeding.");
+            throw;
         }
+    }
+
+    public static async Task SeedIdentityAsync(this WebApplication app, IServiceProvider sp)
+    {
+        var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("IdentitySeeder");
+
+        await IdentitySeeder.SeedAsync(sp, app.Configuration, logger);
     }
 }
