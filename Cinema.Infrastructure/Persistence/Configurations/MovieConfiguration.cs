@@ -25,6 +25,7 @@ public class MovieConfiguration : IEntityTypeConfiguration<Movie>
         builder.Property(x => x.PosterUrl).IsRequired(false).HasMaxLength(500);
         builder.Property(x => x.BackdropUrl).IsRequired(false).HasMaxLength(500);
         builder.Property(x => x.TrailerUrl).IsRequired(false).HasMaxLength(500);
+        builder.Property(x => x.AgeRestriction).IsRequired(false).HasMaxLength(10);
         
         builder.OwnsMany(m => m.Cast, a =>
         {
