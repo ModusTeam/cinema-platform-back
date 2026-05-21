@@ -18,7 +18,8 @@ public class SessionSchedulingService(
         EntityId<Pricing> pricingId,
         DateTime startTime,
         int cleaningTimeMinutes,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool isLoyaltyPaymentAllowed = true)
     {
         var durationMinutes = await movieProvider.GetDurationMinutesAsync(movieId, ct);
         if (durationMinutes == null)
@@ -35,7 +36,8 @@ public class SessionSchedulingService(
             occupyEndTime,
             movieId,
             hallId,
-            pricingId
+            pricingId,
+            isLoyaltyPaymentAllowed
         );
     }
 
