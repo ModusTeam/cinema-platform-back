@@ -42,7 +42,10 @@ public class ImportMovieCommandHandler(
             try
             {
                 var movie = MapToMovie(details);
-                movie.SetAgeRestriction(ExtractAgeRestriction(details));
+                var ageRestriction = !string.IsNullOrWhiteSpace(request.AgeRestrictionOverride)
+                    ? request.AgeRestrictionOverride
+                    : ExtractAgeRestriction(details);
+                movie.SetAgeRestriction(ageRestriction);
 
                 await SyncGenresAsync(movie, details.Genres, ct);
                 context.Movies.Add(movie);
@@ -138,14 +141,17 @@ public class ImportMovieCommandHandler(
         if (tmdbGenres is not { Count: > 0 }) return;
 
         var tmdbGenreIds = tmdbGenres.Select(g => g.Id).ToList();
+        var tmdbGenreNames = tmdbGenres.Select(g => g.Name.ToLower()).ToList();
 
         var existingGenres = await context.Genres
-            .Where(g => g.ExternalId != null && tmdbGenreIds.Contains(g.ExternalId.Value))
+            .Where(g => (g.ExternalId != null && tmdbGenreIds.Contains(g.ExternalId.Value))
+                        || tmdbGenreNames.Contains(g.Name.ToLower()))
             .ToListAsync(ct);
 
         foreach (var tmdbGenre in tmdbGenres)
         {
-            var genre = existingGenres.FirstOrDefault(g => g.ExternalId == tmdbGenre.Id);
+            var genre = existingGenres.FirstOrDefault(g => g.ExternalId == tmdbGenre.Id)
+                        ?? existingGenres.FirstOrDefault(g => string.Equals(g.Name, tmdbGenre.Name, StringComparison.OrdinalIgnoreCase));
 
             if (genre is null)
             {
