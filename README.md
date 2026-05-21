@@ -391,6 +391,39 @@ The `docker-compose.yaml` includes:
 - `SMTP_PASSWORD` — SMTP password
 - `SMTP_SENDER_EMAIL` — Sender email address
 
+## 🔄 Database Migrations & Seeding in Production
+
+In Production (`ASPNETCORE_ENVIRONMENT=Production`), database migrations and identity seeding are not executed automatically on API startup to ensure zero-downtime and safe deployment practices. Instead, they are run as separate steps:
+
+### 1. Database Migrations (cinema-migrator)
+Migrations are run using a separate container (e.g. `cinema-migrator`) that executes `dotnet ef database update`.
+
+### 2. Database Seeding (cinema-seeder)
+Seeding of default Identity roles (`Admin`, `User`) and the default admin user is executed via a separate one-off job container `cinema-seeder`.
+
+#### Configuration / Environment Variables
+The seeder is controlled by the following environment variables (which can be defined in your `.env` file):
+
+- `SEED__RUN` (bool) — Enables/disables execution of the seeder. Defaults to `true` in Development and `false` in Production. It must be explicitly set to `true` in Production for seeding to run.
+- `SEED__MODE` (bool) — Sets the API into CLI seeding mode. If `true` or the command line flag `--seed` is passed, the API runs seeding and exits immediately with code 0 (or 1 on error).
+- `SEED_ADMIN__EMAIL` (string) — The email address of the default Admin user to create.
+- `SEED_ADMIN__PASSWORD` (string) — The password for the default Admin user.
+- `SEED_ADMIN__FIRSTNAME` (string, optional) — First name of the Admin user (defaults to `System`).
+- `SEED_ADMIN__LASTNAME` (string, optional) — Last name of the Admin user (defaults to `Admin`).
+
+#### Running with Docker Compose
+You can run the seeding process using the `cinema-seeder` service defined in `docker-compose.yaml`:
+
+```bash
+# Start the seeder manually (it will wait for the database and exit once done)
+docker compose run --rm cinema-seeder
+```
+
+Or pass variables explicitly if you want to override them:
+```bash
+docker compose run --rm -e SEED_ADMIN__EMAIL=admin@example.com -e SEED_ADMIN__PASSWORD=SecretPassword123! cinema-seeder
+```
+
 ---
 
 ## 📧 Email Configuration
