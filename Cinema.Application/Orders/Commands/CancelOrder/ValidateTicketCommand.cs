@@ -18,7 +18,7 @@ public class ValidateTicketCommandHandler(IApplicationDbContext context)
         var ticketId = new EntityId<Ticket>(request.TicketId);
 
         var ticket = await context.Tickets
-            .Include(t => t.Session)
+            .Include(t => t.Session!)
             .ThenInclude(s => s.Hall)
             .FirstOrDefaultAsync(t => t.Id == ticketId, ct);
 

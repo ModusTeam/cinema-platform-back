@@ -20,7 +20,7 @@ public class GetPricingByIdQueryHandler(IApplicationDbContext context)
 
         var pricing = await context.Pricings
             .AsNoTracking()
-            .Include(p => p.PricingItems)
+            .Include(p => p.PricingItems!)
             .ThenInclude(pi => pi.SeatType)
             .FirstOrDefaultAsync(p => p.Id == pricingId, ct);
 
@@ -29,13 +29,7 @@ public class GetPricingByIdQueryHandler(IApplicationDbContext context)
             return Result.Failure<PricingDetailsDto>(new Error("Pricing.NotFound", "Pricing not found"));
         }
 
-        var config = TypeAdapterConfig.GlobalSettings.Fork(c => 
-        {
-            c.NewConfig<Pricing, PricingDetailsDto>()
-                .Map(dest => dest.Items, src => src.PricingItems);
-        });
-
-        var dto = pricing.Adapt<PricingDetailsDto>(config);
+        var dto = pricing.Adapt<PricingDetailsDto>();
 
         return Result.Success(dto);
     }
