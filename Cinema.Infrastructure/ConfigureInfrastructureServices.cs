@@ -59,8 +59,8 @@ public static class ConfigureInfrastructureServices
         });
 
         services.AddSignalR()
-            .AddStackExchangeRedis(configuration.GetConnectionString("RedisConnection"), options => {
-                options.Configuration.ChannelPrefix = "CinemaPlatform";
+            .AddStackExchangeRedis(redisConnectionString ?? string.Empty, options => {
+                options.Configuration.ChannelPrefix = RedisChannel.Literal("CinemaPlatform");
             });
         
         services.AddStackExchangeRedisCache(options =>
@@ -178,8 +178,8 @@ public static class ConfigureInfrastructureServices
 
                 cfg.Host(rabbitHost, 5672, rabbitVHost ?? "/", h =>
                 {
-                    h.Username(rabbitUser);
-                    h.Password(rabbitPass);
+                    h.Username(rabbitUser ?? string.Empty);
+                    h.Password(rabbitPass ?? string.Empty);
 
                     // h.UseSsl(s =>
                     // {
@@ -223,10 +223,13 @@ public static class ConfigureInfrastructureServices
         return services;
     }
 
-private static IServiceCollection AddExternalServices(this IServiceCollection services, IConfiguration configuration)
+    private static IServiceCollection AddExternalServices(this IServiceCollection services, IConfiguration configuration)
     {
         // 1. TMDB Service (Refit)
-        services.Configure<TmdbSettings>(configuration.GetSection(TmdbSettings.SectionName));
+        services.AddOptions<TmdbSettings>()
+            .Bind(configuration.GetSection(TmdbSettings.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         
         var tmdbRefitSettings = new RefitSettings
         {
@@ -242,11 +245,7 @@ private static IServiceCollection AddExternalServices(this IServiceCollection se
             .ConfigureHttpClient((sp, client) =>
             {
                 var settings = sp.GetRequiredService<IOptions<TmdbSettings>>().Value;
-                
-                if (!string.IsNullOrEmpty(settings.BaseUrl))
-                {
-                    client.BaseAddress = new Uri(settings.BaseUrl);
-                }
+                client.BaseAddress = new Uri(settings.BaseUrl);
             })
             .AddStandardResilienceHandler();
 
@@ -254,7 +253,10 @@ private static IServiceCollection AddExternalServices(this IServiceCollection se
 
         
         // 2. Gemini AI Service (Refit)
-        services.Configure<GeminiOptions>(configuration.GetSection(GeminiOptions.SectionName));
+        services.AddOptions<GeminiOptions>()
+            .Bind(configuration.GetSection(GeminiOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         var geminiRefitSettings = new RefitSettings
         {
@@ -279,11 +281,7 @@ private static IServiceCollection AddExternalServices(this IServiceCollection se
             .ConfigureHttpClient((sp, client) =>
             {
                 var settings = sp.GetRequiredService<IOptions<GeminiOptions>>().Value;
-
-                if (!string.IsNullOrEmpty(settings.BaseUrl))
-                {
-                    client.BaseAddress = new Uri(settings.BaseUrl);
-                }
+                client.BaseAddress = new Uri(settings.BaseUrl);
             })
             .AddStandardResilienceHandler();
 
