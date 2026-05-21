@@ -26,9 +26,9 @@ public class GetPersonalizedRecommendationsQueryHandler(
             .AsNoTracking()
             .Where(o => o.UserId == userId && o.Status == Domain.Enums.OrderStatus.Paid)
             .SelectMany(o => o.Tickets)
-            .Select(t => t.Session.Movie)
+            .Select(t => t.Session!.Movie!)
             .Where(m => m.Embedding != null)
-            .Select(m => m.Embedding)
+            .Select(m => m.Embedding!)
             .ToListAsync(ct);
 
         if (!userHistoryVectors.Any())
@@ -36,9 +36,9 @@ public class GetPersonalizedRecommendationsQueryHandler(
             return Result.Success(new List<MovieRecommendationResult>());
         }
         
-        var vectorSize = userHistoryVectors.First().ToString().Split(',').Length;
+        var vectorSize = userHistoryVectors.First()!.ToString()!.Split(',').Length;
 
-        var vectors = userHistoryVectors.Select(v => v.ToArray()).ToList();
+        var vectors = userHistoryVectors.Select(v => v!.ToArray()).ToList();
         var avgVector = new float[vectors[0].Length];
 
         foreach (var vec in vectors)
@@ -59,7 +59,7 @@ public class GetPersonalizedRecommendationsQueryHandler(
         var watchedMovieIds = await context.Orders
             .Where(o => o.UserId == userId)
             .SelectMany(o => o.Tickets)
-            .Select(t => t.Session.MovieId)
+            .Select(t => t.Session!.MovieId)
             .Distinct()
             .ToListAsync(ct);
 

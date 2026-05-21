@@ -22,7 +22,6 @@ public class GetMovieByIdQueryHandler(IApplicationDbContext context)
             .Include(m => m.MovieGenres)
                 .ThenInclude(mg => mg.Genre)
             .FirstOrDefaultAsync(m => m.Id == movieId, ct);
-
         if (movie == null)
             return Result.Failure<Movie>(MovieErrors.NotFound);
 
