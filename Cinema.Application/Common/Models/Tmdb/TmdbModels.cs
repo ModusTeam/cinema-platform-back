@@ -53,7 +53,10 @@ public class TmdbMovieDetails
     public TmdbCredits? Credits { get; set; }
     
     [JsonPropertyName("videos")]
-    public TmdbVideos? Videos { get; set; } 
+    public TmdbVideos? Videos { get; set; }
+
+    [JsonPropertyName("release_dates")]
+    public TmdbReleaseDates? ReleaseDates { get; set; }
 }
 
 public class TmdbGenreDto
@@ -100,4 +103,25 @@ public class TmdbVideoDto
 
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
+}
+
+public class TmdbReleaseDates
+{
+    [JsonPropertyName("results")]
+    public List<TmdbCountryRelease> Results { get; set; } = [];
+}
+
+public class TmdbCountryRelease
+{
+    [JsonPropertyName("iso_3166_1")]
+    public string CountryCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("release_dates")]
+    public List<TmdbReleaseDateEntry> ReleaseDates { get; set; } = [];
+}
+
+public class TmdbReleaseDateEntry
+{
+    [JsonPropertyName("certification")]
+    public string Certification { get; set; } = string.Empty;
 }
