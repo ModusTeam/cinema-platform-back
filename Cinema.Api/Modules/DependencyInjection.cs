@@ -14,6 +14,8 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddWebServices(this IServiceCollection services, IConfiguration configuration)
     {
+        Mapster.TypeAdapterConfig.GlobalSettings.Scan(Assembly.GetExecutingAssembly());
+
         services.AddApplication();
         services.AddInfrastructureServices(configuration);
 
@@ -79,6 +81,7 @@ public static class DependencyInjection
         });
 
         services.AddProblemDetails();
+        services.AddExceptionHandler<Cinema.Api.ExceptionHandlers.GlobalExceptionHandler>();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerConfiguration();
 
