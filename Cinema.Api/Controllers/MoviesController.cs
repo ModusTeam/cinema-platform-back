@@ -1,16 +1,18 @@
+using Cinema.Api.DTOs.Movies;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Movies.Commands.CreateMovie;
 using Cinema.Application.Movies.Commands.DeleteMovie;
 using Cinema.Application.Movies.Commands.ImportMovie;
 using Cinema.Application.Movies.Commands.UpdateMovie.Commands; 
-using Cinema.Application.Movies.Dtos;
 using Cinema.Application.Movies.Queries.GetMovieById;
 using Cinema.Application.Movies.Queries.GetMoviesWithPagination;
 using Cinema.Application.Movies.Queries.GetRecommendations;
 using Cinema.Application.Movies.Queries.SearchTmdb;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
+using Cinema.Domain.Shared;
 using Hangfire;
+using Mapster;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -31,7 +33,8 @@ public class MoviesController : ApiController
     [HttpGet("tmdb-search")]
     public async Task<IActionResult> SearchTmdb([FromQuery] string query)
     {
-        return Ok(await Mediator.Send(new SearchTmdbQuery(query)));
+        var result = await Mediator.Send(new SearchTmdbQuery(query));
+        return Ok(result.Adapt<List<TmdbSearchResultDto>>());
     }
     
     [Authorize(Roles = "Admin")]
@@ -55,20 +58,32 @@ public class MoviesController : ApiController
     
     [HttpGet]
     [OutputCache(Duration = 60, VaryByQueryKeys = new[] { "pageNumber", "pageSize", "searchTerm", "genreId" })]
-    public async Task<ActionResult<PaginatedList<MovieDto>>> GetMovies([FromQuery] GetMoviesWithPaginationQuery query)
+    public async Task<ActionResult<PaginatedList<MovieListDto>>> GetMovies([FromQuery] GetMoviesWithPaginationQuery query)
     {
         var result = await Mediator.Send(query);
-        if (result.IsSuccess)
+        if (result.IsFailure)
         {
-            return Ok(result.Value);
+            return HandleResult(Result.Failure<PaginatedList<MovieListDto>>(result.Error));
         }
-        return BadRequest(result.Error);
+
+        var movieDtos = result.Value.Items.Adapt<List<MovieListDto>>();
+        var paginatedDtos = new PaginatedList<MovieListDto>(
+            movieDtos,
+            result.Value.TotalCount,
+            result.Value.PageNumber,
+            query.PageSize);
+
+        return Ok(paginatedDtos);
     }
     
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
-        return HandleResult(await Mediator.Send(new GetMovieByIdQuery(id)));
+        var result = await Mediator.Send(new GetMovieByIdQuery(id));
+        var mappedResult = result.IsSuccess 
+            ? Result.Success(result.Value.Adapt<MovieDto>()) 
+            : Result.Failure<MovieDto>(result.Error);
+        return HandleResult(mappedResult);
     }
     
     [Authorize(Roles = "Admin")]
@@ -115,6 +130,11 @@ public class MoviesController : ApiController
         var query = new GetPersonalizedRecommendationsQuery(count);
         var result = await Mediator.Send(query);
 
-        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
+        if (result.IsFailure)
+        {
+            return HandleResult(Result.Failure<List<MovieRecommendationDto>>(result.Error));
+        }
+
+        return Ok(result.Value.Adapt<List<MovieRecommendationDto>>());
     }
 }
