@@ -58,14 +58,14 @@ public static class IdentitySeeder
             }
         }
 
-        if (!await userManager.IsInRoleAsync(adminUser, "ADMIN"))
+        if (!await userManager.IsInRoleAsync(adminUser, "Admin"))
         {
-            var roleResult = await userManager.AddToRoleAsync(adminUser, "ADMIN");
+            var roleResult = await userManager.AddToRoleAsync(adminUser, "Admin");
             if (!roleResult.Succeeded)
             {
                 var errors = string.Join(", ", roleResult.Errors.Select(e => e.Description));
-                logger.LogError("Failed to assign ADMIN role: {Errors}", errors);
-                throw new Exception($"Failed to assign ADMIN role: {errors}");
+                logger.LogError("Failed to assign Admin role: {Errors}", errors);
+                throw new Exception($"Failed to assign Admin role: {errors}");
             }
         }
 
