@@ -29,7 +29,7 @@ public class CreateSessionCommandHandler(
         try 
         {
             var session = await schedulingService.ScheduleSessionAsync(
-                hallId, movieId, pricingId, request.StartTime, 15, ct
+                hallId, movieId, pricingId, request.StartTime, 15, ct, request.IsLoyaltyPaymentAllowed
             );
 
             context.Sessions.Add(session);
