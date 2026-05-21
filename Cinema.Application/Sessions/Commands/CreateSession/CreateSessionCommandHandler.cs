@@ -41,7 +41,7 @@ public class CreateSessionCommandHandler(
         {
             return Result.Failure<Guid>(new Error("Session.Validation", ex.Message));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return Result.Failure<Guid>(new Error("Session.GeneralError", "An unexpected error occurred."));
         }

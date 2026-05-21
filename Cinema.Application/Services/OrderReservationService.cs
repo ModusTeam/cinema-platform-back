@@ -22,10 +22,9 @@ public class OrderReservationService(
             try
             {
                 var rawSeatIds = seatIds.ToArray();
-                var seatIdsParam = string.Join(",", rawSeatIds.Select(id => $"'{id}'"));
                 
                 var seats = await context.Seats
-                    .FromSqlRaw($"SELECT * FROM seats WHERE id IN ({seatIdsParam}) FOR UPDATE NOWAIT")
+                    .FromSql($"SELECT * FROM seats WHERE id = ANY({rawSeatIds}) FOR UPDATE NOWAIT")
                     .ToListAsync(ct);
 
                 if (seats.Count != seatIds.Count)
