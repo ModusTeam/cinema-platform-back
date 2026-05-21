@@ -5,6 +5,7 @@ public record UserProfileDto(
     string Email,
     string FirstName,
     string LastName,
+    DateTime? DateOfBirth,
     int LoyaltyPoints,
     string LoyaltyTier
 );
