@@ -16,6 +16,7 @@ public record SessionDto
     public string PricingName { get; init; } = string.Empty;
 
     public List<Guid> OccupiedSeatIds { get; init; } = [];
+    public bool IsLoyaltyPaymentAllowed { get; init; }
 
     public static SessionDto FromDomainModel(Session session)
     {
@@ -31,7 +32,8 @@ public record SessionDto
             HallName = session.Hall?.Name ?? "Unknown Hall",
             PricingId = session.PricingId.Value,
             PricingName = session.Pricing?.Name ?? "Unknown Pricing",
-            OccupiedSeatIds = []
+            OccupiedSeatIds = [],
+            IsLoyaltyPaymentAllowed = session.IsLoyaltyPaymentAllowed
         };
     }
 }
