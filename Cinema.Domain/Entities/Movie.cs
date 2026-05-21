@@ -30,8 +30,17 @@ public class Movie : BaseEntity
     
     public MovieStatus Status { get; private set; } = MovieStatus.ComingSoon;
     public bool IsDeleted { get; private set; } = false;
+    public string? AgeRestriction { get; private set; }
     
-    public List<MovieCastMember> Cast { get; set; } = new();
+    public List<MovieCastMember> Cast { get; private set; } = [];
+
+    /// <summary>
+    /// Replaces the full cast list. Intended for use during import/sync only.
+    /// </summary>
+    public void SetCast(IEnumerable<MovieCastMember> cast)
+    {
+        Cast = cast.ToList();
+    }
 
     public ICollection<MovieGenre> MovieGenres { get; private set; } = [];
     public ICollection<Session> Sessions { get; private set; } = [];
@@ -81,7 +90,8 @@ public class Movie : BaseEntity
         int releaseYear,
         string? posterUrl,
         string? backdropUrl,
-        string? trailerUrl)
+        string? trailerUrl,
+        string? ageRestriction)
     {
         Id = id;
         ExternalId = externalId;
@@ -93,6 +103,7 @@ public class Movie : BaseEntity
         PosterUrl = posterUrl;
         BackdropUrl = backdropUrl;
         TrailerUrl = trailerUrl;
+        AgeRestriction = ageRestriction;
     }
 
     public static Movie Import(
@@ -104,7 +115,8 @@ public class Movie : BaseEntity
         DateTime? releaseDate,
         string? posterUrl,
         string? backdropUrl,
-        string? trailerUrl)
+        string? trailerUrl,
+        string? ageRestriction = null)
     {
         var movie = new Movie(
             EntityId<Movie>.New(),
@@ -116,10 +128,16 @@ public class Movie : BaseEntity
             releaseDate?.Year ?? DateTime.UtcNow.Year,
             posterUrl,
             backdropUrl,
-            trailerUrl
+            trailerUrl,
+            ageRestriction
         );
 
         return movie;
+    }
+
+    public void SetAgeRestriction(string? ageRestriction)
+    {
+        AgeRestriction = ageRestriction;
     }
     
     public void AddGenre(Genre genre)
