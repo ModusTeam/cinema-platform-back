@@ -81,6 +81,7 @@ public static class DependencyInjection
         });
 
         services.AddProblemDetails();
+        services.AddExceptionHandler<Cinema.Api.Infrastructure.ExceptionHandling.ValidationExceptionHandler>();
         services.AddExceptionHandler<Cinema.Api.ExceptionHandlers.GlobalExceptionHandler>();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerConfiguration();
