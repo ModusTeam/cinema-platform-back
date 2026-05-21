@@ -24,9 +24,9 @@ public class GetTicketDetailsQueryHandler(
         var ticket = await context.Tickets
             .AsNoTracking()
             .Include(t => t.Order)
-            .Include(t => t.Session).ThenInclude(s => s.Movie)
-            .Include(t => t.Session).ThenInclude(s => s.Hall)
-            .Include(t => t.Seat).ThenInclude(s => s.SeatType)
+            .Include(t => t.Session!).ThenInclude(s => s.Movie)
+            .Include(t => t.Session!).ThenInclude(s => s.Hall)
+            .Include(t => t.Seat!).ThenInclude(s => s.SeatType)
             .FirstOrDefaultAsync(t => t.Id == ticketId, ct);
 
         if (ticket == null)
