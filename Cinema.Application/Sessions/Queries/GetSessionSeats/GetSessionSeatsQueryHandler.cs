@@ -13,8 +13,7 @@ public class GetSessionSeatsQueryHandler(
     IApplicationDbContext context,
     IPriceCalculator priceCalculator,
     ISeatLockingService seatLockingService,
-    ISeatTypeProvider seatTypeProvider,
-    ICurrentUserService currentUser)
+    ISeatTypeProvider seatTypeProvider)
     : IRequestHandler<GetSessionSeatsQuery, Result<SessionSeatsVm>>
 {
     public async Task<Result<SessionSeatsVm>> Handle(GetSessionSeatsQuery request, CancellationToken ct)

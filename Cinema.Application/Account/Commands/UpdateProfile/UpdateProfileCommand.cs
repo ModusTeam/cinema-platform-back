@@ -3,4 +3,8 @@ using MediatR;
 
 namespace Cinema.Application.Account.Commands.UpdateProfile;
 
-public record UpdateProfileCommand(string FirstName, string LastName) : IRequest<Result>;
+public record UpdateProfileCommand(
+    string FirstName,
+    string LastName,
+    DateTime? DateOfBirth
+) : IRequest<Result>;

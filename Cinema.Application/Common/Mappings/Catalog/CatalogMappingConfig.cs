@@ -11,12 +11,12 @@ public class CatalogMappingConfig : IRegister
         config.NewConfig<Pricing, PricingDetailsDto>()
             .Map(dest => dest.Id, src => src.Id.Value)
             .Map(dest => dest.Name, src => src.Name)
-            .Map(dest => dest.Items, src => (List<PricingItemDto>)null);
+            .Map(dest => dest.Items, src => src.PricingItems != null ? src.PricingItems : new List<PricingItem>());
         
         config.NewConfig<PricingItem, PricingItemDto>()
             .Map(dest => dest.Id, src => src.Id.Value)
             .Map(dest => dest.SeatTypeId, src => src.SeatTypeId.Value)
-            .Map(dest => dest.SeatTypeName, src => src.SeatType.Name);
+            .Map(dest => dest.SeatTypeName, src => src.SeatType != null ? src.SeatType.Name : string.Empty);
         
         config.NewConfig<Pricing, PricingLookupDto>()
             .Map(dest => dest.Id, src => src.Id.Value)

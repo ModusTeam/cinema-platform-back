@@ -29,7 +29,7 @@ public class CreateSessionCommandHandler(
         try 
         {
             var session = await schedulingService.ScheduleSessionAsync(
-                hallId, movieId, pricingId, request.StartTime, 15, ct
+                hallId, movieId, pricingId, request.StartTime, 15, ct, request.IsLoyaltyPaymentAllowed
             );
 
             context.Sessions.Add(session);
@@ -41,7 +41,7 @@ public class CreateSessionCommandHandler(
         {
             return Result.Failure<Guid>(new Error("Session.Validation", ex.Message));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return Result.Failure<Guid>(new Error("Session.GeneralError", "An unexpected error occurred."));
         }

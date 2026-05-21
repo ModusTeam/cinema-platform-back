@@ -1,4 +1,4 @@
-namespace Cinema.Application.Movies.Dtos;
+namespace Cinema.Api.DTOs.Movies;
 
 public record MovieListDto(
     Guid Id,
@@ -8,5 +8,6 @@ public record MovieListDto(
     int DurationMinutes,
     string? PosterUrl,
     List<string> Genres,
-    int Status
+    int Status,
+    string? AgeRestriction
 );

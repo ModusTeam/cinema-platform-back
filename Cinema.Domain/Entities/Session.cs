@@ -21,6 +21,8 @@ public class Session
     public EntityId<Pricing> PricingId { get; private set; }
     public Pricing? Pricing { get; private set; }
 
+    public bool IsLoyaltyPaymentAllowed { get; private set; } = true;
+
     private readonly List<Ticket> _tickets = new();
     public IReadOnlyCollection<Ticket> Tickets => _tickets.AsReadOnly();
 
@@ -31,7 +33,8 @@ public class Session
         SessionStatus status,
         EntityId<Movie> movieId,
         EntityId<Hall> hallId,
-        EntityId<Pricing> pricingId)
+        EntityId<Pricing> pricingId,
+        bool isLoyaltyPaymentAllowed)
     {
         Id = id;
         StartTime = startTime;
@@ -40,6 +43,7 @@ public class Session
         MovieId = movieId;
         HallId = hallId;
         PricingId = pricingId;
+        IsLoyaltyPaymentAllowed = isLoyaltyPaymentAllowed;
     }
     
     public static Session Create(
@@ -48,7 +52,8 @@ public class Session
         DateTime endTime,
         EntityId<Movie> movieId,
         EntityId<Hall> hallId,
-        EntityId<Pricing> pricingId)
+        EntityId<Pricing> pricingId,
+        bool isLoyaltyPaymentAllowed = true)
     {
         if (startTime < DateTime.UtcNow)
         {
@@ -67,8 +72,14 @@ public class Session
             SessionStatus.Scheduled, 
             movieId, 
             hallId, 
-            pricingId
+            pricingId,
+            isLoyaltyPaymentAllowed
         );
+    }
+
+    public void SetLoyaltyPaymentAllowed(bool isAllowed)
+    {
+        IsLoyaltyPaymentAllowed = isAllowed;
     }
 
     public void Cancel(DateTime cancellationTime)

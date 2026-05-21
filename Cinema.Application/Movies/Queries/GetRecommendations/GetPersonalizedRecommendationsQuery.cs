@@ -1,4 +1,5 @@
 using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Movies.Constants;
 using Cinema.Domain.Shared;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -7,37 +8,37 @@ using Pgvector.EntityFrameworkCore;
 
 namespace Cinema.Application.Movies.Queries.GetRecommendations;
 
-public record MovieRecommendationDto(Guid Id, string Title, string PosterUrl, double SimilarityScore);
+public record MovieRecommendationResult(Guid Id, string Title, string? PosterUrl, double SimilarityScore);
 
-public record GetPersonalizedRecommendationsQuery(int Count = 5) : IRequest<Result<List<MovieRecommendationDto>>>;
+public record GetPersonalizedRecommendationsQuery(int Count = MovieConstants.DefaultRecommendationCount) : IRequest<Result<List<MovieRecommendationResult>>>;
 
 public class GetPersonalizedRecommendationsQueryHandler(
     IApplicationDbContext context,
     ICurrentUserService currentUserService)
-    : IRequestHandler<GetPersonalizedRecommendationsQuery, Result<List<MovieRecommendationDto>>>
+    : IRequestHandler<GetPersonalizedRecommendationsQuery, Result<List<MovieRecommendationResult>>>
 {
-    public async Task<Result<List<MovieRecommendationDto>>> Handle(GetPersonalizedRecommendationsQuery request, CancellationToken ct)
+    public async Task<Result<List<MovieRecommendationResult>>> Handle(GetPersonalizedRecommendationsQuery request, CancellationToken ct)
     {
         var userId = currentUserService.UserId;
-        if (userId == null) return Result.Failure<List<MovieRecommendationDto>>(new Error("Auth.Required", "User not found"));
+        if (userId == null) return Result.Failure<List<MovieRecommendationResult>>(new Error("Auth.Required", "User not found"));
         
         var userHistoryVectors = await context.Orders
             .AsNoTracking()
             .Where(o => o.UserId == userId && o.Status == Domain.Enums.OrderStatus.Paid)
             .SelectMany(o => o.Tickets)
-            .Select(t => t.Session.Movie)
+            .Select(t => t.Session!.Movie!)
             .Where(m => m.Embedding != null)
-            .Select(m => m.Embedding)
+            .Select(m => m.Embedding!)
             .ToListAsync(ct);
 
         if (!userHistoryVectors.Any())
         {
-            return Result.Success(new List<MovieRecommendationDto>());
+            return Result.Success(new List<MovieRecommendationResult>());
         }
         
-        var vectorSize = userHistoryVectors.First().ToString().Split(',').Length;
+        var vectorSize = userHistoryVectors.First()!.ToString()!.Split(',').Length;
 
-        var vectors = userHistoryVectors.Select(v => v.ToArray()).ToList();
+        var vectors = userHistoryVectors.Select(v => v!.ToArray()).ToList();
         var avgVector = new float[vectors[0].Length];
 
         foreach (var vec in vectors)
@@ -58,7 +59,7 @@ public class GetPersonalizedRecommendationsQueryHandler(
         var watchedMovieIds = await context.Orders
             .Where(o => o.UserId == userId)
             .SelectMany(o => o.Tickets)
-            .Select(t => t.Session.MovieId)
+            .Select(t => t.Session!.MovieId)
             .Distinct()
             .ToListAsync(ct);
 
@@ -67,7 +68,7 @@ public class GetPersonalizedRecommendationsQueryHandler(
             .Where(m => !watchedMovieIds.Contains(m.Id) && m.Embedding != null)
             .OrderBy(m => m.Embedding!.CosineDistance(userPreferenceVector))
             .Take(request.Count)
-            .Select(m => new MovieRecommendationDto(
+            .Select(m => new MovieRecommendationResult(
                 m.Id.Value,
                 m.Title,
                 m.PosterUrl,

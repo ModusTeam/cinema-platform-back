@@ -1,25 +1,24 @@
 using Cinema.Application.Common.Interfaces;
-using Cinema.Application.Movies.Dtos;
+using Cinema.Application.Movies.Constants;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Mapster;
 
 namespace Cinema.Application.Movies.Queries.GetMoviesWithPagination;
 
 public record GetMoviesWithPaginationQuery(
     int PageNumber = 1,
-    int PageSize = 10,
+    int PageSize = MovieConstants.DefaultPageSize,
     string? SearchTerm = null,
     Guid? GenreId = null 
-) : IRequest<Result<PaginatedList<MovieDto>>>;
+) : IRequest<Result<PaginatedList<Movie>>>;
 
 public class GetMoviesWithPaginationQueryHandler(IApplicationDbContext context) 
-    : IRequestHandler<GetMoviesWithPaginationQuery, Result<PaginatedList<MovieDto>>>
+    : IRequestHandler<GetMoviesWithPaginationQuery, Result<PaginatedList<Movie>>>
 {
-    public async Task<Result<PaginatedList<MovieDto>>> Handle(GetMoviesWithPaginationQuery request, CancellationToken ct)
+    public async Task<Result<PaginatedList<Movie>>> Handle(GetMoviesWithPaginationQuery request, CancellationToken ct)
     {
         var query = context.Movies
             .AsNoTracking()
@@ -39,11 +38,12 @@ public class GetMoviesWithPaginationQueryHandler(IApplicationDbContext context)
         
         var orderedQuery = query.OrderByDescending(m => m.ReleaseYear).ThenBy(m => m.Title);
 
-        var dtoQuery = orderedQuery
-            .ProjectToType<MovieDto>(); 
+        var queryWithGenres = orderedQuery
+            .Include(m => m.MovieGenres)
+                .ThenInclude(mg => mg.Genre);
 
-        var pagedList = await PaginatedList<MovieDto>.CreateAsync(
-            dtoQuery.AsSplitQuery(), 
+        var pagedList = await PaginatedList<Movie>.CreateAsync(
+            queryWithGenres.AsSplitQuery(), 
             request.PageNumber, 
             request.PageSize);
 

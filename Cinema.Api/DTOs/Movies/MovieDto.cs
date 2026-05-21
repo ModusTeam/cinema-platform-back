@@ -1,6 +1,4 @@
-using Cinema.Domain.Entities;
-
-namespace Cinema.Application.Movies.Dtos;
+namespace Cinema.Api.DTOs.Movies;
 
 public record MovieDto(
     Guid Id,
@@ -8,6 +6,7 @@ public record MovieDto(
     string? Description,
     int DurationMinutes,
     decimal Rating,
+    string? AgeRestriction,
     int ReleaseYear,
     string? PosterUrl,
     string? BackdropUrl,

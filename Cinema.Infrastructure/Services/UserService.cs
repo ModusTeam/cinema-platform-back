@@ -21,7 +21,7 @@ public class UserService(
             var roles = await userManager.GetRolesAsync(user);
             var mainRole = roles.FirstOrDefault() ?? "None";
             
-            userDtos.Add(new UserDto(user.Id, user.Email!, user.FirstName, user.LastName, mainRole));
+            userDtos.Add(new UserDto(user.Id, user.Email!, user.FirstName ?? string.Empty, user.LastName ?? string.Empty, mainRole));
         }
 
         return Result.Success(userDtos);

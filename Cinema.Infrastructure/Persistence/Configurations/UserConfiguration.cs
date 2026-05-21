@@ -1,4 +1,5 @@
 using Cinema.Domain.Entities;
+using Cinema.Infrastructure.Persistence.Converters;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -15,5 +16,9 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.LastName)
             .HasMaxLength(100)
             .IsRequired(false);
+
+        builder.Property(x => x.DateOfBirth)
+            .IsRequired(false)
+            .HasConversion(new DateTimeUtcConverter());
     }
 }

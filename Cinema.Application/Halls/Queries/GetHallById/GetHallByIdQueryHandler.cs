@@ -28,14 +28,7 @@ public class GetHallByIdQueryHandler(IApplicationDbContext context)
             return Result.Failure<HallDto>(new Error("Hall.NotFound", "Hall not found"));
         }
 
-        var config = TypeAdapterConfig.GlobalSettings.Fork(c => 
-        {
-            c.NewConfig<Hall, HallDto>()
-                .Map(dest => dest.Seats, src => src.Seats)
-                .Map(dest => dest.Technologies, src => src.Technologies.Select(t => t.Technology));
-        });
-        
-        var hallDto = hall.Adapt<HallDto>(config);
+        var hallDto = hall.Adapt<HallDto>();
 
         return Result.Success(hallDto);
     }

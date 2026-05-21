@@ -23,17 +23,17 @@ public class GetMyOrdersQueryHandler(
         var activeOrders = await context.Orders
             .AsNoTracking()
             .Where(o => o.UserId == userId)
-            .Where(o => o.Session.StartTime > now)
+            .Where(o => o.Session!.StartTime > now)
             .Where(o => o.Status != OrderStatus.Cancelled && o.Status != OrderStatus.Failed)
-            .OrderBy(o => o.Session.StartTime)
+            .OrderBy(o => o.Session!.StartTime)
             .ProjectToType<OrderDto>() 
             .ToListAsync(ct);
         
         var pastOrders = await context.Orders
             .AsNoTracking()
             .Where(o => o.UserId == userId)
-            .Where(o => o.Session.StartTime <= now || o.Status == OrderStatus.Cancelled || o.Status == OrderStatus.Failed)
-            .OrderByDescending(o => o.Session.StartTime)
+            .Where(o => o.Session!.StartTime <= now || o.Status == OrderStatus.Cancelled || o.Status == OrderStatus.Failed)
+            .OrderByDescending(o => o.Session!.StartTime)
             .ProjectToType<OrderDto>()
             .ToListAsync(ct);
 

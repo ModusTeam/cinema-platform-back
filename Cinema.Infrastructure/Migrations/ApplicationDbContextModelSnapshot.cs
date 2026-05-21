@@ -112,6 +112,11 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("AgeRestriction")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("age_restriction");
+
                     b.Property<string>("BackdropUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -463,6 +468,12 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("hall_id");
 
+                    b.Property<bool>("IsLoyaltyPaymentAllowed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_loyalty_payment_allowed");
+
                     b.Property<Guid>("MovieId")
                         .HasColumnType("uuid")
                         .HasColumnName("movie_id");
@@ -577,6 +588,10 @@ namespace Cinema.Infrastructure.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("text")
                         .HasColumnName("concurrency_stamp");
+
+                    b.Property<DateTime?>("DateOfBirth")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("date_of_birth");
 
                     b.Property<string>("Email")
                         .HasMaxLength(256)

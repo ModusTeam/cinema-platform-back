@@ -47,8 +47,18 @@ public class CreateOrderCommandHandler(
         decimal amountToPay = orderAmount;
         int pointsToDeduct = 0;
 
-        if (request.UseLoyaltyPoints) 
+        if (request.UseLoyaltyPoints)
         {
+            var isLoyaltyAllowed = await context.Sessions
+                .Where(s => s.Id == new EntityId<Session>(request.SessionId))
+                .Select(s => s.IsLoyaltyPaymentAllowed)
+                .FirstOrDefaultAsync(ct);
+
+            if (!isLoyaltyAllowed)
+                return Result.Failure<Guid>(new Error(
+                    "Order.LoyaltyNotAllowed",
+                    "Використання бонусних балів для цього сеансу недоступне."));
+
             var (points, _) = await loyaltyService.GetUserLoyaltyAsync(userId.Value, ct);
 
             if (points >= 75)

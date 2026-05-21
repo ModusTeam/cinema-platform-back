@@ -5,6 +5,6 @@ namespace Cinema.Application.Common.Interfaces;
 
 public interface IGeminiApi
 {
-    [Post("/models/embedding-001:embedContent?key={apiKey}")]
-    Task<GeminiResponse> GenerateEmbeddingAsync(string apiKey, [Body] GeminiRequest request);
+    [Post("/v1beta/models/{modelId}:embedContent?key={apiKey}")]
+    Task<GeminiResponse> GenerateEmbeddingAsync(string modelId, string apiKey, [Body] GeminiRequest request);
 }
