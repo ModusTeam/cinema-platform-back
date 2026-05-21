@@ -16,6 +16,17 @@ public class MovieGenre
         GenreId = genreId;
     }
 
+    private MovieGenre(Movie movie, Genre genre)
+    {
+        MovieId = movie.Id;
+        Movie = movie;
+        GenreId = genre.Id;
+        Genre = genre;
+    }
+
     public static MovieGenre New(EntityId<Movie> movieId, EntityId<Genre> genreId)
         => new(movieId, genreId);
+
+    public static MovieGenre Create(Movie movie, Genre genre)
+        => new(movie, genre);
 }

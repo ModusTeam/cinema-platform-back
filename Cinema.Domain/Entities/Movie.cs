@@ -18,7 +18,7 @@ public class Movie : BaseEntity
 {
     public EntityId<Movie> Id { get; private set; }
     public int? ExternalId { get; private set; }
-    public string Title { get; private set; }
+    public string Title { get; private set; } = null!;
     public string? Description { get; private set; }
     public int DurationMinutes { get; private set; }
     public decimal Rating { get; private set; }
@@ -144,7 +144,7 @@ public class Movie : BaseEntity
     {
         if (!MovieGenres.Any(x => x.GenreId == genre.Id))
         {
-            MovieGenres.Add(MovieGenre.New(this.Id, genre.Id));
+            MovieGenres.Add(MovieGenre.Create(this, genre));
         }
     }
 
