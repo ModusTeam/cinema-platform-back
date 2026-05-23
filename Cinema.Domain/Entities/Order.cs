@@ -9,6 +9,7 @@ public class Order : BaseEntity
 {
     public EntityId<Order> Id { get; }
     public decimal TotalAmount { get; private set; }
+    public decimal PaidAmount { get; private set; }
     public DateTime BookingDate { get; private set; }
     public OrderStatus Status { get; private set; }
     public string? PaymentTransactionId { get; private set; }
@@ -35,6 +36,7 @@ public class Order : BaseEntity
     {
         Id = id;
         TotalAmount = totalAmount;
+        PaidAmount = totalAmount;
         BookingDate = bookingDate;
         Status = status;
         PaymentTransactionId = paymentTransactionId;
@@ -111,11 +113,16 @@ public class Order : BaseEntity
         return order;
     }
 
-    public void ApplyLoyaltyDiscount(int points)
+    public void ApplyLoyaltyDiscount(int pointsUsed)
     {
-        if (points < 0) throw new ArgumentException("Points cannot be negative");
-        
-        PointsUsed = points;
+        if (pointsUsed < 0) throw new ArgumentException("Points cannot be negative");
+
+        decimal discount = pointsUsed;
+        if (discount > TotalAmount)
+            throw new DomainException($"Discount ({discount}) cannot exceed TotalAmount ({TotalAmount}).");
+
+        PointsUsed = pointsUsed;
+        PaidAmount = TotalAmount - discount;
     }
 
     public void MarkAsPaid(string externalTransactionId)
