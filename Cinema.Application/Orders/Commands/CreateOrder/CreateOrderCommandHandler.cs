@@ -23,108 +23,180 @@ public class CreateOrderCommandHandler(
     public async Task<Result<Guid>> Handle(CreateOrderCommand request, CancellationToken ct)
     {
         var userId = currentUser.UserId;
-        if (userId == null) return Result.Failure<Guid>(new Error("Auth.Required", "User not authenticated"));
-        
+        if (userId == null)
+            return Result.Failure<Guid>(new Error("Auth.Required", "User not authenticated"));
+
         foreach (var seatId in request.SeatIds)
         {
             if (!await seatLockingService.ValidateAndExtendLockAsync(request.SessionId, seatId, userId.Value, ct))
-            {
-                 return Result.Failure<Guid>(new Error("Order.LockExpired", $"Lock expired for seat {seatId}."));
-            }
+                return Result.Failure<Guid>(new Error("Order.LockExpired", $"Lock expired for seat {seatId}."));
         }
-        
+
         var reservationResult = await reservationService.ReserveOrderAsync(userId.Value, request.SessionId, request.SeatIds, ct);
         if (reservationResult.IsFailure)
             return reservationResult;
 
         var orderId = reservationResult.Value;
-        
+
         var orderAmount = await context.Orders
             .Where(o => o.Id == new EntityId<Order>(orderId))
             .Select(o => o.TotalAmount)
             .FirstOrDefaultAsync(ct);
-        
-        decimal amountToPay = orderAmount;
-        int pointsToDeduct = 0;
 
-        if (request.UseLoyaltyPoints)
+        var loyaltyDiscountResult = await ResolveLoyaltyDiscountAsync(userId.Value, request.SessionId, orderId, orderAmount, request.UseLoyaltyPoints, ct);
+        if (loyaltyDiscountResult.IsFailure)
         {
-            var isLoyaltyAllowed = await context.Sessions
-                .Where(s => s.Id == new EntityId<Session>(request.SessionId))
-                .Select(s => s.IsLoyaltyPaymentAllowed)
-                .FirstOrDefaultAsync(ct);
+            return Result.Failure<Guid>(loyaltyDiscountResult.Error);
+        }
 
-            if (!isLoyaltyAllowed)
-                return Result.Failure<Guid>(new Error(
-                    "Order.LoyaltyNotAllowed",
-                    "Використання бонусних балів для цього сеансу недоступне."));
+        var (pointsToDeduct, amountToPay) = loyaltyDiscountResult.Value;
 
-            var (points, _) = await loyaltyService.GetUserLoyaltyAsync(userId.Value, ct);
+        var paymentResult = await ProcessPaymentFlowAsync(userId.Value, orderId, amountToPay, request.PaymentToken, pointsToDeduct, ct);
+        if (!paymentResult.IsSuccess)
+        {
+            return await FailOrderAsync(orderId, paymentResult.ErrorMessage!, request.SessionId, request.SeatIds, userId.Value, ct);
+        }
 
-            if (points >= 75)
+        return await ConfirmOrderAsync(orderId, paymentResult.TransactionId!, userId.Value, request.SessionId, request.SeatIds, pointsToDeduct, ct);
+    }
+
+    private async Task<Result<(int PointsToDeduct, decimal AmountToPay)>> ResolveLoyaltyDiscountAsync(
+        Guid userId, Guid sessionId, Guid orderId, decimal orderAmount, bool useLoyaltyPoints, CancellationToken ct)
+    {
+        if (!useLoyaltyPoints)
+        {
+            return Result.Success((0, orderAmount));
+        }
+
+        var isLoyaltyAllowed = await context.Sessions
+            .Where(s => s.Id == new EntityId<Session>(sessionId))
+            .Select(s => s.IsLoyaltyPaymentAllowed)
+            .FirstOrDefaultAsync(ct);
+
+        if (!isLoyaltyAllowed)
+        {
+            return Result.Failure<(int, decimal)>(new Error(
+                "Order.LoyaltyNotAllowed",
+                "Використання бонусних балів для цього сеансу недоступне."));
+        }
+
+        try
+        {
+            var (isAllowed, points, amount) = await loyaltyService.CalculateDiscountAsync(userId, orderAmount, ct);
+            return isAllowed 
+                ? Result.Success((points, amount)) 
+                : Result.Success((0, orderAmount));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Loyalty service unavailable while calculating discount for Order {OrderId}", orderId);
+            return Result.Failure<(int, decimal)>(new Error(
+                "Loyalty.Unavailable",
+                "Loyalty service is currently unavailable. Please try again without loyalty points or retry later."));
+        }
+    }
+
+    private async Task<PaymentResult> ProcessPaymentFlowAsync(
+        Guid userId, Guid orderId, decimal amountToPay, string paymentToken, int pointsToDeduct, CancellationToken ct)
+    {
+        if (pointsToDeduct > 0)
+        {
+            var deductResult = await DeductLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);
+            if (!deductResult.IsSuccess)
             {
-                var maxAllowedDiscount = orderAmount * 0.5m;
-                pointsToDeduct = (int)Math.Min(points, maxAllowedDiscount);
-                amountToPay = orderAmount - pointsToDeduct; 
+                return deductResult;
             }
         }
 
         PaymentResult paymentResult;
         try
         {
-            paymentResult = await paymentService.ProcessPaymentAsync(amountToPay, "UAH", request.PaymentToken, ct);
+            paymentResult = await paymentService.ProcessPaymentAsync(amountToPay, "UAH", paymentToken, ct);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Payment crash for Order {OrderId}", orderId);
+            logger.LogError(ex, "Payment system crash for Order {OrderId}", orderId);
             paymentResult = PaymentResult.Failure("Payment system error");
         }
-        
-        if (paymentResult.IsSuccess)
-        {
-            if (pointsToDeduct > 0)
-            {
-                var idempotencyKey = Guid.NewGuid().ToString(); // Генеруємо ключ
-                var deductResult = await loyaltyService.DeductPointsAsync(userId.Value, pointsToDeduct, orderId, idempotencyKey, ct);
-                
-                if (!deductResult.Success)
-                {
-                    logger.LogCritical("CRITICAL: Failed to deduct {Points} points for Order {OrderId}. Error: {Error}", pointsToDeduct, orderId, deductResult.Error);
-                }
-            }
 
-            return await ConfirmOrderAsync(orderId, paymentResult.TransactionId!, userId.Value, request.SessionId, request.SeatIds, pointsToDeduct, ct);
+        if (!paymentResult.IsSuccess && pointsToDeduct > 0)
+        {
+            await CompensateLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);
+        }
+
+        return paymentResult;
+    }
+
+    private async Task<PaymentResult> DeductLoyaltyPointsAsync(Guid userId, Guid orderId, int pointsToDeduct, CancellationToken ct)
+    {
+        string deductKey = $"deduct-{orderId}";
+        var deductResult = await loyaltyService.DeductPointsAsync(userId, pointsToDeduct, orderId, deductKey, ct);
+
+        if (!deductResult.Success)
+        {
+            logger.LogError(
+                "Failed to deduct {Points} points for Order {OrderId}. Reason: {Error}",
+                pointsToDeduct, orderId, deductResult.Error);
+
+            return PaymentResult.Failure($"Could not deduct loyalty points: {deductResult.Error}");
+        }
+
+        logger.LogInformation(
+            "Deducted {Points} loyalty points for user {UserId}, Order {OrderId}. Balance after: {Balance}",
+            pointsToDeduct, userId, orderId, deductResult.BalanceAfter);
+
+        return PaymentResult.Success(string.Empty);
+    }
+
+    private async Task CompensateLoyaltyPointsAsync(Guid userId, Guid orderId, int pointsToDeduct, CancellationToken ct)
+    {
+        string refundKey = $"refund-{orderId}";
+        var refundResult = await loyaltyService.RefundPointsAsync(userId, pointsToDeduct, orderId, refundKey, ct);
+
+        if (!refundResult.Success)
+        {
+            logger.LogCritical(
+                "SAGA COMPENSATION FAILED: Could not refund {Points} points for user {UserId}, Order {OrderId}. " +
+                "Manual reconciliation required. Refund error: {Error}",
+                pointsToDeduct, userId, orderId, refundResult.Error);
         }
         else
         {
-            return await FailOrderAsync(orderId, paymentResult.ErrorMessage!, request.SessionId, request.SeatIds, userId.Value, ct);
+            logger.LogWarning(
+                "Payment failed for Order {OrderId}. Successfully refunded {Points} points to user {UserId}.",
+                orderId, pointsToDeduct, userId);
         }
     }
-    
-    private async Task<Result<Guid>> ConfirmOrderAsync(Guid orderId, string transactionId, Guid userId, Guid sessionId, List<Guid> seatIds, int pointsUsed, CancellationToken ct)
+
+    private async Task<Result<Guid>> ConfirmOrderAsync(
+        Guid orderId, string transactionId, Guid userId,
+        Guid sessionId, List<Guid> seatIds, int pointsUsed, CancellationToken ct)
     {
-        var order = await context.Orders.Include(o => o.Tickets).FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), ct);
-        if (order == null) return Result.Failure<Guid>(new Error("Order.NotFound", "Order not found"));
+        var order = await context.Orders
+            .Include(o => o.Tickets)
+            .FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), ct);
+
+        if (order == null)
+            return Result.Failure<Guid>(new Error("Order.NotFound", "Order not found"));
+
+        if (pointsUsed > 0)
+            order.ApplyLoyaltyDiscount(pointsUsed);
 
         order.MarkAsPaid(transactionId);
-        if (pointsUsed > 0)
-        {
-            order.ApplyLoyaltyDiscount(pointsUsed);
-        }
 
         await context.SaveChangesAsync(ct);
-        
+
         await publisher.Publish(new OrderPaidEvent(order), ct);
 
         foreach (var seatId in seatIds)
-        {
-           await seatLockingService.UnlockSeatAsync(sessionId, seatId, userId, ct);
-        }
-        
+            await seatLockingService.UnlockSeatAsync(sessionId, seatId, userId, ct);
+
         return Result.Success(order.Id.Value);
     }
 
-    private async Task<Result<Guid>> FailOrderAsync(Guid orderId, string reason, Guid sessionId, List<Guid> seatIds, Guid userId, CancellationToken ct)
+    private async Task<Result<Guid>> FailOrderAsync(
+        Guid orderId, string reason,
+        Guid sessionId, List<Guid> seatIds, Guid userId, CancellationToken ct)
     {
         var order = await context.Orders.FindAsync([new EntityId<Order>(orderId)], ct);
         if (order != null)
@@ -132,8 +204,8 @@ public class CreateOrderCommandHandler(
             order.MarkAsFailed();
             await context.SaveChangesAsync(ct);
         }
-        
-        foreach(var seatId in seatIds) 
+
+        foreach (var seatId in seatIds)
             await seatLockingService.UnlockSeatAsync(sessionId, seatId, userId, ct);
 
         return Result.Failure<Guid>(new Error("Payment.Failed", reason));
