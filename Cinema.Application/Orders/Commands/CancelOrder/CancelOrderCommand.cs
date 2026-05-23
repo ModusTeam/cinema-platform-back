@@ -13,7 +13,8 @@ public record CancelOrderCommand(Guid OrderId) : IRequest<Result>;
 public class CancelOrderCommandHandler(
     IApplicationDbContext context,
     ICurrentUserService currentUser,
-    IPaymentService paymentService) 
+    IPaymentService paymentService,
+    ITicketNotifier notifier) 
     : IRequestHandler<CancelOrderCommand, Result>
 {
     public async Task<Result> Handle(CancelOrderCommand request, CancellationToken ct)
@@ -65,6 +66,19 @@ public class CancelOrderCommandHandler(
         }
 
         await context.SaveChangesAsync(ct);
+
+        foreach (var ticket in order.Tickets!)
+        {
+            try
+            {
+                await notifier.NotifySeatUnlockedAsync(ticket.SessionId.Value, ticket.SeatId.Value, ct);
+            }
+            catch (Exception)
+            {
+                // Silently swallow notification errors so it doesn't fail the business logic
+            }
+        }
+
         return Result.Success();
     }
 }

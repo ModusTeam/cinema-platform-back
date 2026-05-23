@@ -1,3 +1,4 @@
+using Cinema.Application.Common.Constants;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Shared;
 using Microsoft.Extensions.Logging;
@@ -15,7 +16,7 @@ public class RedisSeatLockingService : ISeatLockingService
     private readonly ILogger<RedisSeatLockingService> _logger;
     private readonly ResiliencePipeline _resiliencePipeline;
     
-    private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(OrderConstants.SeatLockDurationMinutes);
     private static readonly TimeSpan ExtensionDuration = TimeSpan.FromMinutes(5);
     private const string KeyPrefix = "lock:session";
     private const string SetPrefix = "locked_seats:session";

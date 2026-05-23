@@ -1,5 +1,6 @@
 using Cinema.Application.Seats.Commands.BatchChangeSeatType;
 using Cinema.Application.Seats.Commands.LockSeat;
+using Cinema.Application.Seats.Commands.UnlockSeat;
 using Cinema.Application.Seats.Commands.UpdateSeat;
 using Cinema.Application.Seats.Commands.UpdateSeatStatus;
 using Cinema.Application.Seats.Dtos;
@@ -31,6 +32,14 @@ public class SeatsController : ApiController
     public async Task<IActionResult> LockSeat([FromBody] LockSeatRequest request)
     {
         var command = new LockSeatCommand(request.SessionId, request.SeatId); 
+        return HandleResult(await Mediator.Send(command));
+    }
+
+    [HttpPost("unlock")]
+    [Authorize] 
+    public async Task<IActionResult> UnlockSeat([FromBody] LockSeatRequest request)
+    {
+        var command = new UnlockSeatCommand(request.SessionId, request.SeatId); 
         return HandleResult(await Mediator.Send(command));
     }
 

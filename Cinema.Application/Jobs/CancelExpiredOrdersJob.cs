@@ -1,3 +1,4 @@
+using Cinema.Application.Common.Constants;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +17,7 @@ public class CancelExpiredOrdersJob(
     {
         logger.LogInformation("Starting CancelExpiredOrdersJob...");
         
-        var timeoutThreshold = DateTime.UtcNow.AddMinutes(-15);
+        var timeoutThreshold = DateTime.UtcNow.AddMinutes(-OrderConstants.SeatLockDurationMinutes);
 
         bool hasMore = true;
         int totalProcessed = 0;
