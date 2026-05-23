@@ -281,6 +281,11 @@ public static class ConfigureInfrastructureServices
             }
         });
 
+        services.AddOptions<LoyaltySettings>()
+            .Bind(configuration.GetSection(LoyaltySettings.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         services.AddRefitClient<IGeminiApi>(geminiRefitSettings)
             .ConfigureHttpClient((sp, client) =>
             {
