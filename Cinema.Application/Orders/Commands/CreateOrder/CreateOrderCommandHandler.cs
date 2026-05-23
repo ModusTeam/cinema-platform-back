@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Payments;
+using Cinema.Application.Common.Utils;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Events;
@@ -129,7 +130,7 @@ public class CreateOrderCommandHandler(
 
     private async Task<PaymentResult> DeductLoyaltyPointsAsync(Guid userId, Guid orderId, int pointsToDeduct, CancellationToken ct)
     {
-        string deductKey = $"deduct-{orderId}";
+        string deductKey = DeterministicGuid.Create($"deduct-{orderId}").ToString();
         var deductResult = await loyaltyService.DeductPointsAsync(userId, pointsToDeduct, orderId, deductKey, ct);
 
         if (!deductResult.Success)
@@ -150,7 +151,7 @@ public class CreateOrderCommandHandler(
 
     private async Task CompensateLoyaltyPointsAsync(Guid userId, Guid orderId, int pointsToDeduct, CancellationToken ct)
     {
-        string refundKey = $"refund-{orderId}";
+        string refundKey = DeterministicGuid.Create($"refund-{orderId}").ToString();
         var refundResult = await loyaltyService.RefundPointsAsync(userId, pointsToDeduct, orderId, refundKey, ct);
 
         if (!refundResult.Success)
