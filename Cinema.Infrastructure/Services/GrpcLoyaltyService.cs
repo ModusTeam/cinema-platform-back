@@ -1,47 +1,44 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Infrastructure.Grpc.Loyalty;
-using Grpc.Core; 
-using Microsoft.Extensions.Configuration;
+using Cinema.Infrastructure.Options;
+using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Cinema.Infrastructure.Services;
 
-public class GrpcLoyaltyService : ILoyaltyService
+public class GrpcLoyaltyService(
+    LoyaltyService.LoyaltyServiceClient client,
+    ILogger<GrpcLoyaltyService> logger,
+    IOptions<LoyaltySettings> loyaltyOptions) : ILoyaltyService
 {
-    private readonly LoyaltyService.LoyaltyServiceClient _client;
-    private readonly ILogger<GrpcLoyaltyService> _logger;
-    private readonly string _apiKey;
+    private readonly string _apiKey = loyaltyOptions.Value.ApiKey
+        ?? throw new InvalidOperationException("LoyaltySettings:ApiKey is not configured.");
 
-    public GrpcLoyaltyService(
-        LoyaltyService.LoyaltyServiceClient client, 
-        ILogger<GrpcLoyaltyService> logger,
-        IConfiguration config)
+    private Metadata BuildMetadata() => new() { { "x-api-key", _apiKey } };
+
+    public async Task<(int Points, string Tier)> GetUserLoyaltyAsync(
+        Guid userId, CancellationToken ct = default)
     {
-        _client = client;
-        _logger = logger;
-        _apiKey = config["InternalServices:ApiKey"] 
-                  ?? throw new InvalidOperationException("InternalServices:ApiKey is not configured");
+        var response = await client.GetBalanceAsync(
+            new GetBalanceRequest { UserId = userId.ToString() },
+            headers: BuildMetadata(), cancellationToken: ct);
+
+        return (response.Balance, response.Tier.ToString());
     }
 
-    private Metadata BuildMetadata() => new()
+    public async Task<(bool IsAllowed, int PointsToDeduct, decimal AmountToPay)> CalculateDiscountAsync(
+        Guid userId, decimal orderAmount, CancellationToken ct = default)
     {
-        { "x-api-key", _apiKey }
-    };
+        var response = await client.CalculateDiscountAsync(
+            new CalculateDiscountRequest
+            {
+                UserId = userId.ToString(),
+                OrderAmount = (double)orderAmount
+            },
+            headers: BuildMetadata(), cancellationToken: ct);
 
-    public async Task<(int Points, string Tier)> GetUserLoyaltyAsync(Guid userId, CancellationToken ct = default)
-    {
-        try
-        {
-            var request = new GetBalanceRequest { UserId = userId.ToString() };
-            
-            var response = await _client.GetBalanceAsync(request, headers: BuildMetadata(), cancellationToken: ct);
-            return (response.Balance, response.Tier.ToString());
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to fetch loyalty for user {UserId}. Defaulting to 0/BRONZE.", userId);
-            return (0, "BRONZE");
-        }
+        return (response.IsAllowed, response.PointsToDeduct, (decimal)response.AmountToPay);
     }
 
     public async Task<(bool Success, int BalanceAfter, string Error)> DeductPointsAsync(
@@ -49,41 +46,70 @@ public class GrpcLoyaltyService : ILoyaltyService
     {
         try
         {
-            var request = new DeductPointsRequest
-            {
-                UserId = userId.ToString(),
-                Amount = amount,
-                OrderId = orderId.ToString(),
-                IdempotencyKey = idempotencyKey
-            };
-            
-            var response = await _client.DeductPointsAsync(request, headers: BuildMetadata(), cancellationToken: ct);
+            var response = await client.DeductPointsAsync(
+                new DeductPointsRequest
+                {
+                    UserId = userId.ToString(),
+                    Amount = amount,
+                    OrderId = orderId.ToString(),
+                    IdempotencyKey = idempotencyKey
+                },
+                headers: BuildMetadata(), cancellationToken: ct);
+
             return (response.Success, response.BalanceAfter, response.ErrorMessage);
         }
-        catch (Exception ex)
+        catch (RpcException ex)
         {
-            _logger.LogError(ex, "gRPC DeductPoints failed for user {UserId}", userId);
-            return (false, 0, "Internal Loyalty Service Error");
+            logger.LogError(ex, "gRPC DeductPoints failed for user {UserId}.", userId);
+            return (false, 0, $"Loyalty service error: {ex.Status.Detail}");
         }
     }
 
-    public async Task<(bool Success, string Error)> UseGoldUpgradeAsync(Guid userId, Guid orderId, CancellationToken ct = default)
+    public async Task<(bool Success, string Error)> RefundPointsAsync(
+        Guid userId, int amount, Guid orderId, string idempotencyKey, CancellationToken ct = default)
     {
         try
         {
-            var request = new UseGoldUpgradeRequest
-            {
-                UserId = userId.ToString(),
-                OrderId = orderId.ToString()
-            };
-            
-            var response = await _client.UseGoldUpgradeAsync(request, headers: BuildMetadata(), cancellationToken: ct);
+            var response = await client.RefundPointsAsync(
+                new RefundPointsRequest
+                {
+                    UserId = userId.ToString(),
+                    Amount = amount,
+                    OrderId = orderId.ToString(),
+                    IdempotencyKey = idempotencyKey
+                },
+                headers: BuildMetadata(), cancellationToken: ct);
+
             return (response.Success, response.ErrorMessage);
         }
-        catch (Exception ex)
+        catch (RpcException ex)
         {
-            _logger.LogError(ex, "gRPC UseGoldUpgrade failed for user {UserId}", userId);
-            return (false, "Internal Loyalty Service Error");
+            logger.LogError(ex,
+                "gRPC RefundPoints failed for user {UserId}, Order {OrderId}. Manual reconciliation may be required.",
+                userId, orderId);
+            return (false, $"Loyalty service error during refund: {ex.Status.Detail}");
+        }
+    }
+
+    public async Task<(bool Success, string Error)> UseGoldUpgradeAsync(
+        Guid userId, Guid orderId, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await client.UseGoldUpgradeAsync(
+                new UseGoldUpgradeRequest
+                {
+                    UserId = userId.ToString(),
+                    OrderId = orderId.ToString()
+                },
+                headers: BuildMetadata(), cancellationToken: ct);
+
+            return (response.Success, response.ErrorMessage);
+        }
+        catch (RpcException ex)
+        {
+            logger.LogError(ex, "gRPC UseGoldUpgrade failed for user {UserId}.", userId);
+            return (false, $"Loyalty service error: {ex.Status.Detail}");
         }
     }
 }
