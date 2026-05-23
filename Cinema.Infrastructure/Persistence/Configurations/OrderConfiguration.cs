@@ -19,6 +19,10 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
             .IsRequired()
             .HasPrecision(18, 2);
 
+        builder.Property(x => x.PaidAmount)
+            .IsRequired()
+            .HasPrecision(18, 2);
+
         builder.Property(x => x.BookingDate)
             .HasConversion(new DateTimeUtcConverter());
 
