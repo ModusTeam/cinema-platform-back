@@ -29,6 +29,11 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
         builder.Property(x => x.IsLoyaltyPaymentAllowed)
             .IsRequired()
             .HasDefaultValue(true);
+
+        builder.Property(x => x.EventType)
+            .IsRequired()
+            .HasMaxLength(50)
+            .HasDefaultValue("STANDARD");
         
         builder.Property(x => x.HallId)
             .HasConversion(x => x.Value, x => new EntityId<Hall>(x));
