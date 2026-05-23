@@ -138,11 +138,19 @@ public class Order : BaseEntity
 
     public void MarkAsFailed()
     {
+        if (Status == OrderStatus.Failed)
+            return;
+
         Status = OrderStatus.Failed;
+        AddDomainEvent(new OrderFailedDomainEvent(this));
     }
 
     public void MarkAsCancelled()
     {
+        if (Status == OrderStatus.Cancelled)
+            return;
+
         Status = OrderStatus.Cancelled;
+        AddDomainEvent(new OrderCancelledDomainEvent(this));
     }
 }

@@ -35,6 +35,16 @@ public class RedisSeatLockingService : ISeatLockingService
             return 0
         end";
 
+    private const string BatchUnlockScript = @"
+        local count = 0
+        for i, key in ipairs(KEYS) do
+            if redis.call('get', key) == ARGV[1] then
+                redis.call('del', key)
+                count = count + 1
+            end
+        end
+        return count";
+
     private string GetKey(Guid sessionId, Guid seatId) => $"{KeyPrefix}:{{{sessionId}}}:{seatId}";
     private string GetSetKey(Guid sessionId) => $"{SetPrefix}:{{{sessionId}}}";
 
@@ -186,6 +196,45 @@ public class RedisSeatLockingService : ISeatLockingService
         {
             _logger.LogError(ex, "Redis error while unlocking seat {SeatId}", seatId);
             return Result.Failure(new Error("Redis.Error", "Failed to unlock seat."));
+        }
+    }
+
+    public async Task<Result> UnlockSeatsAsync(Guid sessionId, IEnumerable<Guid> seatIds, Guid userId, CancellationToken ct = default)
+    {
+        var seatIdsList = seatIds.ToList();
+        if (seatIdsList.Count == 0) return Result.Success();
+
+        var keys = seatIdsList.Select(seatId => new RedisKey(GetKey(sessionId, seatId))).ToArray();
+        
+        try
+        {
+            var result = await _resiliencePipeline.ExecuteAsync(async token => 
+                await _db.ScriptEvaluateAsync(BatchUnlockScript, keys: keys, values: [userId.ToString()]), ct);
+            
+            if (!result.IsNull && (int)result > 0)
+            {
+                var stringSeatIds = seatIdsList.Select(id => (RedisValue)id.ToString()).ToArray();
+                await _db.SetRemoveAsync(GetSetKey(sessionId), stringSeatIds);
+                
+                _logger.LogInformation("{Count} seats unlocked by user {UserId}", (int)result, userId);
+
+                try
+                {
+                    var tasks = seatIdsList.Select(seatId => _notifier.NotifySeatUnlockedAsync(sessionId, seatId, ct));
+                    await Task.WhenAll(tasks);
+                }
+                catch (Exception e)
+                {
+                    _logger.LogWarning(e, "Notification failed on batch unlock");
+                }
+            }
+            
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Redis error while batch unlocking seats for session {SessionId}", sessionId);
+            return Result.Failure(new Error("Redis.Error", "Failed to unlock seats."));
         }
     }
 

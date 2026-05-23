@@ -1,6 +1,7 @@
-﻿using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Interfaces;
+using Cinema.Infrastructure.Persistence.Interceptors;
 using Cinema.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,8 @@ public static class ConfigurePersistenceServices
         
         services.AddSingleton(dataSource);
 
+        services.AddScoped<DispatchDomainEventsInterceptor>();
+
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
         {
             var existingDataSource = sp.GetRequiredService<NpgsqlDataSource>();
@@ -31,6 +34,7 @@ public static class ConfigurePersistenceServices
                 .UseNpgsql(existingDataSource,
                     builder => { builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName); })
                 .UseSnakeCaseNamingConvention()
+                .AddInterceptors(sp.GetRequiredService<DispatchDomainEventsInterceptor>())
                 .ConfigureWarnings(w => w.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
         });
 

@@ -36,9 +36,7 @@ public class CreateOrderCommandHandler(
         var reservationResult = await reservationService.ReserveOrderAsync(userId.Value, request.SessionId, request.SeatIds, ct);
         if (reservationResult.IsFailure)
         {
-            foreach (var seatId in request.SeatIds)
-                await seatLockingService.UnlockSeatAsync(request.SessionId, seatId, userId.Value, ct);
-
+            await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);
             return reservationResult;
         }
 
@@ -192,11 +190,6 @@ public class CreateOrderCommandHandler(
 
         await context.SaveChangesAsync(ct);
 
-        await publisher.Publish(new OrderPaidEvent(order), ct);
-
-        foreach (var seatId in seatIds)
-            await seatLockingService.UnlockSeatAsync(sessionId, seatId, userId, ct);
-
         return Result.Success(order.Id.Value);
     }
 
@@ -208,14 +201,6 @@ public class CreateOrderCommandHandler(
         if (order != null)
         {
             order.MarkAsFailed();
-        }
-
-        // Guarantee locks are released even if SaveChangesAsync throws
-        foreach (var seatId in seatIds)
-            await seatLockingService.UnlockSeatAsync(sessionId, seatId, userId, ct);
-
-        if (order != null)
-        {
             await context.SaveChangesAsync(ct);
         }
 
