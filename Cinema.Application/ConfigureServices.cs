@@ -34,6 +34,7 @@ public static class ConfigureServices
         services.AddScoped<IMapper, ServiceMapper>();
         services.AddScoped<SessionSchedulingService>();
         services.AddScoped<SeatLayoutService>();
+        services.AddScoped<Cinema.Application.Common.Interfaces.IOrderCheckoutOrchestrator, Cinema.Application.Orders.Services.OrderCheckoutOrchestrator>();
         return services;
     }
 }
