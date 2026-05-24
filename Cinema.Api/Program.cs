@@ -25,7 +25,10 @@ app.UseMiddleware<RequestLogContextMiddleware>();
 app.UseSwagger();
 app.UseSwaggerUI();
 
-app.UseHttpsRedirection();
+if (app.Environment.IsProduction() == false)
+{
+    app.UseHttpsRedirection();
+}
 app.UseCors("AllowClient");
 app.UseRateLimiter();
 
