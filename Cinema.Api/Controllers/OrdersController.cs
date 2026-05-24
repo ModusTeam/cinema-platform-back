@@ -19,7 +19,8 @@ public class OrdersController : ApiController
             SessionId = request.SessionId, 
             SeatIds = request.SeatIds, 
             PaymentToken = request.PaymentToken, 
-            UseLoyaltyPoints = request.UseLoyaltyPoints
+            UseLoyaltyPoints = request.UseLoyaltyPoints,
+            ApplyGoldUpgrade = request.ApplyGoldUpgrade
         };
         
         var result = await Mediator.Send(command);
@@ -50,4 +51,4 @@ public class OrdersController : ApiController
     }
 }
 
-public record CreateOrderRequest(Guid SessionId, List<Guid> SeatIds, string PaymentToken, bool UseLoyaltyPoints);
+public record CreateOrderRequest(Guid SessionId, List<Guid> SeatIds, string PaymentToken, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);
