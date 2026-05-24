@@ -18,7 +18,6 @@ public class CreateOrderCommandHandler(
     IPaymentService paymentService,
     ILoyaltyService loyaltyService,
     IApplicationDbContext context,
-    IPublisher publisher,
     IPriceCalculator priceCalculator,
     ILogger<CreateOrderCommandHandler> logger) : IRequestHandler<CreateOrderCommand, Result<Guid>>
 {

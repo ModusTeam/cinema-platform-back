@@ -112,4 +112,26 @@ public class GrpcLoyaltyService(
             return (false, $"Loyalty service error: {ex.Status.Detail}");
         }
     }
+
+    public async Task<(bool Success, string Error)> RollbackGoldUpgradeAsync(
+        Guid userId, Guid orderId, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await client.RollbackGoldUpgradeAsync(
+                new RollbackGoldUpgradeRequest
+                {
+                    UserId = userId.ToString(),
+                    OrderId = orderId.ToString()
+                },
+                headers: BuildMetadata(), cancellationToken: ct);
+
+            return (response.Success, response.ErrorMessage);
+        }
+        catch (RpcException ex)
+        {
+            logger.LogError(ex, "gRPC RollbackGoldUpgrade failed for user {UserId}, Order {OrderId}.", userId, orderId);
+            return (false, $"Loyalty service error: {ex.Status.Detail}");
+        }
+    }
 }

@@ -33,6 +33,7 @@ service LoyaltyService {
   rpc RefundPoints(RefundPointsRequest) returns (RefundPointsResponse);
   rpc UseGoldUpgrade(UseGoldUpgradeRequest) returns (UseGoldUpgradeResponse);
   rpc CalculateDiscount(CalculateDiscountRequest) returns (CalculateDiscountResponse);
+  rpc RollbackGoldUpgrade(RollbackGoldUpgradeRequest) returns (RollbackGoldUpgradeResponse);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,6 +116,20 @@ message UseGoldUpgradeRequest {
 }
 
 message UseGoldUpgradeResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RollbackGoldUpgrade
+// ─────────────────────────────────────────────────────────────────────────────
+
+message RollbackGoldUpgradeRequest {
+  string user_id = 1;
+  string order_id = 2;
+}
+
+message RollbackGoldUpgradeResponse {
   bool success = 1;
   string error_message = 2;
 }
