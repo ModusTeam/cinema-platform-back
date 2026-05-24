@@ -11,4 +11,5 @@ public class CreateOrderCommand : IRequest<Result<Guid>>
     public string PaymentToken { get; set; } = string.Empty;
     
     public bool UseLoyaltyPoints { get; set; } 
+    public bool ApplyGoldUpgrade { get; set; }
 }

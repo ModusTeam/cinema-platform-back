@@ -58,4 +58,15 @@ public class Ticket
             
         TicketStatus = TicketStatus.Used;
     }
+
+    public bool IsGoldUpgraded { get; private set; }
+
+    public void ApplyGoldUpgrade(decimal standardPrice)
+    {
+        if (IsGoldUpgraded)
+            throw new DomainException("Ticket is already gold upgraded.");
+
+        PriceSnapshot = standardPrice;
+        IsGoldUpgraded = true;
+    }
 }

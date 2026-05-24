@@ -153,4 +153,29 @@ public class Order : BaseEntity
         Status = OrderStatus.Cancelled;
         AddDomainEvent(new OrderCancelledDomainEvent(this));
     }
+
+    public void ApplyGoldSeatUpgrade(decimal standardSeatPrice)
+    {
+        var ticketToUpgrade = _tickets
+            .Where(t => !t.IsGoldUpgraded)
+            .OrderByDescending(t => t.PriceSnapshot)
+            .FirstOrDefault();
+
+        if (ticketToUpgrade == null)
+            throw new DomainException("No tickets found to upgrade.");
+
+        if (ticketToUpgrade.PriceSnapshot <= standardSeatPrice)
+            throw new DomainException("No eligible ticket found for gold upgrade (ticket price is already less than or equal to standard price).");
+
+        decimal priceDifference = ticketToUpgrade.PriceSnapshot - standardSeatPrice;
+        
+        ticketToUpgrade.ApplyGoldUpgrade(standardSeatPrice);
+
+        TotalAmount -= priceDifference;
+        
+        if (PaidAmount > TotalAmount)
+        {
+            PaidAmount = TotalAmount;
+        }
+    }
 }

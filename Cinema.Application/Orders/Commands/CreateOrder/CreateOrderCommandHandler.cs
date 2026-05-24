@@ -19,6 +19,7 @@ public class CreateOrderCommandHandler(
     ILoyaltyService loyaltyService,
     IApplicationDbContext context,
     IPublisher publisher,
+    IPriceCalculator priceCalculator,
     ILogger<CreateOrderCommandHandler> logger) : IRequestHandler<CreateOrderCommand, Result<Guid>>
 {
     public async Task<Result<Guid>> Handle(CreateOrderCommand request, CancellationToken ct)
@@ -42,6 +43,50 @@ public class CreateOrderCommandHandler(
 
         var orderId = reservationResult.Value;
 
+        if (request.ApplyGoldUpgrade)
+        {
+            var orderToUpgrade = await context.Orders
+                .Include(o => o.Tickets)
+                .FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), ct);
+
+            if (orderToUpgrade == null)
+            {
+                return Result.Failure<Guid>(new Error("Order.NotFound", "Order not found during gold upgrade processing."));
+            }
+
+            var sessionWithPricing = await context.Sessions
+                .Include(s => s.Pricing)
+                .ThenInclude(p => p!.PricingItems)
+                .FirstOrDefaultAsync(s => s.Id == new EntityId<Session>(request.SessionId), ct);
+
+            var standardSeatType = await context.SeatTypes
+                .FirstOrDefaultAsync(st => st.Name.ToUpper() == "STANDARD", ct);
+
+            if (sessionWithPricing?.Pricing == null || standardSeatType == null)
+            {
+                return Result.Failure<Guid>(new Error("Order.StandardPriceNotFound", "Could not determine standard seat price for the upgrade."));
+            }
+
+            decimal standardPrice = priceCalculator.CalculatePrice(sessionWithPricing.Pricing, standardSeatType.Id, sessionWithPricing.StartTime);
+
+            if (!orderToUpgrade.Tickets.Any(t => t.PriceSnapshot > standardPrice && !t.IsGoldUpgraded))
+            {
+                await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);
+                return Result.Failure<Guid>(new Error("Order.NoEligibleTickets", "No tickets eligible for gold upgrade."));
+            }
+
+            var goldUpgradeResult = await loyaltyService.UseGoldUpgradeAsync(userId.Value, orderId, ct);
+            if (!goldUpgradeResult.Success)
+            {
+                await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);
+                return Result.Failure<Guid>(new Error("Order.GoldUpgradeFailed", $"Gold upgrade failed: {goldUpgradeResult.Error}"));
+            }
+
+            orderToUpgrade.ApplyGoldSeatUpgrade(standardPrice);
+            await context.SaveChangesAsync(ct);
+            logger.LogInformation("Applied Gold Upgrade to order {OrderId} for user {UserId}", orderId, userId.Value);
+        }
+
         var orderAmount = await context.Orders
             .Where(o => o.Id == new EntityId<Order>(orderId))
             .Select(o => o.TotalAmount)
@@ -55,7 +100,7 @@ public class CreateOrderCommandHandler(
 
         var (pointsToDeduct, amountToPay) = loyaltyDiscountResult.Value;
 
-        var paymentResult = await ProcessPaymentFlowAsync(userId.Value, orderId, amountToPay, request.PaymentToken, pointsToDeduct, ct);
+        var paymentResult = await ProcessPaymentFlowAsync(userId.Value, orderId, amountToPay, request.PaymentToken, pointsToDeduct, request.ApplyGoldUpgrade, ct);
         if (!paymentResult.IsSuccess)
         {
             return await FailOrderAsync(orderId, paymentResult.ErrorMessage!, request.SessionId, request.SeatIds, userId.Value, ct);
@@ -101,7 +146,7 @@ public class CreateOrderCommandHandler(
     }
 
     private async Task<PaymentResult> ProcessPaymentFlowAsync(
-        Guid userId, Guid orderId, decimal amountToPay, string paymentToken, int pointsToDeduct, CancellationToken ct)
+        Guid userId, Guid orderId, decimal amountToPay, string paymentToken, int pointsToDeduct, bool applyGoldUpgrade, CancellationToken ct)
     {
         if (pointsToDeduct > 0)
         {
@@ -123,9 +168,25 @@ public class CreateOrderCommandHandler(
             paymentResult = PaymentResult.Failure("Payment system error");
         }
 
-        if (!paymentResult.IsSuccess && pointsToDeduct > 0)
+        if (!paymentResult.IsSuccess)
         {
-            await CompensateLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);
+            if (pointsToDeduct > 0)
+            {
+                await CompensateLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);
+            }
+
+            if (applyGoldUpgrade)
+            {
+                var rollbackResult = await loyaltyService.RollbackGoldUpgradeAsync(userId, orderId, ct);
+                if (!rollbackResult.Success)
+                {
+                    logger.LogCritical("SAGA COMPENSATION FAILED: Could not rollback Gold Upgrade for user {UserId}, Order {OrderId}. Error: {Error}", userId, orderId, rollbackResult.Error);
+                }
+                else
+                {
+                    logger.LogWarning("Payment failed for Order {OrderId}. Successfully rolled back Gold Upgrade for user {UserId}.", orderId, userId);
+                }
+            }
         }
 
         return paymentResult;

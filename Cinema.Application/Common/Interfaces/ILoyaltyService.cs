@@ -16,4 +16,7 @@ public interface ILoyaltyService
 
     Task<(bool Success, string Error)> UseGoldUpgradeAsync(
         Guid userId, Guid orderId, CancellationToken ct = default);
+
+    Task<(bool Success, string Error)> RollbackGoldUpgradeAsync(
+        Guid userId, Guid orderId, CancellationToken ct = default);
 }
