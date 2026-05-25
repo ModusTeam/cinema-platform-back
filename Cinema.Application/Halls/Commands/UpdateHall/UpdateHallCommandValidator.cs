@@ -1,12 +1,16 @@
 using FluentValidation;
 
-namespace Cinema.Application.Halls.Commands.UpdateHall;
-
-public class UpdateHallCommandValidator : AbstractValidator<UpdateHallCommand>
+namespace Cinema.Application.Halls.Commands.UpdateHall
 {
-    public UpdateHallCommandValidator()
+    public class UpdateHallCommandValidator : AbstractValidator<UpdateHallCommand>
     {
-        RuleFor(x => x.HallId).NotEmpty();
-        RuleFor(x => x.Name).NotEmpty().MaximumLength(50);
+        public UpdateHallCommandValidator()
+        {
+            RuleFor(x => x.HallId)
+                .NotEmpty().WithMessage("Hall ID must be a valid GUID.");
+
+            RuleFor(x => x.Name)
+                .NotEmpty().WithMessage("Hall name is required.");
+        }
     }
 }

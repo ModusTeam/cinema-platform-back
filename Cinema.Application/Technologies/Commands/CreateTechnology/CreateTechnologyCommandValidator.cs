@@ -1,17 +1,18 @@
 using FluentValidation;
 
-namespace Cinema.Application.Technologies.Commands.CreateTechnology;
-
-public class CreateTechnologyCommandValidator : AbstractValidator<CreateTechnologyCommand>
+namespace Cinema.Application.Technologies.Commands.CreateTechnology
 {
-    public CreateTechnologyCommandValidator()
+    public class CreateTechnologyCommandValidator : AbstractValidator<CreateTechnologyCommand>
     {
-        RuleFor(x => x.Name)
-            .NotEmpty().WithMessage("Name is required.")
-            .MaximumLength(100).WithMessage("Name cannot exceed 100 characters.");
+        public CreateTechnologyCommandValidator()
+        {
+            RuleFor(x => x.Name)
+                .NotEmpty().WithMessage("Technology name is required.")
+                .MaximumLength(100).WithMessage("Technology name must not exceed 100 characters.");
 
-        RuleFor(x => x.Type)
-            .NotEmpty().WithMessage("Type is required.")
-            .MaximumLength(50).WithMessage("Type cannot exceed 50 characters.");
+            RuleFor(x => x.Type)
+                .NotEmpty().WithMessage("Technology type is required.")
+                .MaximumLength(100).WithMessage("Technology type must not exceed 100 characters.");
+        }
     }
 }
