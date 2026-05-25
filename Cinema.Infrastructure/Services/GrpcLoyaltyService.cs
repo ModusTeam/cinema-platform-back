@@ -228,4 +228,6 @@ public class GrpcLoyaltyService(
             throw new InvalidOperationException(ex.Status.Detail);
         }
     }
+
+
 }

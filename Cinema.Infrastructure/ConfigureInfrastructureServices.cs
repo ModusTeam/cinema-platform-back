@@ -77,10 +77,12 @@ public static class ConfigureInfrastructureServices
         services.AddSingleton(dataSource);
 
         // Interceptors & DB Context
+        services.AddScoped<Cinema.Infrastructure.Persistence.Interceptors.DispatchDomainEventsInterceptor>();
         services.AddScoped<ApplicationDbContextInitializer>();
 
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
         {
+            options.AddInterceptors(sp.GetRequiredService<Cinema.Infrastructure.Persistence.Interceptors.DispatchDomainEventsInterceptor>());
 
             options.UseNpgsql(dataSource, builder =>
                 {
@@ -281,6 +283,15 @@ public static class ConfigureInfrastructureServices
             }
         });
 
+        services.AddGrpcClient<AchievementsService.AchievementsServiceClient>(o =>
+        {
+            var url = configuration["Grpc:LoyaltyServiceUrl"];
+            if (!string.IsNullOrEmpty(url))
+            {
+                o.Address = new Uri(url);
+            }
+        });
+
         services.AddOptions<LoyaltySettings>()
             .Bind(configuration.GetSection(LoyaltySettings.SectionName))
             .ValidateDataAnnotations()
@@ -313,6 +324,7 @@ public static class ConfigureInfrastructureServices
         services.AddScoped<IOrderReservationService, OrderReservationService>();
         services.AddScoped<ILoyaltyService, GrpcLoyaltyService>();
         services.AddScoped<IAdminLoyaltyService, GrpcLoyaltyService>();
+        services.AddScoped<IAdminAchievementsService, GrpcAchievementsService>();
         
         return services;
     }

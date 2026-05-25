@@ -22,6 +22,33 @@ enum EventType {
   EVENT_TYPE_PREMIERE = 3;
 }
 
+enum AchievementCategory {
+  ACHIEVEMENT_CATEGORY_UNSPECIFIED = 0;
+  ACHIEVEMENT_CATEGORY_VISITS = 1;
+  ACHIEVEMENT_CATEGORY_SPENDING = 2;
+  ACHIEVEMENT_CATEGORY_TIER = 3;
+  ACHIEVEMENT_CATEGORY_TIME = 4;
+  ACHIEVEMENT_CATEGORY_SPECIAL = 5;
+  ACHIEVEMENT_CATEGORY_STREAK = 6;
+  ACHIEVEMENT_CATEGORY_SECRET = 7;
+}
+
+enum AchievementRarity {
+  ACHIEVEMENT_RARITY_UNSPECIFIED = 0;
+  ACHIEVEMENT_RARITY_COMMON = 1;
+  ACHIEVEMENT_RARITY_UNCOMMON = 2;
+  ACHIEVEMENT_RARITY_RARE = 3;
+  ACHIEVEMENT_RARITY_EPIC = 4;
+  ACHIEVEMENT_RARITY_LEGENDARY = 5;
+}
+
+enum AchievementStrategy {
+  ACHIEVEMENT_STRATEGY_UNSPECIFIED = 0;
+  ACHIEVEMENT_STRATEGY_INSTANT = 1;
+  ACHIEVEMENT_STRATEGY_THRESHOLD = 2;
+  ACHIEVEMENT_STRATEGY_STREAK = 3;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Service
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,6 +66,17 @@ service LoyaltyService {
   rpc ModifyUserPoints(ModifyUserPointsRequest) returns (ModifyUserPointsResponse);
   rpc GetAdminUsers(GetAdminUsersRequest) returns (GetAdminUsersResponse);
   rpc GrantVipStatus(GrantVipStatusRequest) returns (GrantVipStatusResponse);
+}
+
+service AchievementsService {
+  // Admin (CRUD-ish)
+  rpc CreateAchievement(CreateAchievementRequest) returns (CreateAchievementResponse);
+  rpc UpdateAchievement(UpdateAchievementRequest) returns (UpdateAchievementResponse);
+  rpc DeleteAchievement(DeleteAchievementRequest) returns (DeleteAchievementResponse);
+  rpc GetAdminAchievements(GetAdminAchievementsRequest) returns (GetAdminAchievementsResponse);
+
+  // Client (user-facing)
+  rpc GetUserAchievements(GetUserAchievementsRequest) returns (GetUserAchievementsResponse);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -232,237 +270,122 @@ message GrantVipStatusResponse {
   string new_tier = 2;
   bool success = 3;
 }
-syntax = "proto3";
 
-package loyalty.v1;
-
-option csharp_namespace = "Cinema.Infrastructure.Grpc.Loyalty";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Enums
-// ─────────────────────────────────────────────────────────────────────────────
-
-enum Tier {
-  TIER_UNSPECIFIED = 0;
-  TIER_BRONZE = 1;
-  TIER_SILVER = 2;
-  TIER_GOLD = 3;
-}
-
-enum EventType {
-  EVENT_TYPE_UNSPECIFIED = 0;
-  EVENT_TYPE_STANDARD = 1;
-  EVENT_TYPE_SPECIAL = 2;
-  EVENT_TYPE_PREMIERE = 3;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Service
-// ─────────────────────────────────────────────────────────────────────────────
-
-service LoyaltyService {
-  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
-  rpc GetFullProfile(GetFullProfileRequest) returns (GetFullProfileResponse);
-  rpc DeductPoints(DeductPointsRequest) returns (DeductPointsResponse);
-  rpc UseGoldUpgrade(UseGoldUpgradeRequest) returns (UseGoldUpgradeResponse);
-  rpc RefundPoints(RefundPointsRequest) returns (RefundPointsResponse);
-  rpc CalculateDiscount(CalculateDiscountRequest) returns (CalculateDiscountResponse);
-  rpc RollbackGoldUpgrade(RollbackGoldUpgradeRequest) returns (RollbackGoldUpgradeResponse);
-  rpc GetAdminUserBalance(GetAdminUserBalanceRequest) returns (GetAdminUserBalanceResponse);
-  rpc GetAdminTransactionHistory(GetAdminTransactionHistoryRequest) returns (GetAdminTransactionHistoryResponse);
-  rpc ModifyUserPoints(ModifyUserPointsRequest) returns (ModifyUserPointsResponse);
-  rpc GetAdminUsers(GetAdminUsersRequest) returns (GetAdminUsersResponse);
-  rpc GrantVipStatus(GrantVipStatusRequest) returns (GrantVipStatusResponse);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GetBalance
-// ─────────────────────────────────────────────────────────────────────────────
-
-message GetBalanceRequest {
-  string user_id = 1;
-}
-
-message GetBalanceResponse {
-  int32 balance = 1;
-  int32 lifetime_points = 2;
-  int32 year_points = 3;
-  Tier tier = 4;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GetFullProfile
-// ─────────────────────────────────────────────────────────────────────────────
-
-message GetFullProfileRequest {
-  string user_id = 1;
-}
-
-message GetFullProfileResponse {
-  string user_id = 1;
-  Tier tier = 2;
-  int32 balance = 3;
-  int32 lifetime_points = 4;
-  int32 year_points = 5;
-  int32 year_visits = 6;
-  string tier_expires_at = 7;
-  string balance_expires_at = 8;
-  bool is_birthday_week = 9;
-  bool gold_upgrade_available = 10;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DeductPoints
-// ─────────────────────────────────────────────────────────────────────────────
-
-message DeductPointsRequest {
-  string user_id = 1;
-  int32 amount = 2;
-  string order_id = 3;
-  string idempotency_key = 4;
-}
-
-message DeductPointsResponse {
-  bool success = 1;
-  int32 balance_after = 2;
-  string error_message = 3;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// UseGoldUpgrade
-// ─────────────────────────────────────────────────────────────────────────────
-
-message UseGoldUpgradeRequest {
-  string user_id = 1;
-  string order_id = 2;
-}
-
-message UseGoldUpgradeResponse {
-  bool success = 1;
-  string error_message = 2;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RefundPoints
-// ─────────────────────────────────────────────────────────────────────────────
-
-message RefundPointsRequest {
-  string user_id = 1;
-  int32 amount = 2;
-  string order_id = 3;
-  string idempotency_key = 4;
-}
-
-message RefundPointsResponse {
-  bool success = 1;
-  int32 balance_after = 2;
-  string error_message = 3;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CalculateDiscountRequest
-// ─────────────────────────────────────────────────────────────────────────────
-
-message CalculateDiscountRequest {
-  string user_id = 1;
-  double order_amount = 2;
-}
-
-message CalculateDiscountResponse {
-  bool is_allowed = 1;
-  int32 points_to_deduct = 2;
-  double amount_to_pay = 3;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RollbackGoldUpgradeRequest
-// ─────────────────────────────────────────────────────────────────────────────
-
-message RollbackGoldUpgradeRequest {
-  string user_id = 1;
-  string order_id = 2;
-}
-
-message RollbackGoldUpgradeResponse {
-  bool success = 1;
-  string error_message = 2;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Admin
-// ─────────────────────────────────────────────────────────────────────────────
-
-message GetAdminUserBalanceRequest {
-  string user_id = 1;
-}
-
-message GetAdminUserBalanceResponse {
-  string tier = 1;
-  int32 balance = 2;
-  int32 lifetime_points = 3;
-}
-
-message GetAdminTransactionHistoryRequest {
-  string user_id = 1;
-  int32 limit = 2;
-  int32 skip = 3;
-}
-
-message AdminTransactionMessage {
+message AchievementDto {
   string id = 1;
-  string type = 2;
-  int32 points = 3;
-  int32 balance_after = 4;
-  string order_id = 5;
-  string description = 6;
-  string created_at = 7;
+  string code = 2;
+
+  string name = 3;
+  string description = 4;
+
+  string secret_hint = 5;
+  bool is_secret = 6;
+
+  string icon = 7;
+  AchievementCategory category = 8;
+  AchievementRarity rarity = 9;
+  AchievementStrategy strategy = 10;
+
+  string criteria_json = 11;
+
+  int32 reward_points = 12;
+  int32 sort_order = 13;
+
+  bool is_active = 14;
+
+  string created_at = 15;
+  string updated_at = 16;
 }
 
-message GetAdminTransactionHistoryResponse {
-  repeated AdminTransactionMessage transactions = 1;
+message CreateAchievementRequest {
+  string code = 1;
+
+  string name = 2;
+  string description = 3;
+
+  string secret_hint = 4;
+  bool is_secret = 5;
+
+  string icon = 6;
+  AchievementCategory category = 7;
+  AchievementRarity rarity = 8;
+  AchievementStrategy strategy = 9;
+
+  string criteria_json = 10;
+
+  int32 reward_points = 11;
+  int32 sort_order = 12;
+
+  bool is_active = 13;
 }
 
-message ModifyUserPointsRequest {
+message CreateAchievementResponse {
+  AchievementDto achievement = 1;
+}
+
+message UpdateAchievementRequest {
+  string id = 1;
+
+  string code = 2;
+
+  string name = 3;
+  string description = 4;
+
+  string secret_hint = 5;
+  bool is_secret = 6;
+
+  string icon = 7;
+  AchievementCategory category = 8;
+  AchievementRarity rarity = 9;
+  AchievementStrategy strategy = 10;
+
+  string criteria_json = 11;
+
+  int32 reward_points = 12;
+  int32 sort_order = 13;
+
+  bool is_active = 14;
+}
+
+message UpdateAchievementResponse {
+  AchievementDto achievement = 1;
+}
+
+message GetAdminAchievementsRequest {
+  bool include_inactive = 1;
+
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message GetAdminAchievementsResponse {
+  repeated AchievementDto achievements = 1;
+  int32 total = 2;
+}
+
+message UserAchievementDto {
+  AchievementDto achievement = 1;
+
+  int32 current = 2;
+  int32 target = 3;
+
+  bool is_unlocked = 4;
+  string unlocked_at = 5;
+}
+
+message GetUserAchievementsRequest {
   string user_id = 1;
-  string admin_id = 2;
-  int32 points = 3;
-  string reason = 4;
+  bool include_locked = 2;
 }
 
-message ModifyUserPointsResponse {
-  string user_id = 1;
-  string tier = 2;
-  int32 balance = 3;
-  bool success = 4;
+message GetUserAchievementsResponse {
+  repeated UserAchievementDto achievements = 1;
 }
 
-message GetAdminUsersRequest {
-  int32 limit = 1;
-  int32 skip = 2;
-  string tier_filter = 3;
-  repeated string user_ids = 4;
+message DeleteAchievementRequest {
+  string id = 1;
 }
 
-message AdminUserProfile {
-  string user_id = 1;
-  string tier = 2;
-  int32 balance = 3;
-  int32 lifetime_points = 4;
-}
-
-message GetAdminUsersResponse {
-  repeated AdminUserProfile profiles = 1;
-  int32 total_count = 2;
-}
-
-message GrantVipStatusRequest {
-  string user_id = 1;
-  string admin_id = 2;
-  string reason = 3;
-}
-
-message GrantVipStatusResponse {
-  string user_id = 1;
-  string new_tier = 2;
-  bool success = 3;
+message DeleteAchievementResponse {
+  AchievementDto achievement = 1;
 }

@@ -23,6 +23,7 @@ public class OrderPaidIntegrationEventHandler(
 
     public async Task Handle(OrderPaidEvent notification, CancellationToken cancellationToken)
     {
+        logger.LogInformation("OrderPaidIntegrationEventHandler started for Order {OrderId}", notification.Order.Id);
         var order = notification.Order;
 
         var user = await context.Users
@@ -59,6 +60,8 @@ public class OrderPaidIntegrationEventHandler(
             var endpoint = await sendEndpointProvider.GetSendEndpoint(
                 new Uri("queue:loyalty_ticket_purchased"));
 
+            logger.LogInformation("Sending NestJsTicketPurchasedEvent for Order {OrderId} to loyalty_ticket_purchased", order.Id);
+
             await endpoint.Send(
                 new NestJsTicketPurchasedEvent("TicketPurchased", new NestJsTicketPurchasedDto(
                     EventId:     order.Id.Value,
@@ -78,6 +81,7 @@ public class OrderPaidIntegrationEventHandler(
                 cancellationToken);
 
             logger.LogInformation("Order {OrderId} published to RabbitMQ.", order.Id);
+            logger.LogInformation("NestJsTicketPurchasedEvent sent for Order {OrderId}", order.Id);
         }
         catch (Exception ex)
         {
