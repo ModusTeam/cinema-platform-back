@@ -80,6 +80,16 @@ public class Movie : BaseEntity
         IsDeleted = true;
     }
     
+    public void Restore()
+    {
+        IsDeleted = false;
+    }
+    
+    public void ClearGenres()
+    {
+        MovieGenres.Clear();
+    }
+
     private Movie(
         EntityId<Movie> id,
         int? externalId,
@@ -133,6 +143,28 @@ public class Movie : BaseEntity
         );
 
         return movie;
+    }
+
+    public void UpdateFromTmdb(
+        string title,
+        string? description,
+        int duration,
+        decimal rating,
+        DateTime? releaseDate,
+        string? posterUrl,
+        string? backdropUrl,
+        string? trailerUrl,
+        string? ageRestriction = null)
+    {
+        Title = title;
+        Description = description;
+        DurationMinutes = duration;
+        Rating = rating;
+        ReleaseYear = releaseDate?.Year ?? DateTime.UtcNow.Year;
+        PosterUrl = posterUrl;
+        BackdropUrl = backdropUrl;
+        TrailerUrl = trailerUrl;
+        AgeRestriction = ageRestriction;
     }
 
     public void SetAgeRestriction(string? ageRestriction)

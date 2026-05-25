@@ -8,6 +8,7 @@ using Cinema.Domain.Shared;
 using Hangfire;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Data;
 
@@ -17,19 +18,30 @@ public class ImportMovieCommandHandler(
     IApplicationDbContext context,
     ITmdbApi tmdbApi,
     IOptions<TmdbSettings> settings,
-    IBackgroundJobClient jobClient
+    IBackgroundJobClient jobClient,
+    ILogger<ImportMovieCommandHandler> logger
     ) : IRequestHandler<ImportMovieCommand, Result<Guid>>
 {
     private readonly TmdbSettings _settings = settings.Value;
 
     public async Task<Result<Guid>> Handle(ImportMovieCommand request, CancellationToken ct)
     {
-        if (await context.Movies.AnyAsync(m => m.ExternalId == request.TmdbId, ct))
+        var existing = await context.Movies
+            .Include(m => m.MovieGenres)
+            .FirstOrDefaultAsync(m => m.ExternalId == request.TmdbId, ct);
+
+        if (existing is not null && !existing.IsDeleted)
+        {
+            logger.LogWarning("Movie with TMDB ID {TmdbId} is already imported and active.", request.TmdbId);
             return Result.Failure<Guid>(MovieErrors.AlreadyImported);
+        }
 
         var detailsResult = await FetchTmdbDetailsAsync(request.TmdbId, ct);
         if (detailsResult.IsFailure)
+        {
+            logger.LogError("Failed to fetch TMDB details for movie {TmdbId}", request.TmdbId);
             return Result.Failure<Guid>(detailsResult.Error);
+        }
 
         var details = detailsResult.Value;
         var dbContext = (DbContext)context;
@@ -41,17 +53,61 @@ public class ImportMovieCommandHandler(
 
             try
             {
-                var movie = MapToMovie(details);
+                var movie = existing;
+                var isRestored = false;
+
+                if (movie is not null && movie.IsDeleted)
+                {
+                    movie.Restore();
+                    movie.UpdateFromTmdb(
+                        details.Title,
+                        details.Overview,
+                        details.Runtime ?? 0,
+                        (decimal)details.VoteAverage,
+                        DateTime.TryParse(details.ReleaseDate, out var d) ? d : null,
+                        !string.IsNullOrEmpty(details.PosterPath) ? $"{_settings.ImageBaseUrl}{details.PosterPath}" : null,
+                        !string.IsNullOrEmpty(details.BackdropPath) ? $"{_settings.ImageBaseUrl}{details.BackdropPath}" : null,
+                        ExtractTrailerUrl(details)
+                    );
+                    movie.ClearGenres();
+                    isRestored = true;
+                }
+                else
+                {
+                    movie = MapToMovie(details);
+                    context.Movies.Add(movie);
+                }
+
                 var ageRestriction = !string.IsNullOrWhiteSpace(request.AgeRestrictionOverride)
                     ? request.AgeRestrictionOverride
                     : ExtractAgeRestriction(details);
                 movie.SetAgeRestriction(ageRestriction);
 
+                if (isRestored && details.Credits?.Cast != null)
+                {
+                    var cast = details.Credits.Cast
+                        .OrderBy(c => c.Order)
+                        .Take(MovieConstants.MaxImportedCastMembers)
+                        .Select(c => new MovieCastMember
+                        {
+                            ExternalId = c.Id,
+                            Name       = c.Name,
+                            Role       = c.Character,
+                            PhotoUrl   = !string.IsNullOrEmpty(c.ProfilePath)
+                                ? $"{_settings.ImageBaseUrl}{c.ProfilePath}" : null
+                        });
+                    movie.SetCast(cast);
+                }
+
                 await SyncGenresAsync(movie, details.Genres, ct);
-                context.Movies.Add(movie);
                 await context.SaveChangesAsync(ct);
 
                 await transaction.CommitAsync(ct);
+
+                if (isRestored)
+                {
+                    logger.LogInformation("Restored existing soft-deleted movie {TmdbId}", request.TmdbId);
+                }
 
                 // Hangfire does not support cancellation tokens on background jobs —
                 // CancellationToken.None is correct and intentional here.
@@ -60,8 +116,9 @@ public class ImportMovieCommandHandler(
 
                 return Result.Success(movie.Id.Value);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                logger.LogError(ex, "Failed to import movie {TmdbId}", request.TmdbId);
                 await transaction.RollbackAsync(ct);
                 throw;
             }
@@ -95,14 +152,7 @@ public class ImportMovieCommandHandler(
         var backdropUrl = !string.IsNullOrEmpty(details.BackdropPath)
             ? $"{_settings.ImageBaseUrl}{details.BackdropPath}" : null;
 
-        var trailer = details.Videos?.Results?
-            .FirstOrDefault(v =>
-                v.Site == TmdbConstants.VideoSiteYouTube &&
-                (v.Type == TmdbConstants.VideoTypeTrailer || v.Type == TmdbConstants.VideoTypeTeaser));
-
-        var trailerUrl = trailer != null
-            ? $"{TmdbConstants.YouTubeWatchBaseUrl}{trailer.Key}"
-            : null;
+        var trailerUrl = ExtractTrailerUrl(details);
 
         var movie = Movie.Import(
             details.Id,
@@ -134,6 +184,18 @@ public class ImportMovieCommandHandler(
         }
 
         return movie;
+    }
+
+    private string? ExtractTrailerUrl(TmdbMovieDetails details)
+    {
+        var trailer = details.Videos?.Results?
+            .FirstOrDefault(v =>
+                v.Site == TmdbConstants.VideoSiteYouTube &&
+                (v.Type == TmdbConstants.VideoTypeTrailer || v.Type == TmdbConstants.VideoTypeTeaser));
+
+        return trailer != null
+            ? $"{TmdbConstants.YouTubeWatchBaseUrl}{trailer.Key}"
+            : null;
     }
 
     private async Task SyncGenresAsync(Movie movie, List<TmdbGenreDto> tmdbGenres, CancellationToken ct)
