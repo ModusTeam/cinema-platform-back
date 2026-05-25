@@ -41,6 +41,7 @@ public abstract class ApiController : ControllerBase
             "Seat.Locked" => StatusCodes.Status409Conflict,
             "Seat.AlreadyLocked" => StatusCodes.Status409Conflict,
             "Ticket.Expired" => StatusCodes.Status409Conflict,
+            "User.DateOfBirthAlreadySet" => StatusCodes.Status409Conflict,
             var code when code.Contains("NotFound", StringComparison.OrdinalIgnoreCase) => StatusCodes.Status404NotFound,
             var code when code.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase) => StatusCodes.Status401Unauthorized,
             _ => StatusCodes.Status400BadRequest
@@ -68,6 +69,7 @@ public abstract class ApiController : ControllerBase
             var code when code.Contains("Validation") => "Validation Error",
             "Seat.Locked" => "Conflict",
             "Seat.AlreadyLocked" => "Conflict",
+            "User.DateOfBirthAlreadySet" => "Conflict",
             _ => "Bad Request"
         };
 }

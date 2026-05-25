@@ -1,49 +1,42 @@
 using Cinema.Application.Common.Contracts;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
-using Cinema.Domain.Exceptions;
 using Cinema.Domain.Shared;
 using MassTransit;
 using MediatR;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 
-namespace Cinema.Application.Account.Commands.UpdateProfile;
+namespace Cinema.Application.Account.Commands.SetMyDateOfBirth;
 
-public class UpdateProfileCommandHandler(
+public class SetMyDateOfBirthCommandHandler(
     ICurrentUserService currentUser,
     UserManager<User> userManager,
     ISendEndpointProvider sendEndpointProvider,
-    ILogger<UpdateProfileCommandHandler> logger)
-    : IRequestHandler<UpdateProfileCommand, Result>
+    ILogger<SetMyDateOfBirthCommandHandler> logger)
+    : IRequestHandler<SetMyDateOfBirthCommand, Result<SetMyDateOfBirthResponse>>
 {
-    public async Task<Result> Handle(UpdateProfileCommand request, CancellationToken ct)
+    public async Task<Result<SetMyDateOfBirthResponse>> Handle(SetMyDateOfBirthCommand request, CancellationToken ct)
     {
         if (currentUser.UserId == null)
-            return Result.Failure(new Error("Auth.Unauthorized", "User is not authenticated."));
+            return Result.Failure<SetMyDateOfBirthResponse>(new Error("Auth.Unauthorized", "User is not authenticated."));
 
         var user = await userManager.FindByIdAsync(currentUser.UserId.ToString()!);
         if (user == null)
-            return Result.Failure(new Error("User.NotFound", "User not found."));
+            return Result.Failure<SetMyDateOfBirthResponse>(new Error("User.NotFound", "User not found."));
 
-        user.FirstName = request.FirstName;
-        user.LastName = request.LastName;
-
-        if (user.DateOfBirth.HasValue
-            && request.DateOfBirth.HasValue
-            && user.DateOfBirth.Value.Date != request.DateOfBirth.Value.Date)
+        if (user.DateOfBirth.HasValue)
         {
-            return Result.Failure(new Error("User.DateOfBirthAlreadySet", "Date of birth has already been set and cannot be changed."));
+            return Result.Failure<SetMyDateOfBirthResponse>(
+                new Error("User.DateOfBirthAlreadySet", "Date of birth has already been set and cannot be changed."));
         }
 
-        user.DateOfBirth = request.DateOfBirth.HasValue
-            ? DateTime.SpecifyKind(request.DateOfBirth.Value, DateTimeKind.Utc)
-            : user.DateOfBirth;
+        user.DateOfBirth = DateTime.SpecifyKind(request.DateOfBirth.Date, DateTimeKind.Utc);
 
         var result = await userManager.UpdateAsync(user);
 
         if (!result.Succeeded)
-            return Result.Failure(new Error("User.UpdateFailed", result.Errors.First().Description));
+            return Result.Failure<SetMyDateOfBirthResponse>(new Error("User.UpdateFailed", result.Errors.First().Description));
 
         try
         {
@@ -63,6 +56,6 @@ public class UpdateProfileCommandHandler(
                 user.Id);
         }
 
-        return Result.Success();
+        return Result.Success(new SetMyDateOfBirthResponse(user.DateOfBirth.Value));
     }
 }
