@@ -312,8 +312,8 @@ public static class ConfigureInfrastructureServices
         services.AddScoped<IMovieInfoProvider, EfMovieInfoProvider>();
         services.AddScoped<IOrderReservationService, OrderReservationService>();
         services.AddScoped<ILoyaltyService, GrpcLoyaltyService>();
+        services.AddScoped<IAdminLoyaltyService, GrpcLoyaltyService>();
         
-
         return services;
     }
 }

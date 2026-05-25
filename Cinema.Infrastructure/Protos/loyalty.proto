@@ -30,10 +30,13 @@ service LoyaltyService {
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
   rpc GetFullProfile(GetFullProfileRequest) returns (GetFullProfileResponse);
   rpc DeductPoints(DeductPointsRequest) returns (DeductPointsResponse);
-  rpc RefundPoints(RefundPointsRequest) returns (RefundPointsResponse);
   rpc UseGoldUpgrade(UseGoldUpgradeRequest) returns (UseGoldUpgradeResponse);
+  rpc RefundPoints(RefundPointsRequest) returns (RefundPointsResponse);
   rpc CalculateDiscount(CalculateDiscountRequest) returns (CalculateDiscountResponse);
   rpc RollbackGoldUpgrade(RollbackGoldUpgradeRequest) returns (RollbackGoldUpgradeResponse);
+  rpc GetAdminUserBalance(GetAdminUserBalanceRequest) returns (GetAdminUserBalanceResponse);
+  rpc GetAdminTransactionHistory(GetAdminTransactionHistoryRequest) returns (GetAdminTransactionHistoryResponse);
+  rpc ModifyUserPoints(ModifyUserPointsRequest) returns (ModifyUserPointsResponse);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,7 +93,21 @@ message DeductPointsResponse {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RefundPoints (compensating transaction for failed payments)
+// UseGoldUpgrade
+// ─────────────────────────────────────────────────────────────────────────────
+
+message UseGoldUpgradeRequest {
+  string user_id = 1;
+  string order_id = 2;
+}
+
+message UseGoldUpgradeResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RefundPoints
 // ─────────────────────────────────────────────────────────────────────────────
 
 message RefundPointsRequest {
@@ -107,21 +124,22 @@ message RefundPointsResponse {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UseGoldUpgrade
+// CalculateDiscountRequest
 // ─────────────────────────────────────────────────────────────────────────────
 
-message UseGoldUpgradeRequest {
+message CalculateDiscountRequest {
   string user_id = 1;
-  string order_id = 2;
+  double order_amount = 2;
 }
 
-message UseGoldUpgradeResponse {
-  bool success = 1;
-  string error_message = 2;
+message CalculateDiscountResponse {
+  bool is_allowed = 1;
+  int32 points_to_deduct = 2;
+  double amount_to_pay = 3;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RollbackGoldUpgrade
+// RollbackGoldUpgradeRequest
 // ─────────────────────────────────────────────────────────────────────────────
 
 message RollbackGoldUpgradeRequest {
@@ -135,16 +153,49 @@ message RollbackGoldUpgradeResponse {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CalculateDiscount
+// Admin
 // ─────────────────────────────────────────────────────────────────────────────
 
-message CalculateDiscountRequest {
+message GetAdminUserBalanceRequest {
   string user_id = 1;
-  double order_amount = 2;
 }
 
-message CalculateDiscountResponse {
-  bool is_allowed = 1;
-  int32 points_to_deduct = 2;
-  double amount_to_pay = 3;
+message GetAdminUserBalanceResponse {
+  string tier = 1;
+  int32 balance = 2;
+  int32 lifetime_points = 3;
+}
+
+message GetAdminTransactionHistoryRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 skip = 3;
+}
+
+message AdminTransactionMessage {
+  string id = 1;
+  string type = 2;
+  int32 points = 3;
+  int32 balance_after = 4;
+  string order_id = 5;
+  string description = 6;
+  string created_at = 7;
+}
+
+message GetAdminTransactionHistoryResponse {
+  repeated AdminTransactionMessage transactions = 1;
+}
+
+message ModifyUserPointsRequest {
+  string user_id = 1;
+  string admin_id = 2;
+  int32 points = 3;
+  string reason = 4;
+}
+
+message ModifyUserPointsResponse {
+  string user_id = 1;
+  string tier = 2;
+  int32 balance = 3;
+  bool success = 4;
 }

@@ -10,7 +10,7 @@ namespace Cinema.Infrastructure.Services;
 public class GrpcLoyaltyService(
     LoyaltyService.LoyaltyServiceClient client,
     ILogger<GrpcLoyaltyService> logger,
-    IOptions<LoyaltySettings> loyaltyOptions) : ILoyaltyService
+    IOptions<LoyaltySettings> loyaltyOptions) : ILoyaltyService, IAdminLoyaltyService
 {
     private readonly string _apiKey = loyaltyOptions.Value.ApiKey
         ?? throw new InvalidOperationException("LoyaltySettings:ApiKey is not configured.");
@@ -134,4 +134,56 @@ public class GrpcLoyaltyService(
             return (false, $"Loyalty service error: {ex.Status.Detail}");
         }
     }
+
+    public async Task<AdminUserBalanceDto> GetUserBalanceAsync(Guid userId, CancellationToken ct)
+    {
+        try
+        {
+            var request = new GetAdminUserBalanceRequest { UserId = userId.ToString() };
+            var response = await client.GetAdminUserBalanceAsync(request, headers: BuildMetadata(), cancellationToken: ct);
+            
+            return new AdminUserBalanceDto(response.Tier, response.Balance, response.LifetimePoints);
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        {
+            throw new KeyNotFoundException(ex.Status.Detail);
+        }
+    }
+
+    public async Task<AdminTransactionHistoryDto> GetTransactionHistoryAsync(Guid userId, int limit, int skip, CancellationToken ct)
+    {
+        var request = new GetAdminTransactionHistoryRequest { UserId = userId.ToString(), Limit = limit, Skip = skip };
+        var response = await client.GetAdminTransactionHistoryAsync(request, headers: BuildMetadata(), cancellationToken: ct);
+
+        var mappedTransactions = response.Transactions.Select(t => 
+            new AdminTransactionDto(t.Id, t.Type, t.Points, t.BalanceAfter, t.OrderId, t.Description, t.CreatedAt));
+
+        return new AdminTransactionHistoryDto(mappedTransactions);
+    }
+
+    public async Task<AdminModifyPointsDto> ModifyPointsAsync(Guid userId, string adminId, int points, string reason, CancellationToken ct)
+    {
+        try
+        {
+            var request = new ModifyUserPointsRequest
+            {
+                UserId = userId.ToString(),
+                AdminId = adminId,
+                Points = points,
+                Reason = reason
+            };
+
+            var response = await client.ModifyUserPointsAsync(request, headers: BuildMetadata(), cancellationToken: ct);
+            
+            return new AdminModifyPointsDto(Guid.Parse(response.UserId), response.Tier, response.Balance, response.Success);
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.InvalidArgument)
+        {
+            throw new ArgumentException(ex.Status.Detail);
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        {
+            throw new KeyNotFoundException(ex.Status.Detail);
+        }
+    }   
 }
