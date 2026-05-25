@@ -185,5 +185,47 @@ public class GrpcLoyaltyService(
         {
             throw new KeyNotFoundException(ex.Status.Detail);
         }
-    }   
+    }
+
+    public async Task<AdminUsersListDto> GetUsersAsync(int limit, int skip, string? tierFilter, IEnumerable<Guid>? userIds, CancellationToken ct)
+    {
+        var request = new GetAdminUsersRequest 
+        { 
+            Limit = limit, 
+            Skip = skip, 
+            TierFilter = tierFilter ?? string.Empty 
+        };
+        
+        if (userIds != null)
+        {
+            request.UserIds.AddRange(userIds.Select(id => id.ToString()));
+        }
+
+        var response = await client.GetAdminUsersAsync(request, headers: BuildMetadata(), cancellationToken: ct);
+
+        var profiles = response.Profiles.Select(p => 
+            new AdminUserProfileDto(Guid.Parse(p.UserId), string.Empty, string.Empty, p.Tier, p.Balance, p.LifetimePoints));
+
+        return new AdminUsersListDto(profiles, response.TotalCount);
+    }
+
+    public async Task<AdminGrantVipDto> GrantVipStatusAsync(Guid userId, string adminId, string reason, CancellationToken ct)
+    {
+        try
+        {
+            var request = new GrantVipStatusRequest
+            {
+                UserId = userId.ToString(),
+                AdminId = adminId,
+                Reason = reason
+            };
+
+            var response = await client.GrantVipStatusAsync(request, headers: BuildMetadata(), cancellationToken: ct);
+            return new AdminGrantVipDto(Guid.Parse(response.UserId), response.NewTier, response.Success);
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.AlreadyExists)
+        {
+            throw new InvalidOperationException(ex.Status.Detail);
+        }
+    }
 }

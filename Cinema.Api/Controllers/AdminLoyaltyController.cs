@@ -4,6 +4,7 @@ using MediatR;
 using System.Security.Claims;
 using Cinema.Application.AdminLoyalty.Commands;
 using Cinema.Application.AdminLoyalty.Queries;
+using Cinema.Application.AdminLoyalty.GrantVipStatus;
 
 namespace Cinema.Api.Controllers.Admin
 {
@@ -42,7 +43,32 @@ namespace Cinema.Api.Controllers.Admin
             var result = await _mediator.Send(command);
             return Ok(result);
         }
-    }
 
+        [HttpGet("users")]
+        public async Task<IActionResult> GetUsers([FromQuery] int limit = 50, [FromQuery] int skip = 0, [FromQuery] string? tier = null, [FromQuery] string? emailSearch = null)
+        {
+            var query = new GetAdminUsersQuery(limit, skip, tier, emailSearch);
+            var result = await _mediator.Send(query);
+            return Ok(result);
+        }
+
+        [HttpPost("users/{userId}/vip")]
+        public async Task<IActionResult> GrantVipStatus(Guid userId, [FromBody] GrantVipRequestDto dto)
+        {
+            var adminId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "UnknownAdmin";
+            var command = new GrantVipStatusCommand(userId, adminId, dto.Reason);
+            
+            try 
+            {
+                var result = await _mediator.Send(command);
+                return Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message }); 
+            }
+        }
+    }
+    public record GrantVipRequestDto(string Reason);
     public record ModifyPointsRequestDto(Guid UserId, int Points, string Reason);
 }
