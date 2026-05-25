@@ -24,7 +24,7 @@ The project follows **Clean Architecture** combined with the **CQRS** (Command Q
 | **API** | ASP.NET Core 8 Web API, Swagger/OpenAPI, SignalR |
 | **Application** | MediatR (CQRS), FluentValidation, Mapster, Domain Events |
 | **Domain** | Entities, Value Objects, Enums, Domain Exceptions, Result<T> pattern |
-| **Infrastructure** | EF Core, PostgreSQL (Supabase), Redis, Refit (TMDB), Hangfire, Serilog |
+| **Infrastructure** | EF Core, PostgreSQL (Supabase), Redis, Refit (TMDB, Gemini), gRPC, Hangfire, Serilog |
 | **Messaging** | RabbitMQ, MassTransit (Event Bus) |
 | **Email** | SMTP (Gmail/custom), HTML templates, PDF attachments |
 | **Auth** | ASP.NET Core Identity, JWT (Access + Refresh Tokens) |
@@ -45,12 +45,15 @@ Cinema.Api/                # Controllers, Middleware, SignalR Hubs, Entry Point
 
 Cinema.Application/        # Business Logic, CQRS Handlers, DTOs, Validators
 ├── Account/              # Profile & password commands/queries
+├── Achievements/         # Achievements logic & queries
 ├── Auth/                 # Login, Register, RefreshToken
 ├── Genres/               # Genre CRUD
 ├── Halls/                # Hall CRUD + technologies management
+├── Loyalty/              # Loyalty system integration and rules
 ├── Movies/               # Movie CRUD + TMDB import + AI embeddings
 ├── Orders/               # CreateOrder, CancelOrder, GetMyOrders, ValidateTicket
-│   └── EventHandlers/    # OrderPaidIntegrationEventHandler (publishes to RabbitMQ)
+│   ├── EventHandlers/    # OrderPaidIntegrationEventHandler (publishes to RabbitMQ)
+│   └── Services/         # OrderCheckoutOrchestrator for complex checkout sagas
 ├── Pricings/             # Pricing CRUD + price calculation
 ├── Seats/                # Seat types, locking logic
 ├── Sessions/             # Session scheduling, reschedule, cancel
@@ -76,8 +79,8 @@ Cinema.Infrastructure/     # Data, Caching, External APIs, Identity, Messaging
 │   ├── Migrations/       # Database migrations
 │   └── ApplicationDbContext.cs
 ├── Messaging/
-│   └── Consumers/        # TicketPurchasedConsumer (RabbitMQ consumer)
-└── Services/             # Identity, Token, Redis SeatLocking, TMDB, Payment, Email, etc.
+│   └── Consumers/        # TicketPurchased, TierUpgraded, PointsExpiring consumers
+└── Services/             # Identity, Token, Redis SeatLocking, TMDB, Gemini, gRPC (Loyalty/Achievements), Payment, Email, etc.
 ```
 
 ---
@@ -177,6 +180,8 @@ Progress tracking based on **SoftServe Practice** requirements.
 - [x] **Pricing Management** — Create dynamic pricing policies with seat type multipliers
 - [x] **Sales Statistics** — View sales stats and key metrics (KPIs dashboard)
 - [x] **AI Integration** — Movie embeddings for semantic search
+- [x] **Loyalty Program** — Manage users' points, VIP statuses, and view balances
+- [x] **Achievements** — Create and manage platform achievements
 
 ### 👤 Client
 
@@ -186,6 +191,7 @@ Progress tracking based on **SoftServe Practice** requirements.
 - [x] **Authentication** — Registration and login via ASP.NET Core Identity
 - [x] **Ticket Booking** — **COMPLETE ORDER FLOW IMPLEMENTED**
   - [x] Seat locking via Redis distributed lock (10-min TTL)
+  - [x] Loyalty point discounts & VIP Gold Seat Upgrades
   - [x] Order creation with payment processing
   - [x] Automatic ticket generation
   - [x] Order history (active & past orders)
@@ -197,6 +203,7 @@ Progress tracking based on **SoftServe Practice** requirements.
   - [x] Cancel pending orders
   - [x] Automatic expiration of unpaid orders (Hangfire job)
 - [x] **Personalized Recommendations** — Based on AI embeddings and booking history
+- [x] **Loyalty & Achievements** — Earn points, unlock VIP tiers, and gain achievements
 
 ---
 
@@ -209,8 +216,9 @@ The system now implements a **full end-to-end booking flow with asynchronous ema
 2. **Seat Locking** → Redis distributed lock (10-min TTL) prevents double-booking
 3. **Price Calculation** → Dynamic pricing based on seat type and session pricing policy
 4. **Order Creation** → `CreateOrderCommand` generates order with `Pending` status
-5. **Payment Processing** → `IPaymentService` handles payment (mock implementation included)
-6. **Ticket Generation** → On payment success, tickets are auto-generated with `Valid` status
+5. **Loyalty Processing** → `OrderCheckoutOrchestrator` applies points discounts or Gold upgrades via gRPC
+6. **Payment Processing** → `IPaymentService` handles payment (mock implementation included)
+7. **Ticket Generation** → On payment success, tickets are auto-generated with `Valid` status
 7. **Real-Time Notification** → SignalR pushes ticket data to client via `TicketHub`
 8. **Event Publishing** → `OrderPaidEvent` triggers `OrderPaidIntegrationEventHandler`
 9. **RabbitMQ Message** → `TicketPurchasedMessage` published to message queue
@@ -221,8 +229,19 @@ The system now implements a **full end-to-end booking flow with asynchronous ema
 - `OrderPaidEvent` → Domain event raised when payment succeeds
 - `OrderPaidIntegrationEventHandler` → Publishes `TicketPurchasedMessage` to RabbitMQ
 - `TicketPurchasedConsumer` → Consumes messages, generates PDF tickets, sends emails
+- `TierUpgradedConsumer` & `PointsExpiringConsumer` → Listen to external loyalty service events
+
+**Orchestration (Saga Pattern)**: The `OrderCheckoutOrchestrator` manages complex checkout scenarios ensuring atomicity between database operations, payment processing, and gRPC calls (with compensation logic/refunds if failures occur).
 
 **Idempotency**: Duplicate order requests are prevented via `IdempotencyBehavior` using request IDs.
+
+### Loyalty & Achievements (Microservices Integration)
+- **gRPC Integration**: Connects to an external Loyalty Service to handle user points, tiers, and achievements.
+- **Resilience**: `OrderCheckoutOrchestrator` gracefully degrades if the loyalty service is unavailable.
+- **Features**: 
+  - Earn points on purchases.
+  - Pay with points or apply "Gold Upgrades" to standard seats for VIP users.
+  - Track user achievements seamlessly through the unified API.
 
 ### Email Notification System
 - **Technology**: SMTP (Gmail or custom server), MassTransit, RabbitMQ
@@ -329,6 +348,13 @@ The scheduling service checks for time-slot overlaps within the same hall before
 - `GET    /api/genres` — List genres
 - `POST   /api/genres` — Create genre (Admin)
 
+### Loyalty & Achievements
+- `GET    /api/admin/loyalty/users` — List users with loyalty tiers (Admin)
+- `POST   /api/admin/loyalty/modify-points` — Modify user points (Admin)
+- `POST   /api/admin/loyalty/users/{id}/vip` — Grant VIP status (Admin)
+- `GET    /api/achievements/me` — Get my achievements
+- `GET    /api/achievements` — List achievements (Admin)
+
 ### Pricings
 - `GET    /api/pricings` — List pricing policies
 - `POST   /api/pricings` — Create pricing (Admin)
@@ -390,6 +416,7 @@ The `docker-compose.yaml` includes:
 - `SMTP_USERNAME` — SMTP username
 - `SMTP_PASSWORD` — SMTP password
 - `SMTP_SENDER_EMAIL` — Sender email address
+- `Grpc__LoyaltyServiceUrl` — URL for the external Loyalty gRPC Service
 
 ## 🔄 Database Migrations & Seeding in Production
 
