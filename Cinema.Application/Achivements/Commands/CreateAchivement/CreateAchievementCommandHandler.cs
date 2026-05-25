@@ -1,4 +1,3 @@
-// CreateAchievementCommandHandler.cs
 using Cinema.Application.Achievements.Commands;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Achievements.Dtos;
@@ -14,8 +13,10 @@ public class CreateAchievementCommandHandler(IAdminAchievementsService service)
         {
             Code = cmd.Code, Name = cmd.Name, Description = cmd.Description,
             SecretHint = cmd.SecretHint ?? string.Empty, IsSecret = cmd.IsSecret,
-            Icon = cmd.Icon, Category = (AchievementCategory)cmd.Category,
-            Rarity = (AchievementRarity)cmd.Rarity, Strategy = (AchievementStrategy)cmd.Strategy,
+            Icon = cmd.Icon, 
+            Category = cmd.Category, 
+            Rarity = cmd.Rarity,     
+            Strategy = cmd.Strategy, 
             CriteriaJson = cmd.CriteriaJson, RewardPoints = cmd.RewardPoints,
             SortOrder = cmd.SortOrder, IsActive = cmd.IsActive
         }, ct);

@@ -6,7 +6,9 @@ namespace Cinema.Application.Achievements.Commands;
 public record CreateAchievementCommand(
     string Code, string Name, string Description,
     string? SecretHint, bool IsSecret, string Icon,
-    int Category, int Rarity, int Strategy,
+    AchievementCategory Category, 
+    AchievementRarity Rarity,     
+    AchievementStrategy Strategy, 
     string CriteriaJson, int RewardPoints,
     int SortOrder, bool IsActive
 ) : IRequest<AchievementDto>;

@@ -23,13 +23,13 @@ public class CreateAchievementCommandValidator : AbstractValidator<CreateAchieve
             .NotEmpty().WithMessage("Icon is required.");
 
         RuleFor(x => x.Category)
-            .InclusiveBetween(1, 7).WithMessage("Invalid category.");
+            .IsInEnum().WithMessage("Invalid category.");
 
         RuleFor(x => x.Rarity)
-            .InclusiveBetween(1, 5).WithMessage("Invalid rarity.");
+            .IsInEnum().WithMessage("Invalid rarity.");
 
         RuleFor(x => x.Strategy)
-            .InclusiveBetween(1, 3).WithMessage("Invalid strategy.");
+            .IsInEnum().WithMessage("Invalid strategy.");
 
         RuleFor(x => x.CriteriaJson)
             .NotEmpty().WithMessage("CriteriaJson is required.")
