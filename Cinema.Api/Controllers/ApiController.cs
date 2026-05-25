@@ -39,6 +39,7 @@ public abstract class ApiController : ControllerBase
         var statusCode = error.Code switch
         {
             "Seat.Locked" => StatusCodes.Status409Conflict,
+            "Seat.AlreadyLocked" => StatusCodes.Status409Conflict,
             "Ticket.Expired" => StatusCodes.Status409Conflict,
             var code when code.Contains("NotFound", StringComparison.OrdinalIgnoreCase) => StatusCodes.Status404NotFound,
             var code when code.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase) => StatusCodes.Status401Unauthorized,
@@ -66,6 +67,7 @@ public abstract class ApiController : ControllerBase
             var code when code.Contains("NotFound") => "Resource Not Found",
             var code when code.Contains("Validation") => "Validation Error",
             "Seat.Locked" => "Conflict",
+            "Seat.AlreadyLocked" => "Conflict",
             _ => "Bad Request"
         };
 }
