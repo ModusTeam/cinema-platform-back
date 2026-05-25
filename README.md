@@ -344,6 +344,7 @@ The scheduling service checks for time-slot overlaps within the same hall before
 - `POST   /api/auth/refresh` — Refresh access token
 - `GET    /api/account/profile` — Get my profile
 - `PUT    /api/account/profile` — Update profile
+- `PATCH  /api/account/profile/date-of-birth` — Set my date of birth (one-time)
 - `POST   /api/account/change-password` — Change password
 
 ---
