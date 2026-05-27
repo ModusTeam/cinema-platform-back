@@ -7,6 +7,7 @@ public record MovieListDto(
     decimal Rating,
     int DurationMinutes,
     string? PosterUrl,
+    string? BackdropUrl,
     List<string> Genres,
     int Status,
     string? AgeRestriction
