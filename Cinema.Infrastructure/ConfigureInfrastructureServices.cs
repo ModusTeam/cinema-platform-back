@@ -207,6 +207,11 @@ public static class ConfigureInfrastructureServices
                     m.SetEntityName("TicketPurchased");
                 });
 
+                cfg.Message<UserDateOfBirthSetIntegrationEvent>(m =>
+                {
+                    m.SetEntityName("user.date_of_birth_set");
+                });
+
                 cfg.ConfigureEndpoints(context);
             });
         });

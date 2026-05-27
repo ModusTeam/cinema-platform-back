@@ -1,6 +1,7 @@
 using Cinema.Application.Common.Contracts;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
+using Cinema.Domain.Errors;
 using Cinema.Domain.Shared;
 using MassTransit;
 using MediatR;
@@ -12,48 +13,43 @@ namespace Cinema.Application.Account.Commands.SetMyDateOfBirth;
 public class SetMyDateOfBirthCommandHandler(
     ICurrentUserService currentUser,
     UserManager<User> userManager,
-    ISendEndpointProvider sendEndpointProvider,
+    IPublishEndpoint publishEndpoint,
     ILogger<SetMyDateOfBirthCommandHandler> logger)
     : IRequestHandler<SetMyDateOfBirthCommand, Result<SetMyDateOfBirthResponse>>
 {
     public async Task<Result<SetMyDateOfBirthResponse>> Handle(SetMyDateOfBirthCommand request, CancellationToken ct)
     {
         if (currentUser.UserId == null)
-            return Result.Failure<SetMyDateOfBirthResponse>(new Error("Auth.Unauthorized", "User is not authenticated."));
+            return Result.Failure<SetMyDateOfBirthResponse>(AuthErrors.UserNotAuthenticated);
 
         var user = await userManager.FindByIdAsync(currentUser.UserId.ToString()!);
         if (user == null)
-            return Result.Failure<SetMyDateOfBirthResponse>(new Error("User.NotFound", "User not found."));
+            return Result.Failure<SetMyDateOfBirthResponse>(UserErrors.NotFound);
 
         if (user.DateOfBirth.HasValue)
-        {
-            return Result.Failure<SetMyDateOfBirthResponse>(
-                new Error("User.DateOfBirthAlreadySet", "Date of birth has already been set and cannot be changed."));
-        }
+            return Result.Failure<SetMyDateOfBirthResponse>(UserErrors.DateOfBirthAlreadySet);
 
         user.DateOfBirth = DateTime.SpecifyKind(request.DateOfBirth.Date, DateTimeKind.Utc);
 
-        var result = await userManager.UpdateAsync(user);
-
-        if (!result.Succeeded)
-            return Result.Failure<SetMyDateOfBirthResponse>(new Error("User.UpdateFailed", result.Errors.First().Description));
+        var updateResult = await userManager.UpdateAsync(user);
+        if (!updateResult.Succeeded)
+            return Result.Failure<SetMyDateOfBirthResponse>(
+                new Error("User.UpdateFailed", updateResult.Errors.First().Description));
 
         try
         {
-            var endpoint = await sendEndpointProvider.GetSendEndpoint(
-                new Uri("queue:user.profile_updated"));
+            var integrationEvent = new UserDateOfBirthSetIntegrationEvent(
+                UserId: user.Id,
+                DateOfBirth: DateOnly.FromDateTime(user.DateOfBirth.Value),
+                OccurredAtUtc: DateTime.UtcNow);
 
-            var message = new UserProfileUpdatedMessage(
-                "user.profile_updated",
-                new UserProfileUpdatedPayload(user.Id, user.DateOfBirth));
-
-            await endpoint.Send(message, ct);
+            await publishEndpoint.Publish(integrationEvent, ct);
         }
         catch (Exception ex)
         {
             logger.LogCritical(ex,
-                "Failed to publish UserProfileUpdatedMessage for User {UserId}. DateOfBirth may be stale in Loyalty service.",
-                user.Id);
+                "Failed to publish {Event} for User {UserId}. Birthday bonus may be delayed in Loyalty service.",
+                nameof(UserDateOfBirthSetIntegrationEvent), user.Id);
         }
 
         return Result.Success(new SetMyDateOfBirthResponse(user.DateOfBirth.Value));
