@@ -1,4 +1,5 @@
 using Cinema.Domain.Common;
+using Cinema.Domain.Exceptions;
 
 namespace Cinema.Domain.Entities;
 
@@ -17,4 +18,13 @@ public class SeatType
 
     public static SeatType New(EntityId<SeatType> id, string name, string? description)
         => new(id, name, description);
+
+    public void Update(string name, string? description)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new DomainException("Seat type name cannot be empty.");
+
+        Name = name.Trim();
+        Description = description?.Trim();
+    }
 }

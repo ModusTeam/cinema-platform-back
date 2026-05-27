@@ -1,5 +1,6 @@
 
 using Cinema.Application.Seats.Commands.CreateSeatType;
+using Cinema.Application.Seats.Commands.UpdateSeatType;
 using Cinema.Application.Seats.Queries.GetAllSeatTypesQuery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,4 +24,12 @@ public class SeatTypesController : ApiController
         if (result.IsFailure) return HandleResult(result);
         return StatusCode(StatusCodes.Status201Created, result.Value);
     }
-}
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateSeatTypeCommand command)
+    {
+        if (id != command.Id) return BadRequest("ID mismatch.");
+        return HandleResult(await Mediator.Send(command));
+    }
+}
