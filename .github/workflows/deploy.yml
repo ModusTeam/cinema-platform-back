@@ -4,14 +4,18 @@ on:
   push:
     branches: [ main ]
 
+concurrency:
+  group: deploy-backend-main
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ─── ДІАГНОСТИКА ───────────────────────────────────────────────
       - name: "[DEBUG] Show runner info"
         run: |
           echo "=========================================="
@@ -60,8 +64,19 @@ jobs:
           rm -f /tmp/test_key
           echo "=========================================="
 
-      # ─── ДЕПЛОЙ ────────────────────────────────────────────────────
-      - name: Copy files via SSH
+      - name: Clean remote backend workspace (remove stale files)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -euo pipefail
+            echo "Cleaning /root/cinema-platform/backend ..."
+            rm -rf /root/cinema-platform/backend
+            mkdir -p /root/cinema-platform/backend
+
+      - name: Copy files via SSH (fresh sync)
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ secrets.HOST }}
@@ -77,6 +92,13 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            set -euo pipefail
             cd /root/cinema-platform
-            docker compose up -d --build cinema-api # <--- Контейнер .NET
+            echo "=========================================="
+            echo "[Server] Building & starting cinema-api via docker compose..."
+            # Використовуємо --no-cache для білду, якщо хочеш 100% застрахуватись від фантомного кешу
+            docker compose build --no-cache cinema-api
+            docker compose up -d cinema-api
+            echo "[Server] Pruning unused images..."
             docker image prune -f
+            echo "=========================================="
