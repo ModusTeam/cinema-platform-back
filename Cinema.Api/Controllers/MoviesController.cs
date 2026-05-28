@@ -3,7 +3,9 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Movies.Commands.CreateMovie;
 using Cinema.Application.Movies.Commands.DeleteMovie;
 using Cinema.Application.Movies.Commands.ImportMovie;
+using Cinema.Application.Movies.Commands.RestoreMovie;
 using Cinema.Application.Movies.Commands.UpdateMovie.Commands; 
+using Cinema.Application.Movies.Queries.GetDeletedMovies;
 using Cinema.Application.Movies.Queries.GetMovieById;
 using Cinema.Application.Movies.Queries.GetMoviesWithPagination;
 using Cinema.Application.Movies.Queries.GetRecommendations;
@@ -121,6 +123,31 @@ public class MoviesController : ApiController
     public async Task<IActionResult> Delete(Guid id)
     {
         return HandleResult(await Mediator.Send(new DeleteMovieCommand(id)));
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("deleted")]
+    public async Task<ActionResult<PaginatedList<MovieListDto>>> GetDeleted([FromQuery] GetDeletedMoviesQuery query)
+    {
+        var result = await Mediator.Send(query);
+        if (result.IsFailure)
+            return HandleResult(Result.Failure<PaginatedList<MovieListDto>>(result.Error));
+
+        var movieDtos = result.Value.Items.Adapt<List<MovieListDto>>();
+        var paginatedDtos = new PaginatedList<MovieListDto>(
+            movieDtos,
+            result.Value.TotalCount,
+            result.Value.PageNumber,
+            query.PageSize);
+
+        return Ok(paginatedDtos);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("{id:guid}/restore")]
+    public async Task<IActionResult> Restore(Guid id)
+    {
+        return HandleResult(await Mediator.Send(new RestoreMovieCommand(id)));
     }
     
     [HttpGet("recommendations")]

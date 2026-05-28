@@ -13,4 +13,7 @@ public static class MovieErrors
 
     public static readonly Error AlreadyImported =
         new("Movie.Exists", "This movie has already been imported from TMDB.");
+
+    public static readonly Error AlreadyActive =
+        new("Movie.AlreadyActive", "The movie is not deleted and cannot be restored.");
 }
