@@ -1,3 +1,4 @@
+using System.Globalization;
 using Cinema.Application.Common.Contracts;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
@@ -26,6 +27,8 @@ public class UpdateProfileCommandHandler(
         if (user == null)
             return Result.Failure(new Error("User.NotFound", "User not found."));
 
+        var hadDateOfBirth = user.DateOfBirth.HasValue;
+
         user.FirstName = request.FirstName;
         user.LastName = request.LastName;
 
@@ -45,6 +48,8 @@ public class UpdateProfileCommandHandler(
         if (!result.Succeeded)
             return Result.Failure(new Error("User.UpdateFailed", result.Errors.First().Description));
 
+        var shouldSendDateOfBirthSetEvent = !hadDateOfBirth && user.DateOfBirth.HasValue;
+
         try
         {
             var endpoint = await sendEndpointProvider.GetSendEndpoint(
@@ -55,11 +60,30 @@ public class UpdateProfileCommandHandler(
                 new UserProfileUpdatedPayload(user.Id, user.DateOfBirth));
 
             await endpoint.Send(message, ct);
+
+            if (shouldSendDateOfBirthSetEvent)
+            {
+                var loyaltyEndpoint = await sendEndpointProvider.GetSendEndpoint(
+                    new Uri("queue:loyalty_ticket_purchased"));
+
+                var dateOfBirth = DateOnly
+                    .FromDateTime(user.DateOfBirth!.Value)
+                    .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+                var dateOfBirthEvent = new NestJsUserDateOfBirthSetEvent(
+                    LoyaltyEventPatterns.UserDateOfBirthSet,
+                    new UserDateOfBirthSetPayload(
+                        UserId: user.Id,
+                        DateOfBirth: dateOfBirth,
+                        OccurredAtUtc: DateTime.UtcNow));
+
+                await loyaltyEndpoint.Send(dateOfBirthEvent, ct);
+            }
         }
         catch (Exception ex)
         {
             logger.LogCritical(ex,
-                "Failed to publish UserProfileUpdatedMessage for User {UserId}. DateOfBirth may be stale in Loyalty service.",
+                "Failed to publish profile integration messages for User {UserId}. DateOfBirth may be stale in Loyalty service.",
                 user.Id);
         }
 

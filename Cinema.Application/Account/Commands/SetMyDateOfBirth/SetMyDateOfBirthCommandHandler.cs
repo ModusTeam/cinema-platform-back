@@ -1,3 +1,4 @@
+using System.Globalization;
 using Cinema.Application.Common.Contracts;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
@@ -13,7 +14,7 @@ namespace Cinema.Application.Account.Commands.SetMyDateOfBirth;
 public class SetMyDateOfBirthCommandHandler(
     ICurrentUserService currentUser,
     UserManager<User> userManager,
-    IPublishEndpoint publishEndpoint,
+    ISendEndpointProvider sendEndpointProvider,
     ILogger<SetMyDateOfBirthCommandHandler> logger)
     : IRequestHandler<SetMyDateOfBirthCommand, Result<SetMyDateOfBirthResponse>>
 {
@@ -38,18 +39,27 @@ public class SetMyDateOfBirthCommandHandler(
 
         try
         {
-            var integrationEvent = new UserDateOfBirthSetIntegrationEvent(
-                UserId: user.Id,
-                DateOfBirth: DateOnly.FromDateTime(user.DateOfBirth.Value),
-                OccurredAtUtc: DateTime.UtcNow);
+            var endpoint = await sendEndpointProvider.GetSendEndpoint(
+                new Uri("queue:loyalty_ticket_purchased"));
 
-            await publishEndpoint.Publish(integrationEvent, ct);
+            var dateOfBirth = DateOnly
+                .FromDateTime(user.DateOfBirth.Value)
+                .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+            var integrationEvent = new NestJsUserDateOfBirthSetEvent(
+                LoyaltyEventPatterns.UserDateOfBirthSet,
+                new UserDateOfBirthSetPayload(
+                    UserId: user.Id,
+                    DateOfBirth: dateOfBirth,
+                    OccurredAtUtc: DateTime.UtcNow));
+
+            await endpoint.Send(integrationEvent, ct);
         }
         catch (Exception ex)
         {
             logger.LogCritical(ex,
-                "Failed to publish {Event} for User {UserId}. Birthday bonus may be delayed in Loyalty service.",
-                nameof(UserDateOfBirthSetIntegrationEvent), user.Id);
+                "Failed to send {Event} for User {UserId}. Birthday bonus may be delayed in Loyalty service.",
+                nameof(NestJsUserDateOfBirthSetEvent), user.Id);
         }
 
         return Result.Success(new SetMyDateOfBirthResponse(user.DateOfBirth.Value));

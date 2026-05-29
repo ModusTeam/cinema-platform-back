@@ -10,7 +10,7 @@ namespace Cinema.Api.Controllers;
 public class UsersController : ApiController
 {
     /// <summary>
-    /// Sets the authenticated user's date of birth (set-once). Publishes UserDateOfBirthSetIntegrationEvent to Loyalty service.
+    /// Sets the authenticated user's date of birth (set-once). Sends a DOB event to the Loyalty service.
     /// </summary>
     [HttpPatch("me/date-of-birth")]
     [ProducesResponseType(typeof(SetMyDateOfBirthResponse), StatusCodes.Status200OK)]
