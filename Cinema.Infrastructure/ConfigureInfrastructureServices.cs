@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
@@ -198,6 +198,7 @@ public static class ConfigureInfrastructureServices
                     e.ClearSerialization();
                     e.UseRawJsonSerializer(); 
                     e.ConfigureConsumer<PointsExpiringConsumer>(context);
+                    e.ConfigureConsumer<TierUpgradedConsumer>(context);
                 });
 
                 cfg.UseRawJsonSerializer();
@@ -329,3 +330,4 @@ public static class ConfigureInfrastructureServices
         return services;
     }
 }
+
