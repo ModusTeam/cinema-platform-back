@@ -56,6 +56,7 @@ enum AchievementStrategy {
 service LoyaltyService {
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
   rpc GetFullProfile(GetFullProfileRequest) returns (GetFullProfileResponse);
+  rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsResponse);
   rpc DeductPoints(DeductPointsRequest) returns (DeductPointsResponse);
   rpc UseGoldUpgrade(UseGoldUpgradeRequest) returns (UseGoldUpgradeResponse);
   rpc RefundPoints(RefundPointsRequest) returns (RefundPointsResponse);
@@ -113,6 +114,27 @@ message GetFullProfileResponse {
   string balance_expires_at = 8;
   bool is_birthday_week = 9;
   bool gold_upgrade_available = 10;
+}
+
+message GetTransactionsRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 skip = 3;
+}
+
+message LoyaltyTransactionMessage {
+  string id = 1;
+  string type = 2;
+  int32 points = 3;
+  int32 balance_after = 4;
+  string order_id = 5;
+  string description = 6;
+  string created_at = 7;
+}
+
+message GetTransactionsResponse {
+  repeated LoyaltyTransactionMessage transactions = 1;
+  int32 total_count = 2;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

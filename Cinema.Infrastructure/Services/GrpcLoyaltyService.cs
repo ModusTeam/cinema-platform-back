@@ -1,4 +1,4 @@
-using Cinema.Application.Common.Interfaces;
+﻿using Cinema.Application.Common.Interfaces;
 using Cinema.Infrastructure.Grpc.Loyalty;
 using Cinema.Infrastructure.Options;
 using Grpc.Core;
@@ -27,6 +27,38 @@ public class GrpcLoyaltyService(
         return (response.Balance, response.Tier.ToString());
     }
 
+
+    public async Task<LoyaltyTransactionHistoryDto> GetUserTransactionHistoryAsync(
+        Guid userId,
+        int limit,
+        int skip,
+        CancellationToken ct = default)
+    {
+        var request = new GetTransactionsRequest
+        {
+            UserId = userId.ToString(),
+            Limit = limit,
+            Skip = skip
+        };
+
+        var response = await client.GetTransactionsAsync(
+            request,
+            headers: BuildMetadata(),
+            cancellationToken: ct);
+
+        var transactions = response.Transactions
+            .Select(t => new LoyaltyTransactionDto(
+                t.Id,
+                t.Type,
+                t.Points,
+                t.BalanceAfter,
+                string.IsNullOrWhiteSpace(t.OrderId) ? null : t.OrderId,
+                t.Description,
+                t.CreatedAt))
+            .ToList();
+
+        return new LoyaltyTransactionHistoryDto(transactions, response.TotalCount);
+    }
     public async Task<(bool IsAllowed, int PointsToDeduct, decimal AmountToPay)> CalculateDiscountAsync(
         Guid userId, decimal orderAmount, CancellationToken ct = default)
     {
@@ -231,3 +263,4 @@ public class GrpcLoyaltyService(
 
 
 }
+

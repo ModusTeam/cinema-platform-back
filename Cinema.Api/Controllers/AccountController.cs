@@ -1,8 +1,9 @@
-using Cinema.Application.Account.Commands.ChangePassword;
+﻿using Cinema.Application.Account.Commands.ChangePassword;
 using Cinema.Application.Account.Commands.SetMyDateOfBirth;
 using Cinema.Application.Account.Commands.UpdateProfile;
 using Cinema.Application.Account.Queries.GetProfile;
 using Cinema.Application.Account.Queries.GetLoyaltyProfile;
+using Cinema.Application.Account.Queries.GetLoyaltyTransactions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -37,6 +38,12 @@ public class AccountController : ApiController
         return HandleResult(await Mediator.Send(command));
     }
 
+
+    [HttpGet("loyalty/transactions")]
+    public async Task<IActionResult> GetLoyaltyTransactions([FromQuery] int limit = 20, [FromQuery] int skip = 0)
+    {
+        return HandleResult(await Mediator.Send(new GetLoyaltyTransactionsQuery(limit, skip)));
+    }
     [HttpPost("change-password")]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordCommand command)
     {
@@ -49,3 +56,4 @@ public class AccountController : ApiController
         return HandleResult(await Mediator.Send(new GetLoyaltyProfileQuery()));
     }
 }
+
