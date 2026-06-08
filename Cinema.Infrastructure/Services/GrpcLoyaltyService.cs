@@ -1,4 +1,4 @@
-﻿using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Interfaces;
 using Cinema.Infrastructure.Grpc.Loyalty;
 using Cinema.Infrastructure.Options;
 using Grpc.Core;
@@ -25,6 +25,25 @@ public class GrpcLoyaltyService(
             headers: BuildMetadata(), cancellationToken: ct);
 
         return (response.Balance, response.Tier.ToString());
+    }
+
+    public async Task<LoyaltyProfileDto> GetUserLoyaltyProfileAsync(
+        Guid userId, CancellationToken ct = default)
+    {
+        var response = await client.GetFullProfileAsync(
+            new GetFullProfileRequest { UserId = userId.ToString() },
+            headers: BuildMetadata(), cancellationToken: ct);
+
+        return new LoyaltyProfileDto(
+            response.Balance,
+            response.LifetimePoints,
+            response.YearPoints,
+            response.YearVisits,
+            response.Tier.ToString(),
+            string.IsNullOrWhiteSpace(response.TierExpiresAt) ? null : response.TierExpiresAt,
+            string.IsNullOrWhiteSpace(response.BalanceExpiresAt) ? null : response.BalanceExpiresAt,
+            response.IsBirthdayWeek,
+            response.GoldUpgradeAvailable);
     }
 
 
@@ -263,4 +282,5 @@ public class GrpcLoyaltyService(
 
 
 }
+
 

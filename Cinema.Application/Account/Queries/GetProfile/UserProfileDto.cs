@@ -7,5 +7,9 @@ public record UserProfileDto(
     string LastName,
     DateTime? DateOfBirth,
     int LoyaltyPoints,
-    string LoyaltyTier
+    string LoyaltyTier,
+    int LoyaltyLifetimePoints,
+    int LoyaltyYearPoints,
+    int LoyaltyYearVisits,
+    bool LoyaltyGoldUpgradeAvailable
 );

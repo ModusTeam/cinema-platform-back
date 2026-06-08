@@ -1,8 +1,10 @@
-﻿namespace Cinema.Application.Common.Interfaces;
+namespace Cinema.Application.Common.Interfaces;
 
 public interface ILoyaltyService
 {
     Task<(int Points, string Tier)> GetUserLoyaltyAsync(Guid userId, CancellationToken ct = default);
+
+    Task<LoyaltyProfileDto> GetUserLoyaltyProfileAsync(Guid userId, CancellationToken ct = default);
 
     Task<LoyaltyTransactionHistoryDto> GetUserTransactionHistoryAsync(
         Guid userId,
@@ -25,6 +27,17 @@ public interface ILoyaltyService
     Task<(bool Success, string Error)> RollbackGoldUpgradeAsync(
         Guid userId, Guid orderId, CancellationToken ct = default);
 }
+
+public record LoyaltyProfileDto(
+    int Balance,
+    int LifetimePoints,
+    int YearPoints,
+    int YearVisits,
+    string Tier,
+    string? TierExpiresAt,
+    string? BalanceExpiresAt,
+    bool IsBirthdayWeek,
+    bool GoldUpgradeAvailable);
 
 public record LoyaltyTransactionHistoryDto(
     IReadOnlyCollection<LoyaltyTransactionDto> Transactions,
