@@ -1,4 +1,4 @@
-using Cinema.Application.Common.Interfaces;
+﻿using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Tmdb;
 using Cinema.Application.Common.Settings;
 using Cinema.Application.Movies.Constants;
@@ -22,6 +22,9 @@ public class ImportMovieCommandHandler(
     ILogger<ImportMovieCommandHandler> logger
     ) : IRequestHandler<ImportMovieCommand, Result<Guid>>
 {
+    private const string PrimaryTmdbLanguage = "uk-UA";
+    private const string FallbackTmdbLanguage = "en-US";
+    private const string DetailsAppendToResponse = "credits,videos,release_dates";
     private readonly TmdbSettings _settings = settings.Value;
 
     public async Task<Result<Guid>> Handle(ImportMovieCommand request, CancellationToken ct)
@@ -109,7 +112,7 @@ public class ImportMovieCommandHandler(
                     logger.LogInformation("Restored existing soft-deleted movie {TmdbId}", request.TmdbId);
                 }
 
-                // Hangfire does not support cancellation tokens on background jobs —
+                // Hangfire does not support cancellation tokens on background jobs вЂ”
                 // CancellationToken.None is correct and intentional here.
                 jobClient.Enqueue<IAiEmbeddingService>(s =>
                     s.UpdateMovieEmbeddingAsync(movie.Id.Value, CancellationToken.None));
@@ -125,23 +128,75 @@ public class ImportMovieCommandHandler(
         });
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // в”Ђв”Ђ Private helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
     private async Task<Result<TmdbMovieDetails>> FetchTmdbDetailsAsync(int tmdbId, CancellationToken ct)
     {
         try
         {
-            var details = await tmdbApi.GetMovieDetailsAsync(tmdbId, _settings.ApiKey, ct);
+            var details = await tmdbApi.GetMovieDetailsAsync(
+                tmdbId,
+                _settings.ApiKey,
+                PrimaryTmdbLanguage,
+                DetailsAppendToResponse,
+                ct);
+
+            if (ShouldFetchFallbackDetails(details))
+            {
+                details = await MergeFallbackDetailsAsync(details, tmdbId, ct);
+            }
+
             return Result.Success(details);
         }
         catch (Refit.ApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             return Result.Failure<TmdbMovieDetails>(TmdbErrors.NotFound);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            logger.LogError(ex, "Failed to fetch TMDB details for movie {TmdbId}", tmdbId);
             return Result.Failure<TmdbMovieDetails>(TmdbErrors.FetchFailed);
         }
+    }
+
+    private bool ShouldFetchFallbackDetails(TmdbMovieDetails details)
+    {
+        return string.IsNullOrWhiteSpace(details.Overview) || ExtractTrailerUrl(details) is null;
+    }
+
+    private async Task<TmdbMovieDetails> MergeFallbackDetailsAsync(
+        TmdbMovieDetails primary,
+        int tmdbId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var fallback = await tmdbApi.GetMovieDetailsAsync(
+                tmdbId,
+                _settings.ApiKey,
+                FallbackTmdbLanguage,
+                DetailsAppendToResponse,
+                ct);
+
+            if (string.IsNullOrWhiteSpace(primary.Overview) && !string.IsNullOrWhiteSpace(fallback.Overview))
+            {
+                primary.Overview = fallback.Overview;
+            }
+
+            if (ExtractTrailerUrl(primary) is null && ExtractTrailerUrl(fallback) is not null)
+            {
+                primary.Videos = fallback.Videos;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to fetch TMDB fallback details for movie {TmdbId}. Import will continue with primary language details.",
+                tmdbId);
+        }
+
+        return primary;
     }
 
     private Movie MapToMovie(TmdbMovieDetails details)
@@ -188,10 +243,19 @@ public class ImportMovieCommandHandler(
 
     private string? ExtractTrailerUrl(TmdbMovieDetails details)
     {
-        var trailer = details.Videos?.Results?
-            .FirstOrDefault(v =>
-                v.Site == TmdbConstants.VideoSiteYouTube &&
-                (v.Type == TmdbConstants.VideoTypeTrailer || v.Type == TmdbConstants.VideoTypeTeaser));
+        var videos = details.Videos?.Results?
+            .Where(v =>
+                string.Equals(v.Site, TmdbConstants.VideoSiteYouTube, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(v.Key))
+            .ToList();
+
+        if (videos is not { Count: > 0 })
+            return null;
+
+        var trailer = videos.FirstOrDefault(v =>
+                string.Equals(v.Type, TmdbConstants.VideoTypeTrailer, StringComparison.OrdinalIgnoreCase))
+            ?? videos.FirstOrDefault(v =>
+                string.Equals(v.Type, TmdbConstants.VideoTypeTeaser, StringComparison.OrdinalIgnoreCase));
 
         return trailer != null
             ? $"{TmdbConstants.YouTubeWatchBaseUrl}{trailer.Key}"
@@ -262,3 +326,5 @@ public class ImportMovieCommandHandler(
         };
     }
 }
+
+

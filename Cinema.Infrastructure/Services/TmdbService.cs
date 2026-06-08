@@ -1,4 +1,4 @@
-using Cinema.Application.Common.Interfaces;
+﻿using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Tmdb;
 using Cinema.Application.Common.Settings;
 using Microsoft.Extensions.Logging;
@@ -12,6 +12,8 @@ public class TmdbService(
     IOptions<TmdbSettings> settings, 
     ILogger<TmdbService> logger) : ITmdbService
 {
+    private const string DefaultDetailsLanguage = "uk-UA";
+    private const string DetailsAppendToResponse = "credits,videos,release_dates";
     private readonly TmdbSettings _settings = settings.Value;
 
     public async Task<TmdbSearchResponse?> SearchMoviesAsync(string query)
@@ -39,7 +41,11 @@ public class TmdbService(
     {
         try
         {
-            return await tmdbApi.GetMovieDetailsAsync(tmdbId, _settings.ApiKey);
+            return await tmdbApi.GetMovieDetailsAsync(
+                tmdbId,
+                _settings.ApiKey,
+                DefaultDetailsLanguage,
+                DetailsAppendToResponse);
         }
         catch (ApiException ex)
         {
@@ -59,3 +65,5 @@ public class TmdbService(
         }
     }
 }
+
+

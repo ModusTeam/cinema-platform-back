@@ -1,4 +1,4 @@
-using Refit;
+﻿using Refit;
 using Cinema.Application.Common.Models.Tmdb;
 
 namespace Cinema.Application.Common.Interfaces;
@@ -11,9 +11,11 @@ public interface ITmdbApi
         [AliasAs("api_key")] string apiKey,
         CancellationToken cancellationToken = default);
 
-    [Get("/movie/{id}?language=uk-UA&append_to_response=credits,videos,release_dates")]
+    [Get("/movie/{id}")]
     Task<TmdbMovieDetails> GetMovieDetailsAsync(
         int id,
         [AliasAs("api_key")] string apiKey,
+        [AliasAs("language")] string language,
+        [AliasAs("append_to_response")] string appendToResponse,
         CancellationToken cancellationToken = default);
 }
