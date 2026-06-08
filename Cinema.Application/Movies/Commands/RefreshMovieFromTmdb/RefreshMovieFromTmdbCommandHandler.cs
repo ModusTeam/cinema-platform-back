@@ -7,14 +7,14 @@ using Hangfire;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-namespace Cinema.Application.Movies.Commands.RestoreMovie;
+namespace Cinema.Application.Movies.Commands.RefreshMovieFromTmdb;
 
-public class RestoreMovieCommandHandler(
+public class RefreshMovieFromTmdbCommandHandler(
     IApplicationDbContext context,
     IMovieTmdbSyncService tmdbSyncService,
-    IBackgroundJobClient jobClient) : IRequestHandler<RestoreMovieCommand, Result>
+    IBackgroundJobClient jobClient) : IRequestHandler<RefreshMovieFromTmdbCommand, Result>
 {
-    public async Task<Result> Handle(RestoreMovieCommand request, CancellationToken ct)
+    public async Task<Result> Handle(RefreshMovieFromTmdbCommand request, CancellationToken ct)
     {
         var movieId = new EntityId<Movie>(request.Id);
         var movie = await context.Movies
@@ -22,15 +22,9 @@ public class RestoreMovieCommandHandler(
             .FirstOrDefaultAsync(m => m.Id == movieId, ct);
 
         if (movie is null) return Result.Failure(MovieErrors.NotFound);
-        if (!movie.IsDeleted) return Result.Failure(MovieErrors.AlreadyActive);
 
-        movie.Restore();
-
-        if (movie.ExternalId.HasValue)
-        {
-            var syncResult = await tmdbSyncService.ApplyLatestTmdbDetailsAsync(movie, ct: ct);
-            if (syncResult.IsFailure) return syncResult;
-        }
+        var syncResult = await tmdbSyncService.ApplyLatestTmdbDetailsAsync(movie, ct: ct);
+        if (syncResult.IsFailure) return syncResult;
 
         await context.SaveChangesAsync(ct);
 

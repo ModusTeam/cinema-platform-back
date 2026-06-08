@@ -1,4 +1,4 @@
-using Cinema.Domain.Shared;
+﻿using Cinema.Domain.Shared;
 
 namespace Cinema.Domain.Errors;
 
@@ -16,4 +16,8 @@ public static class MovieErrors
 
     public static readonly Error AlreadyActive =
         new("Movie.AlreadyActive", "The movie is not deleted and cannot be restored.");
+
+    public static readonly Error NotImportedFromTmdb =
+        new("Movie.NotImportedFromTmdb", "This movie is not linked to a TMDB identifier.");
 }
+

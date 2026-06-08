@@ -1,8 +1,9 @@
-using Cinema.Api.DTOs.Movies;
+﻿using Cinema.Api.DTOs.Movies;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Movies.Commands.CreateMovie;
 using Cinema.Application.Movies.Commands.DeleteMovie;
 using Cinema.Application.Movies.Commands.ImportMovie;
+using Cinema.Application.Movies.Commands.RefreshMovieFromTmdb;
 using Cinema.Application.Movies.Commands.RestoreMovie;
 using Cinema.Application.Movies.Commands.UpdateMovie.Commands; 
 using Cinema.Application.Movies.Queries.GetDeletedMovies;
@@ -118,6 +119,13 @@ public class MoviesController : ApiController
         return HandleResult(await Mediator.Send(new UpdateMovieStatusCommand(id, status)));
     }
     
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("{id:guid}/refresh-tmdb")]
+    public async Task<IActionResult> RefreshFromTmdb(Guid id)
+    {
+        return HandleResult(await Mediator.Send(new RefreshMovieFromTmdbCommand(id)));
+    }
     [Authorize(Roles = "Admin")]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
@@ -165,3 +173,4 @@ public class MoviesController : ApiController
         return Ok(result.Value.Adapt<List<MovieRecommendationDto>>());
     }
 }
+
