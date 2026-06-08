@@ -1,4 +1,4 @@
-using Cinema.Application.Common.Contracts;
+﻿using Cinema.Application.Common.Contracts;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Application.Orders.IntegrationEvents;
@@ -67,8 +67,8 @@ public class OrderPaidIntegrationEventHandler(
                     EventId:     order.Id.Value,
                     UserId:      order.UserId,
                     OrderId:     order.Id.Value,
-                    TotalAmount: (double)order.PaidAmount,
-                    TicketAmount:(double)order.PaidAmount,
+                    TotalAmount: (double)order.TotalAmount,
+                    TicketAmount:(double)order.TotalAmount,
                     FoodAmount:  0.0,
                     EventType:   eventType,
                     PurchasedAt: DateTime.UtcNow,
@@ -77,7 +77,9 @@ public class OrderPaidIntegrationEventHandler(
                     MovieTitle:  movieTitle,
                     SessionDate: sessionDate,
                     DownloadUrl: downloadUrl,
-                    TotalPrice:  (double)order.PaidAmount)),
+                    PaidAmount:  (double)order.PaidAmount,
+                    PointsUsed:  order.PointsUsed,
+                    TotalPrice:  (double)order.TotalAmount)),
                 cancellationToken);
 
             logger.LogInformation("Order {OrderId} published to RabbitMQ.", order.Id);
@@ -96,3 +98,5 @@ public class OrderPaidIntegrationEventHandler(
         return $"{_settings.BaseUrl.TrimEnd('/')}/{relative.TrimStart('/')}";
     }
 }
+
+
