@@ -5,6 +5,7 @@ using Cinema.Application.Orders.IntegrationEvents;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
+using Cinema.Domain.Exceptions;
 using Cinema.Domain.Shared;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
@@ -62,19 +63,28 @@ public class OrderCheckoutOrchestrator(
                 .FirstOrDefaultAsync(s => s.Id == new EntityId<Session>(trustedSessionId), ct);
 
             var standardSeatType = await context.SeatTypes
+                .AsNoTracking()
                 .FirstOrDefaultAsync(st => st.Name.ToUpper() == "STANDARD", ct);
 
-            if (sessionWithPricing?.Pricing == null || standardSeatType == null)
+            if (sessionWithPricing is null)
             {
-                return Result.Failure<Guid>(new Error("Order.StandardPriceNotFound", "Could not determine standard seat price for the upgrade."));
+                await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
+                return Result.Failure<Guid>(new Error("Session.NotFound", "Session not found."));
             }
 
-            decimal standardPrice = priceCalculator.CalculatePrice(sessionWithPricing.Pricing, standardSeatType.Id, sessionWithPricing.StartTime);
+            var basePriceResult = ResolveGoldUpgradeBasePrice(sessionWithPricing, standardSeatType);
+            if (basePriceResult.IsFailure)
+            {
+                await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
+                return Result.Failure<Guid>(basePriceResult.Error);
+            }
+
+            var standardPrice = basePriceResult.Value;
 
             if (!order.Tickets.Any(t => t.PriceSnapshot > standardPrice && !t.IsGoldUpgraded))
             {
                 await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
-                return Result.Failure<Guid>(new Error("Order.NoEligibleTickets", "No tickets eligible for gold upgrade."));
+                return Result.Failure<Guid>(new Error("Order.NoEligibleTickets", "Select at least one premium or VIP seat to apply GOLD upgrade."));
             }
 
             var goldUpgradeResult = await loyaltyService.UseGoldUpgradeAsync(userId, orderId, ct);
@@ -124,6 +134,52 @@ public class OrderCheckoutOrchestrator(
         }
     }
 
+    private Result<decimal> ResolveGoldUpgradeBasePrice(Session session, SeatType? standardSeatType)
+    {
+        if (session.Pricing is null)
+        {
+            return Result.Failure<decimal>(new Error(
+                "Order.StandardPriceNotFound",
+                "Could not determine base seat price for the GOLD upgrade."));
+        }
+
+        if (standardSeatType is not null)
+        {
+            var standardPrice = TryCalculatePrice(session.Pricing, standardSeatType.Id, session.StartTime);
+            if (standardPrice.HasValue)
+            {
+                return Result.Success(standardPrice.Value);
+            }
+        }
+
+        var fallbackPrice = session.Pricing.PricingItems?
+            .Select(item => TryCalculatePrice(session.Pricing, item.SeatTypeId, session.StartTime))
+            .Where(price => price.HasValue)
+            .Select(price => price!.Value)
+            .DefaultIfEmpty()
+            .Min();
+
+        if (fallbackPrice is null or <= 0)
+        {
+            return Result.Failure<decimal>(new Error(
+                "Order.StandardPriceNotFound",
+                "Could not determine base seat price for the GOLD upgrade."));
+        }
+
+        return Result.Success(fallbackPrice.Value);
+    }
+
+    private decimal? TryCalculatePrice(Pricing pricing, EntityId<SeatType> seatTypeId, DateTime sessionStartTime)
+    {
+        try
+        {
+            return priceCalculator.CalculatePrice(pricing, seatTypeId, sessionStartTime);
+        }
+        catch (PriceNotConfiguredException)
+        {
+            return null;
+        }
+    }
     private async Task<Result<(int PointsToDeduct, decimal AmountToPay)>> ResolveLoyaltyDiscountAsync(
         Guid userId, Guid sessionId, Guid orderId, decimal orderAmount, bool useLoyaltyPoints, CancellationToken ct)
     {
