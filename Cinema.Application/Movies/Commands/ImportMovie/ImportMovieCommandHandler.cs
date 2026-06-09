@@ -1,7 +1,8 @@
-﻿using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Tmdb;
 using Cinema.Application.Common.Settings;
 using Cinema.Application.Movies.Constants;
+using Cinema.Application.Movies.Helpers;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Errors;
 using Cinema.Domain.Shared;
@@ -47,6 +48,12 @@ public class ImportMovieCommandHandler(
         }
 
         var details = detailsResult.Value;
+        var runtimeResult = TmdbMovieDetailsHelper.ResolveRuntime(details, existing?.DurationMinutes);
+        if (runtimeResult.IsFailure)
+        {
+            return Result.Failure<Guid>(runtimeResult.Error);
+        }
+
         var dbContext = (DbContext)context;
         var strategy = dbContext.Database.CreateExecutionStrategy();
 
@@ -65,19 +72,19 @@ public class ImportMovieCommandHandler(
                     movie.UpdateFromTmdb(
                         details.Title,
                         details.Overview,
-                        details.Runtime ?? 0,
+                        runtimeResult.Value,
                         (decimal)details.VoteAverage,
                         DateTime.TryParse(details.ReleaseDate, out var d) ? d : null,
                         !string.IsNullOrEmpty(details.PosterPath) ? $"{_settings.ImageBaseUrl}{details.PosterPath}" : null,
                         !string.IsNullOrEmpty(details.BackdropPath) ? $"{_settings.ImageBaseUrl}{details.BackdropPath}" : null,
-                        ExtractTrailerUrl(details)
+                        TmdbMovieDetailsHelper.ExtractTrailerUrl(details)
                     );
                     movie.ClearGenres();
                     isRestored = true;
                 }
                 else
                 {
-                    movie = MapToMovie(details);
+                    movie = MapToMovie(details, runtimeResult.Value);
                     context.Movies.Add(movie);
                 }
 
@@ -112,8 +119,7 @@ public class ImportMovieCommandHandler(
                     logger.LogInformation("Restored existing soft-deleted movie {TmdbId}", request.TmdbId);
                 }
 
-                // Hangfire does not support cancellation tokens on background jobs вЂ”
-                // CancellationToken.None is correct and intentional here.
+                // Hangfire does not support cancellation tokens on background jobs.
                 jobClient.Enqueue<IAiEmbeddingService>(s =>
                     s.UpdateMovieEmbeddingAsync(movie.Id.Value, CancellationToken.None));
 
@@ -128,8 +134,6 @@ public class ImportMovieCommandHandler(
         });
     }
 
-    // в”Ђв”Ђ Private helpers в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-
     private async Task<Result<TmdbMovieDetails>> FetchTmdbDetailsAsync(int tmdbId, CancellationToken ct)
     {
         try
@@ -141,11 +145,12 @@ public class ImportMovieCommandHandler(
                 DetailsAppendToResponse,
                 ct);
 
-            if (ShouldFetchFallbackDetails(details))
+            if (TmdbMovieDetailsHelper.ShouldFetchFallbackDetails(details))
             {
                 details = await MergeFallbackDetailsAsync(details, tmdbId, ct);
             }
 
+            TmdbMovieDetailsHelper.NormalizeForPersistence(details);
             return Result.Success(details);
         }
         catch (Refit.ApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -157,11 +162,6 @@ public class ImportMovieCommandHandler(
             logger.LogError(ex, "Failed to fetch TMDB details for movie {TmdbId}", tmdbId);
             return Result.Failure<TmdbMovieDetails>(TmdbErrors.FetchFailed);
         }
-    }
-
-    private bool ShouldFetchFallbackDetails(TmdbMovieDetails details)
-    {
-        return string.IsNullOrWhiteSpace(details.Overview) || ExtractTrailerUrl(details) is null;
     }
 
     private async Task<TmdbMovieDetails> MergeFallbackDetailsAsync(
@@ -178,15 +178,7 @@ public class ImportMovieCommandHandler(
                 DetailsAppendToResponse,
                 ct);
 
-            if (string.IsNullOrWhiteSpace(primary.Overview) && !string.IsNullOrWhiteSpace(fallback.Overview))
-            {
-                primary.Overview = fallback.Overview;
-            }
-
-            if (ExtractTrailerUrl(primary) is null && ExtractTrailerUrl(fallback) is not null)
-            {
-                primary.Videos = fallback.Videos;
-            }
+            TmdbMovieDetailsHelper.MergeFallbackDetails(primary, fallback);
         }
         catch (Exception ex)
         {
@@ -199,7 +191,7 @@ public class ImportMovieCommandHandler(
         return primary;
     }
 
-    private Movie MapToMovie(TmdbMovieDetails details)
+    private Movie MapToMovie(TmdbMovieDetails details, int runtimeMinutes)
     {
         var posterUrl = !string.IsNullOrEmpty(details.PosterPath)
             ? $"{_settings.ImageBaseUrl}{details.PosterPath}" : null;
@@ -207,13 +199,13 @@ public class ImportMovieCommandHandler(
         var backdropUrl = !string.IsNullOrEmpty(details.BackdropPath)
             ? $"{_settings.ImageBaseUrl}{details.BackdropPath}" : null;
 
-        var trailerUrl = ExtractTrailerUrl(details);
+        var trailerUrl = TmdbMovieDetailsHelper.ExtractTrailerUrl(details);
 
         var movie = Movie.Import(
             details.Id,
             details.Title,
             details.Overview,
-            details.Runtime ?? 0,
+            runtimeMinutes,
             (decimal)details.VoteAverage,
             DateTime.TryParse(details.ReleaseDate, out var d) ? d : null,
             posterUrl,
@@ -239,27 +231,6 @@ public class ImportMovieCommandHandler(
         }
 
         return movie;
-    }
-
-    private string? ExtractTrailerUrl(TmdbMovieDetails details)
-    {
-        var videos = details.Videos?.Results?
-            .Where(v =>
-                string.Equals(v.Site, TmdbConstants.VideoSiteYouTube, StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrWhiteSpace(v.Key))
-            .ToList();
-
-        if (videos is not { Count: > 0 })
-            return null;
-
-        var trailer = videos.FirstOrDefault(v =>
-                string.Equals(v.Type, TmdbConstants.VideoTypeTrailer, StringComparison.OrdinalIgnoreCase))
-            ?? videos.FirstOrDefault(v =>
-                string.Equals(v.Type, TmdbConstants.VideoTypeTeaser, StringComparison.OrdinalIgnoreCase));
-
-        return trailer != null
-            ? $"{TmdbConstants.YouTubeWatchBaseUrl}{trailer.Key}"
-            : null;
     }
 
     private async Task SyncGenresAsync(Movie movie, List<TmdbGenreDto> tmdbGenres, CancellationToken ct)
@@ -326,5 +297,3 @@ public class ImportMovieCommandHandler(
         };
     }
 }
-
-

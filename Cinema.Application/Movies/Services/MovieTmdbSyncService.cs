@@ -1,7 +1,8 @@
-﻿using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Tmdb;
 using Cinema.Application.Common.Settings;
 using Cinema.Application.Movies.Constants;
+using Cinema.Application.Movies.Helpers;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Errors;
 using Cinema.Domain.Shared;
@@ -36,6 +37,12 @@ public class MovieTmdbSyncService(
             return Result.Failure(detailsResult.Error);
 
         var details = detailsResult.Value;
+        var runtimeResult = TmdbMovieDetailsHelper.ResolveRuntime(details, movie.DurationMinutes);
+        if (runtimeResult.IsFailure)
+        {
+            return Result.Failure(runtimeResult.Error);
+        }
+
         var posterUrl = !string.IsNullOrWhiteSpace(details.PosterPath)
             ? $"{_settings.ImageBaseUrl}{details.PosterPath}"
             : null;
@@ -49,12 +56,12 @@ public class MovieTmdbSyncService(
         movie.UpdateFromTmdb(
             details.Title,
             details.Overview,
-            details.Runtime ?? 0,
+            runtimeResult.Value,
             (decimal)details.VoteAverage,
             DateTime.TryParse(details.ReleaseDate, out var releaseDate) ? releaseDate : null,
             posterUrl,
             backdropUrl,
-            ExtractTrailerUrl(details),
+            TmdbMovieDetailsHelper.ExtractTrailerUrl(details),
             ageRestriction);
 
         movie.ClearGenres();
@@ -92,11 +99,12 @@ public class MovieTmdbSyncService(
                 DetailsAppendToResponse,
                 ct);
 
-            if (ShouldFetchFallbackDetails(details))
+            if (TmdbMovieDetailsHelper.ShouldFetchFallbackDetails(details))
             {
                 details = await MergeFallbackDetailsAsync(details, tmdbId, ct);
             }
 
+            TmdbMovieDetailsHelper.NormalizeForPersistence(details);
             return Result.Success(details);
         }
         catch (ApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -108,11 +116,6 @@ public class MovieTmdbSyncService(
             logger.LogError(ex, "Failed to fetch TMDB details for movie {TmdbId}", tmdbId);
             return Result.Failure<TmdbMovieDetails>(TmdbErrors.FetchFailed);
         }
-    }
-
-    private bool ShouldFetchFallbackDetails(TmdbMovieDetails details)
-    {
-        return string.IsNullOrWhiteSpace(details.Overview) || ExtractTrailerUrl(details) is null;
     }
 
     private async Task<TmdbMovieDetails> MergeFallbackDetailsAsync(
@@ -129,15 +132,7 @@ public class MovieTmdbSyncService(
                 DetailsAppendToResponse,
                 ct);
 
-            if (string.IsNullOrWhiteSpace(primary.Overview) && !string.IsNullOrWhiteSpace(fallback.Overview))
-            {
-                primary.Overview = fallback.Overview;
-            }
-
-            if (ExtractTrailerUrl(primary) is null && ExtractTrailerUrl(fallback) is not null)
-            {
-                primary.Videos = fallback.Videos;
-            }
+            TmdbMovieDetailsHelper.MergeFallbackDetails(primary, fallback);
         }
         catch (Exception ex)
         {
@@ -148,27 +143,6 @@ public class MovieTmdbSyncService(
         }
 
         return primary;
-    }
-
-    private string? ExtractTrailerUrl(TmdbMovieDetails details)
-    {
-        var videos = details.Videos?.Results?
-            .Where(v =>
-                string.Equals(v.Site, TmdbConstants.VideoSiteYouTube, StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrWhiteSpace(v.Key))
-            .ToList();
-
-        if (videos is not { Count: > 0 })
-            return null;
-
-        var trailer = videos.FirstOrDefault(v =>
-                string.Equals(v.Type, TmdbConstants.VideoTypeTrailer, StringComparison.OrdinalIgnoreCase))
-            ?? videos.FirstOrDefault(v =>
-                string.Equals(v.Type, TmdbConstants.VideoTypeTeaser, StringComparison.OrdinalIgnoreCase));
-
-        return trailer != null
-            ? $"{TmdbConstants.YouTubeWatchBaseUrl}{trailer.Key}"
-            : null;
     }
 
     private async Task SyncGenresAsync(Movie movie, List<TmdbGenreDto> tmdbGenres, CancellationToken ct)

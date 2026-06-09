@@ -96,13 +96,13 @@ public class TmdbVideos
 public class TmdbVideoDto
 {
     [JsonPropertyName("key")]
-    public string Key { get; set; } = string.Empty;
+    public string? Key { get; set; }
 
     [JsonPropertyName("site")]
-    public string Site { get; set; } = string.Empty;
+    public string? Site { get; set; }
 
     [JsonPropertyName("type")]
-    public string Type { get; set; } = string.Empty;
+    public string? Type { get; set; }
 }
 
 public class TmdbReleaseDates

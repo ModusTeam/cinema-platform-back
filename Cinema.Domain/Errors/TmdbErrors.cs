@@ -12,4 +12,7 @@ public static class TmdbErrors
 
     public static readonly Error FetchFailed =
         new("Tmdb.Error", "Failed to retrieve movie data from TMDB.");
+
+    public static readonly Error MissingRuntime =
+        new("Tmdb.MissingRuntime", "TMDB did not return a valid movie runtime.");
 }
