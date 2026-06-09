@@ -37,6 +37,7 @@ public static class ConfigureServices
         services.AddScoped<SessionSchedulingService>();
         services.AddScoped<SeatLayoutService>();
         services.AddScoped<IMovieTmdbSyncService, MovieTmdbSyncService>();
+        services.AddScoped<IGoldUpgradePricingService, Cinema.Application.Orders.Services.GoldUpgradePricingService>();
         services.AddScoped<Cinema.Application.Common.Interfaces.IOrderCheckoutOrchestrator, Cinema.Application.Orders.Services.OrderCheckoutOrchestrator>();
         return services;
     }

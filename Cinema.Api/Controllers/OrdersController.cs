@@ -4,6 +4,7 @@ using Cinema.Application.Orders.Dtos;
 using Cinema.Application.Orders.Queries.GetMyOrders;
 using Cinema.Application.Orders.Queries.GetUserOrders;
 using Cinema.Application.Orders.Queries.CalculateLoyaltyDiscountPreview;
+using Cinema.Application.Orders.Queries.CalculateCheckoutPreview;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -35,6 +36,20 @@ public class OrdersController : ApiController
         var result = await Mediator.Send(query);
         return HandleResult(result);
     }
+
+    [HttpPost("checkout-preview")]
+    public async Task<IActionResult> PreviewCheckout([FromBody] CheckoutPreviewRequest request)
+    {
+        var query = new CalculateCheckoutPreviewQuery(
+            request.SessionId,
+            request.SeatIds,
+            request.UseLoyaltyPoints,
+            request.ApplyGoldUpgrade);
+
+        var result = await Mediator.Send(query);
+        return HandleResult(result);
+    }
+
     [HttpGet]
     public async Task<ActionResult<List<OrderDto>>> GetMyOrders()
     {
@@ -61,3 +76,4 @@ public class OrdersController : ApiController
 
 public record CreateOrderRequest(Guid SessionId, List<Guid> SeatIds, string PaymentToken, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);
 public record LoyaltyDiscountPreviewRequest(Guid SessionId, List<Guid> SeatIds);
+public record CheckoutPreviewRequest(Guid SessionId, List<Guid> SeatIds, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);

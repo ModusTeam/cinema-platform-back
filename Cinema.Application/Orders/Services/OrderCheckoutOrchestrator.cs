@@ -5,7 +5,6 @@ using Cinema.Application.Orders.IntegrationEvents;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
-using Cinema.Domain.Exceptions;
 using Cinema.Domain.Shared;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +17,7 @@ public class OrderCheckoutOrchestrator(
     ILoyaltyService loyaltyService,
     IPaymentService paymentService,
     ISeatLockingService seatLockingService,
-    IPriceCalculator priceCalculator,
+    IGoldUpgradePricingService goldUpgradePricingService,
     IPublishEndpoint publishEndpoint,
     ILogger<OrderCheckoutOrchestrator> logger) : IOrderCheckoutOrchestrator
 {
@@ -62,29 +61,33 @@ public class OrderCheckoutOrchestrator(
                 .ThenInclude(p => p!.PricingItems)
                 .FirstOrDefaultAsync(s => s.Id == new EntityId<Session>(trustedSessionId), ct);
 
-            var standardSeatType = await context.SeatTypes
-                .AsNoTracking()
-                .FirstOrDefaultAsync(st => st.Name.ToUpper() == "STANDARD", ct);
-
             if (sessionWithPricing is null)
             {
                 await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
                 return Result.Failure<Guid>(new Error("Session.NotFound", "Session not found."));
             }
 
-            var basePriceResult = ResolveGoldUpgradeBasePrice(sessionWithPricing, standardSeatType);
-            if (basePriceResult.IsFailure)
+            var goldUpgradeQuoteResult = await goldUpgradePricingService.CalculateAsync(
+                sessionWithPricing,
+                order.Tickets
+                    .Where(t => !t.IsGoldUpgraded)
+                    .Select(t => new GoldUpgradeTicketPrice(t.SeatId.Value, t.PriceSnapshot))
+                    .ToList(),
+                ct);
+
+            if (goldUpgradeQuoteResult.IsFailure)
             {
                 await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
-                return Result.Failure<Guid>(basePriceResult.Error);
+                return Result.Failure<Guid>(goldUpgradeQuoteResult.Error);
             }
 
-            var standardPrice = basePriceResult.Value;
-
-            if (!order.Tickets.Any(t => t.PriceSnapshot > standardPrice && !t.IsGoldUpgraded))
+            var goldUpgradeQuote = goldUpgradeQuoteResult.Value;
+            if (!goldUpgradeQuote.IsApplied)
             {
                 await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
-                return Result.Failure<Guid>(new Error("Order.NoEligibleTickets", "Select at least one premium or VIP seat to apply GOLD upgrade."));
+                return Result.Failure<Guid>(new Error(
+                    "Order.NoEligibleTickets",
+                    goldUpgradeQuote.Reason ?? "Select at least one premium or VIP seat to apply GOLD upgrade."));
             }
 
             var goldUpgradeResult = await loyaltyService.UseGoldUpgradeAsync(userId, orderId, ct);
@@ -94,7 +97,7 @@ public class OrderCheckoutOrchestrator(
                 return Result.Failure<Guid>(new Error("Order.GoldUpgradeFailed", $"Gold upgrade failed: {goldUpgradeResult.Error}"));
             }
 
-            order.ApplyGoldSeatUpgrade(standardPrice);
+            order.ApplyGoldSeatUpgrade(goldUpgradeQuote.BasePrice);
             await context.SaveChangesAsync(ct);
             logger.LogInformation("Applied Gold Upgrade to order {OrderId} for user {UserId}", orderId, userId);
         }
@@ -134,52 +137,6 @@ public class OrderCheckoutOrchestrator(
         }
     }
 
-    private Result<decimal> ResolveGoldUpgradeBasePrice(Session session, SeatType? standardSeatType)
-    {
-        if (session.Pricing is null)
-        {
-            return Result.Failure<decimal>(new Error(
-                "Order.StandardPriceNotFound",
-                "Could not determine base seat price for the GOLD upgrade."));
-        }
-
-        if (standardSeatType is not null)
-        {
-            var standardPrice = TryCalculatePrice(session.Pricing, standardSeatType.Id, session.StartTime);
-            if (standardPrice.HasValue)
-            {
-                return Result.Success(standardPrice.Value);
-            }
-        }
-
-        var fallbackPrice = session.Pricing.PricingItems?
-            .Select(item => TryCalculatePrice(session.Pricing, item.SeatTypeId, session.StartTime))
-            .Where(price => price.HasValue)
-            .Select(price => price!.Value)
-            .DefaultIfEmpty()
-            .Min();
-
-        if (fallbackPrice is null or <= 0)
-        {
-            return Result.Failure<decimal>(new Error(
-                "Order.StandardPriceNotFound",
-                "Could not determine base seat price for the GOLD upgrade."));
-        }
-
-        return Result.Success(fallbackPrice.Value);
-    }
-
-    private decimal? TryCalculatePrice(Pricing pricing, EntityId<SeatType> seatTypeId, DateTime sessionStartTime)
-    {
-        try
-        {
-            return priceCalculator.CalculatePrice(pricing, seatTypeId, sessionStartTime);
-        }
-        catch (PriceNotConfiguredException)
-        {
-            return null;
-        }
-    }
     private async Task<Result<(int PointsToDeduct, decimal AmountToPay)>> ResolveLoyaltyDiscountAsync(
         Guid userId, Guid sessionId, Guid orderId, decimal orderAmount, bool useLoyaltyPoints, CancellationToken ct)
     {
