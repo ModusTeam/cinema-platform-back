@@ -137,7 +137,7 @@ public class CalculateCheckoutPreviewQueryHandler(
             request.ApplyGoldUpgrade,
             goldUpgrade.Value,
             request.UseLoyaltyPoints,
-            session.IsLoyaltyPaymentAllowed);
+            loyaltyPoints.Value);
 
         var ticketDtos = selectedTickets
             .Select(t => new CheckoutTicketPreviewDto(
@@ -200,7 +200,7 @@ public class CalculateCheckoutPreviewQueryHandler(
     {
         if (!requested)
         {
-            return Result.Success(new CheckoutGoldUpgradePreviewDto(false, false, false, 0m, null, null, null, null));
+            return Result.Success(new CheckoutGoldUpgradePreviewDto(false, false, false, 0m, null, null, null, null, null));
         }
 
         LoyaltyProfileDto profile;
@@ -217,9 +217,18 @@ public class CalculateCheckoutPreviewQueryHandler(
 
         if (!profile.GoldUpgradeAvailable)
         {
-            const string reason = "GOLD upgrade is not available for this user.";
+            var (reasonCode, reason) = ResolveUnavailableGoldUpgradeReason(profile);
             warnings.Add(reason);
-            return Result.Success(new CheckoutGoldUpgradePreviewDto(true, false, false, 0m, null, null, null, reason));
+            return Result.Success(new CheckoutGoldUpgradePreviewDto(
+                true,
+                false,
+                false,
+                0m,
+                null,
+                null,
+                null,
+                reasonCode,
+                reason));
         }
 
         var quoteResult = await goldUpgradePricingService.CalculateAsync(
@@ -239,7 +248,16 @@ public class CalculateCheckoutPreviewQueryHandler(
         {
             var reason = quote.Reason ?? "No selected ticket can use GOLD upgrade.";
             warnings.Add(reason);
-            return Result.Success(new CheckoutGoldUpgradePreviewDto(true, false, false, 0m, null, null, null, reason));
+            return Result.Success(new CheckoutGoldUpgradePreviewDto(
+                true,
+                false,
+                false,
+                0m,
+                null,
+                null,
+                null,
+                CheckoutPreviewReasonCodes.GoldUpgradeNoEligibleTicket,
+                reason));
         }
 
         ticketFinalPrices[quote.SeatId.Value] = quote.PriceAfter.Value;
@@ -252,6 +270,7 @@ public class CalculateCheckoutPreviewQueryHandler(
             quote.SeatId,
             quote.PriceBefore,
             quote.PriceAfter,
+            null,
             null));
     }
 
@@ -272,6 +291,7 @@ public class CalculateCheckoutPreviewQueryHandler(
                 0,
                 0m,
                 amountAfterGoldUpgrade,
+                null,
                 null));
         }
 
@@ -286,6 +306,7 @@ public class CalculateCheckoutPreviewQueryHandler(
                 0,
                 0m,
                 amountAfterGoldUpgrade,
+                CheckoutPreviewReasonCodes.LoyaltyPointsNotAllowedForSession,
                 reason));
         }
 
@@ -305,6 +326,7 @@ public class CalculateCheckoutPreviewQueryHandler(
                     0,
                     0m,
                     amountAfterGoldUpgrade,
+                    CheckoutPreviewReasonCodes.LoyaltyPointsInsufficientBalance,
                     reason));
             }
 
@@ -315,6 +337,7 @@ public class CalculateCheckoutPreviewQueryHandler(
                 pointsToDeduct,
                 pointsToDeduct,
                 amountToPay,
+                null,
                 null));
         }
         catch (Exception ex)
@@ -329,19 +352,40 @@ public class CalculateCheckoutPreviewQueryHandler(
         bool goldRequested,
         CheckoutGoldUpgradePreviewDto goldUpgrade,
         bool loyaltyPointsRequested,
-        bool isLoyaltyPaymentAllowed)
+        CheckoutLoyaltyPointsPreviewDto loyaltyPoints)
     {
         if (goldRequested && !goldUpgrade.Applied)
         {
             return false;
         }
 
-        if (loyaltyPointsRequested && !isLoyaltyPaymentAllowed)
+        if (loyaltyPointsRequested && !loyaltyPoints.Applied)
         {
             return false;
         }
 
         return true;
+    }
+
+    private static (string ReasonCode, string Reason) ResolveUnavailableGoldUpgradeReason(LoyaltyProfileDto profile)
+    {
+        if (!IsGoldTier(profile.Tier))
+        {
+            return (
+                CheckoutPreviewReasonCodes.GoldUpgradeRequiresGoldTier,
+                "GOLD upgrade is available only for GOLD tier users.");
+        }
+
+        return (
+            CheckoutPreviewReasonCodes.GoldUpgradeAlreadyUsedThisMonth,
+            "GOLD upgrade has already been used this month.");
+    }
+
+    private static bool IsGoldTier(string tier)
+    {
+        return tier.Equals("GOLD", StringComparison.OrdinalIgnoreCase)
+               || tier.Equals("TIER_GOLD", StringComparison.OrdinalIgnoreCase)
+               || tier.Equals("TierGold", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record SelectedTicketPreview(
