@@ -36,14 +36,14 @@ The project follows **Clean Architecture** combined with the **CQRS** (Command Q
 ## 📂 Project Structure
 
 ```
-Cinema.Api/                # Controllers, Middleware, SignalR Hubs, Entry Point
+src/Host/Cinema.Api/       # Controllers, Middleware, SignalR Hubs, Entry Point
 ├── Controllers/           # Account, Auth, Genres, Halls, Movies, Orders, Pricings, etc.
 ├── Hubs/                 # TicketHub (SignalR real-time notifications)
 ├── ExceptionHandlers/    # GlobalExceptionHandler
 ├── Middleware/           # RequestLogContextMiddleware
 └── Services/             # CurrentUserService, SignalRTicketNotifier, TicketNotificationWorker
 
-Cinema.Application/        # Business Logic, CQRS Handlers, DTOs, Validators
+src/Cinema.Application/    # Business Logic, CQRS Handlers, DTOs, Validators
 ├── Account/              # Profile & password commands/queries
 ├── Achievements/         # Achievements logic & queries
 ├── Auth/                 # Login, Register, RefreshToken
@@ -67,13 +67,13 @@ Cinema.Application/        # Business Logic, CQRS Handlers, DTOs, Validators
     ├── Interfaces/       # IPaymentService, IPriceCalculator, ITicketNotifier, IEmailService, etc.
     └── Mappings/         # Mapster configuration
 
-Cinema.Domain/             # Core: Entities, Value Objects, Enums, Events
+src/Cinema.Domain/          # Core: Entities, Value Objects, Enums, Events
 ├── Entities/             # Movie, Hall, Session, Seat, Order, Ticket, Genre, Pricing, etc.
 ├── Enums/                # MovieStatus, SeatStatus, SessionStatus, OrderStatus, TicketStatus
 ├── Events/               # OrderPaidEvent (domain events)
 └── Shared/               # Result<T>, Error, EntityId<T>
 
-Cinema.Infrastructure/     # Data, Caching, External APIs, Identity, Messaging
+src/Cinema.Infrastructure/ # Data, Caching, External APIs, Identity, Messaging
 ├── Persistence/
 │   ├── Configurations/   # EF Core entity configurations
 │   ├── Migrations/       # Database migrations
@@ -162,8 +162,8 @@ cd cinema-platform-backend
 ```bash
 dotnet tool restore
 dotnet restore
-dotnet ef database update --project Cinema.Infrastructure --startup-project Cinema.Api
-dotnet run --project Cinema.Api
+dotnet ef database update --project src/Cinema.Infrastructure --startup-project src/Host/Cinema.Api
+dotnet run --project src/Host/Cinema.Api
 ```
 
 ---
@@ -304,7 +304,7 @@ The scheduling service checks for time-slot overlaps within the same hall before
 
 ### Object Mapping
 - **Mapster**: High-performance object-to-object mapper
-- **Configuration**: Mapping profiles in `Cinema.Application/Common/Mappings/`
+- **Configuration**: Mapping profiles in `src/Cinema.Application/Common/Mappings/`
 - **Usage**: `entity.Adapt<Dto>()` for clean, type-safe transformations
 
 ---

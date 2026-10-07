@@ -3,13 +3,17 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.Domain", "Cinema.Domain\Cinema.Domain.csproj", "{ED1A8A96-D7D0-4641-992D-D72622986086}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.Domain", "src\Cinema.Domain\Cinema.Domain.csproj", "{ED1A8A96-D7D0-4641-992D-D72622986086}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.Application", "Cinema.Application\Cinema.Application.csproj", "{E3633075-D09B-417C-843D-F85012D92744}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.Application", "src\Cinema.Application\Cinema.Application.csproj", "{E3633075-D09B-417C-843D-F85012D92744}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.Infrastructure", "Cinema.Infrastructure\Cinema.Infrastructure.csproj", "{02BC97FF-FD37-4BBE-B9CC-F2866D043EDC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.Infrastructure", "src\Cinema.Infrastructure\Cinema.Infrastructure.csproj", "{02BC97FF-FD37-4BBE-B9CC-F2866D043EDC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.Api", "Cinema.Api\Cinema.Api.csproj", "{671894C1-0E7E-43DD-85FB-198C69CEB8DB}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.Api", "src\Host\Cinema.Api\Cinema.Api.csproj", "{671894C1-0E7E-43DD-85FB-198C69CEB8DB}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{1CDE4FB1-742D-4255-B430-E885969135A0}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Host", "Host", "{DE6A286F-1269-4C10-B059-BC100A5B48A9}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
@@ -102,6 +106,11 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{ED1A8A96-D7D0-4641-992D-D72622986086} = {1CDE4FB1-742D-4255-B430-E885969135A0}
+		{E3633075-D09B-417C-843D-F85012D92744} = {1CDE4FB1-742D-4255-B430-E885969135A0}
+		{02BC97FF-FD37-4BBE-B9CC-F2866D043EDC} = {1CDE4FB1-742D-4255-B430-E885969135A0}
+		{DE6A286F-1269-4C10-B059-BC100A5B48A9} = {1CDE4FB1-742D-4255-B430-E885969135A0}
+		{671894C1-0E7E-43DD-85FB-198C69CEB8DB} = {DE6A286F-1269-4C10-B059-BC100A5B48A9}
 		{E73CC82A-C53C-44F5-B369-44C732EC2C6A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

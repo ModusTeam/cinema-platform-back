@@ -31,6 +31,8 @@ This file is the **Source of Truth** for AI coding agents working on the Cinema 
 
 ## 🏗 Architectural Layers
 
+Production projects live under `src/`. `src/Host/Cinema.Api` is the application host; the other three existing layers remain under `src/` during incremental module extraction. Tests live under `tests/`. Add future business modules only when they contain real production code. SharedKernel or Contracts projects should be introduced only when stable cross-module types need them.
+
 ### 1. Cinema.Domain (The Core)
 *No dependencies on other projects.*
 - **Entities**: Encapsulated state (private setters), factory methods, and domain logic. Inherit from `BaseEntity`.
@@ -153,13 +155,13 @@ public class Movie : BaseEntity
 
 ```bash
 # General
-dotnet run --project Cinema.Api
-dotnet watch --project Cinema.Api
+dotnet run --project src/Host/Cinema.Api
+dotnet watch --project src/Host/Cinema.Api
 
 # Database
 dotnet tool restore # Restores the repository-local dotnet-ef 9.0.12 tool
-dotnet ef migrations add <Name> --project Cinema.Infrastructure --startup-project Cinema.Api
-dotnet ef database update --project Cinema.Infrastructure --startup-project Cinema.Api
+dotnet ef migrations add <Name> --project src/Cinema.Infrastructure --startup-project src/Host/Cinema.Api
+dotnet ef database update --project src/Cinema.Infrastructure --startup-project src/Host/Cinema.Api
 
 # Infrastructure
 docker-compose up -d # Spins up Postgres, Redis, RabbitMQ
