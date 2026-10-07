@@ -17,10 +17,14 @@ public class DependencyRules
     private static readonly Assembly CatalogDomainAssembly = Assembly.Load("Cinema.Catalog.Domain");
     private static readonly Assembly CatalogApplicationAssembly = Assembly.Load("Cinema.Catalog.Application");
     private static readonly Assembly CatalogInfrastructureAssembly = Assembly.Load("Cinema.Catalog.Infrastructure");
+    private static readonly Assembly SchedulingDomainAssembly = Assembly.Load("Cinema.Scheduling.Domain");
+    private static readonly Assembly SchedulingApplicationAssembly = Assembly.Load("Cinema.Scheduling.Application");
+    private static readonly Assembly SchedulingInfrastructureAssembly = Assembly.Load("Cinema.Scheduling.Infrastructure");
 
     private static readonly Architecture Architecture = new ArchLoader()
         .LoadAssemblies(DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly,
-            CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly)
+            CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
+            SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly)
         .Build();
 
     [Fact]
@@ -89,6 +93,60 @@ public class DependencyRules
             .Or().ResideInAssembly(ApplicationAssembly).Should().NotDependOnAny(
                 Types().That().ResideInAssembly(CatalogApplicationAssembly)
                     .Or().ResideInAssembly(CatalogInfrastructureAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Scheduling_Domain_Should_Not_Depend_On_Legacy_Or_Higher_Layers()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(SchedulingDomainAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(DomainAssembly)
+                .Or().ResideInAssembly(ApplicationAssembly)
+                .Or().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly)
+                .Or().ResideInAssembly(SchedulingApplicationAssembly)
+                .Or().ResideInAssembly(SchedulingInfrastructureAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Scheduling_Application_Should_Not_Depend_On_Infrastructure_Or_Host()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(SchedulingApplicationAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(SchedulingInfrastructureAssembly)
+                .Or().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Scheduling_Infrastructure_Should_Not_Depend_On_Legacy_Infrastructure_Or_Host()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(SchedulingInfrastructureAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Catalog_Should_Not_Depend_On_Scheduling()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(CatalogDomainAssembly)
+            .Or().ResideInAssembly(CatalogApplicationAssembly)
+            .Or().ResideInAssembly(CatalogInfrastructureAssembly).Should().NotDependOnAny(
+                Types().That().ResideInAssembly(SchedulingDomainAssembly)
+                    .Or().ResideInAssembly(SchedulingApplicationAssembly)
+                    .Or().ResideInAssembly(SchedulingInfrastructureAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Legacy_Layers_Should_Not_Depend_On_Scheduling_Implementation()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(DomainAssembly)
+            .Or().ResideInAssembly(ApplicationAssembly).Should().NotDependOnAny(
+                Types().That().ResideInAssembly(SchedulingApplicationAssembly)
+                    .Or().ResideInAssembly(SchedulingInfrastructureAssembly));
         rule.Check(Architecture);
     }
 }

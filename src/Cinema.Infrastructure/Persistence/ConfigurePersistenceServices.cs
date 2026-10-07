@@ -1,8 +1,6 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
-using Cinema.Domain.Interfaces;
 using Cinema.Infrastructure.Persistence.Interceptors;
-using Cinema.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -54,8 +52,6 @@ public static class ConfigurePersistenceServices
             .AddRoles<IdentityRole<Guid>>()
             .AddEntityFrameworkStores<ApplicationDbContext>()
             .AddDefaultTokenProviders();
-        services.AddScoped<IMovieInfoProvider, EfMovieInfoProvider>();
-
         return services;
     }
 }

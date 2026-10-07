@@ -4,7 +4,7 @@ using Cinema.Domain.Entities;
 using Cinema.Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace Cinema.Infrastructure.Services;
+namespace Cinema.Scheduling.Infrastructure.Services;
 
 public class EfMovieInfoProvider(IApplicationDbContext context) : IMovieInfoProvider
 {

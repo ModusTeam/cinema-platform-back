@@ -34,7 +34,7 @@ public class TicketConfiguration : IEntityTypeConfiguration<Ticket>
             .HasConversion(x => x.Value, x => new EntityId<Session>(x));
 
         builder.HasOne(x => x.Session)
-            .WithMany(x => x.Tickets)
+            .WithMany()
             .HasForeignKey(x => x.SessionId)    
             .OnDelete(DeleteBehavior.Restrict);
 

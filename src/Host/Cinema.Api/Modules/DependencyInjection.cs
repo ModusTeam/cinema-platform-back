@@ -8,6 +8,8 @@ using Cinema.Catalog.Application;
 using Cinema.Catalog.Infrastructure;
 using Cinema.Infrastructure;
 using Cinema.Infrastructure.Services;
+using Cinema.Scheduling.Application;
+using Cinema.Scheduling.Infrastructure;
 using Microsoft.OpenApi.Models;
 
 namespace Cinema.Api.Modules;
@@ -20,8 +22,10 @@ public static class DependencyInjection
 
         services.AddApplication();
         services.AddCatalogApplication();
+        services.AddSchedulingApplication();
         services.AddInfrastructureServices(configuration);
         services.AddCatalogInfrastructure(configuration);
+        services.AddSchedulingInfrastructure();
 
         var appSettings = configuration.Get<ApplicationSettings>();
         if (appSettings != null)

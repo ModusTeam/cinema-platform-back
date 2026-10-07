@@ -9,7 +9,7 @@ public class InfrastructureMappingConfig : IRegister
 {
     public void Register(TypeAdapterConfig config)
     {
-        var entityTypes = new[] { typeof(Session).Assembly, typeof(Movie).Assembly }
+        var entityTypes = new[] { typeof(Order).Assembly, typeof(Session).Assembly, typeof(Movie).Assembly }
             .SelectMany(assembly => assembly.GetTypes())
             .Where(t => t.IsClass && !t.IsAbstract && !t.IsGenericType 
                         && t.Namespace != null && t.Namespace.EndsWith("Entities"));

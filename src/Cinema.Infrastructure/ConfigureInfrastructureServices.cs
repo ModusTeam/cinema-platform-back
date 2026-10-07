@@ -3,7 +3,6 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Application.Services;
 using Cinema.Domain.Entities;
-using Cinema.Domain.Interfaces;
 using Cinema.Infrastructure.Messaging.Consumers;
 using Cinema.Infrastructure.Options;
 using Cinema.Infrastructure.Persistence;
@@ -266,7 +265,6 @@ public static class ConfigureInfrastructureServices
         services.AddTransient<ITokenService, TokenService>();
         services.AddTransient<IIdentityService, IdentityService>();
         services.AddTransient<IUserService, UserService>();
-        services.AddScoped<IMovieInfoProvider, EfMovieInfoProvider>();
         services.AddScoped<IOrderReservationService, OrderReservationService>();
         services.AddScoped<ILoyaltyService, GrpcLoyaltyService>();
         services.AddScoped<IAdminLoyaltyService, GrpcLoyaltyService>();
