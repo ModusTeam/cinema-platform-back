@@ -27,12 +27,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Cinema.Application\Cinema.Application.csproj" />
-    <ProjectReference Include="..\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Cinema.Application\Cinema.Application.csproj" />
+    <ProjectReference Include="..\..\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\.dockerignore">
+    <Content Include="..\..\..\.dockerignore">
       <Link>.dockerignore</Link>
     </Content>
   </ItemGroup>

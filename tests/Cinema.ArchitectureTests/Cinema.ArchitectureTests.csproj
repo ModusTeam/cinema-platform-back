@@ -14,10 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Cinema.Api\Cinema.Api.csproj" />
-    <ProjectReference Include="..\..\Cinema.Application\Cinema.Application.csproj" />
-    <ProjectReference Include="..\..\Cinema.Domain\Cinema.Domain.csproj" />
-    <ProjectReference Include="..\..\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Host\Cinema.Api\Cinema.Api.csproj" />
+    <ProjectReference Include="..\..\src\Cinema.Application\Cinema.Application.csproj" />
+    <ProjectReference Include="..\..\src\Cinema.Domain\Cinema.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

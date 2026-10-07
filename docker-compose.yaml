@@ -69,7 +69,7 @@ services:
       - RabbitMQ__Host=cinema-rabbitmq
       - SEED_ADMIN__EMAIL=admin@cinema.com
       - SEED_ADMIN__PASSWORD=Admin123!
-    entrypoint: ["dotnet", "run", "--project", "Cinema.Api", "--", "--seed"]
+    entrypoint: ["dotnet", "run", "--project", "src/Host/Cinema.Api", "--", "--seed"]
     depends_on:
       cinema-db:
         condition: service_healthy
