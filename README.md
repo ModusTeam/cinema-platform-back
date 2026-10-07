@@ -2,7 +2,7 @@
 
 Backend API for a Cinema Management System developed as part of the **SoftServe Practice**. This solution provides a comprehensive RESTful API for managing movies, sessions, halls, and ticket bookings using Clean Architecture principles.
 
-![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat&logo=dotnet)
+![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?style=flat&logo=dotnet)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql)
 ![Redis](https://img.shields.io/badge/Redis-Cache-DC382D?style=flat&logo=redis)
 ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-Messaging-FF6600?style=flat&logo=rabbitmq)
@@ -89,7 +89,7 @@ Cinema.Infrastructure/     # Data, Caching, External APIs, Identity, Messaging
 
 ### Prerequisites
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download)
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop)
 - **Supabase** account (for PostgreSQL) *or* local PostgreSQL
 - **Redis** instance
@@ -400,7 +400,7 @@ A complete automated test suite is included: **Cinema Booking Flow (Auto).postma
 ## 🐳 Docker Deployment
 
 The `docker-compose.yaml` includes:
-- **cinema-api**: Main .NET 8 API container
+- **cinema-api**: Main .NET 10 API container
 - **redis**: Redis cache with password protection
 - **redis-commander**: Web UI for Redis at `http://localhost:8081`
 - **rabbitmq**: Message broker with management UI at `http://localhost:15672`
