@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TngTech.ArchUnitNET.xUnitV3" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Cinema.Api\Cinema.Api.csproj" />
+    <ProjectReference Include="..\..\Cinema.Application\Cinema.Application.csproj" />
+    <ProjectReference Include="..\..\Cinema.Domain\Cinema.Domain.csproj" />
+    <ProjectReference Include="..\..\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
