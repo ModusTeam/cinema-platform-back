@@ -9,8 +9,8 @@ public class InfrastructureMappingConfig : IRegister
 {
     public void Register(TypeAdapterConfig config)
     {
-        var domainAssembly = typeof(Movie).Assembly;
-        var entityTypes = domainAssembly.GetTypes()
+        var entityTypes = new[] { typeof(Session).Assembly, typeof(Movie).Assembly }
+            .SelectMany(assembly => assembly.GetTypes())
             .Where(t => t.IsClass && !t.IsAbstract && !t.IsGenericType 
                         && t.Namespace != null && t.Namespace.EndsWith("Entities"));
 

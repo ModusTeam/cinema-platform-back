@@ -7,6 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\BuildingBlocks\Cinema.SharedKernel\Cinema.SharedKernel.csproj" />
+    <ProjectReference Include="..\Modules\Catalog\Cinema.Catalog.Domain\Cinema.Catalog.Domain.csproj" />
     <PackageReference Include="MediatR.Contracts" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
     <PackageReference Include="Pgvector" />

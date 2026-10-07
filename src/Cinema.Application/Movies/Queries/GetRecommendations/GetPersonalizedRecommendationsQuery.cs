@@ -1,5 +1,4 @@
 using Cinema.Application.Common.Interfaces;
-using Cinema.Application.Movies.Constants;
 using Cinema.Domain.Shared;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +9,7 @@ namespace Cinema.Application.Movies.Queries.GetRecommendations;
 
 public record MovieRecommendationResult(Guid Id, string Title, string? PosterUrl, double SimilarityScore);
 
-public record GetPersonalizedRecommendationsQuery(int Count = MovieConstants.DefaultRecommendationCount) : IRequest<Result<List<MovieRecommendationResult>>>;
+public record GetPersonalizedRecommendationsQuery(int Count = 5) : IRequest<Result<List<MovieRecommendationResult>>>;
 
 public class GetPersonalizedRecommendationsQueryHandler(
     IApplicationDbContext context,

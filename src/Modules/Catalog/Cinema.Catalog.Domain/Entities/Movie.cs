@@ -1,0 +1,205 @@
+using Cinema.Domain.Common;
+using Cinema.Domain.Exceptions;
+using Pgvector;
+
+namespace Cinema.Catalog.Domain.Entities;
+
+public class MovieCastMember
+{
+    public int ExternalId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Role { get; set; }
+    public string? PhotoUrl { get; set; }
+}
+
+public class Movie : BaseEntity
+{
+    public EntityId<Movie> Id { get; private set; }
+    public int? ExternalId { get; private set; }
+    public string Title { get; private set; } = null!;
+    public string? Description { get; private set; }
+    public int DurationMinutes { get; private set; }
+    public decimal Rating { get; private set; }
+    public int ReleaseYear { get; private set; }
+    
+    public string? PosterUrl { get; private set; }
+    public string? BackdropUrl { get; private set; }
+    public string? TrailerUrl { get; private set; }
+    
+    public MovieStatus Status { get; private set; } = MovieStatus.ComingSoon;
+    public bool IsDeleted { get; private set; } = false;
+    public string? AgeRestriction { get; private set; }
+    
+    public List<MovieCastMember> Cast { get; private set; } = [];
+
+    /// <summary>
+    /// Replaces the full cast list. Intended for use during import/sync only.
+    /// </summary>
+    public void SetCast(IEnumerable<MovieCastMember> cast)
+    {
+        Cast = cast.ToList();
+    }
+
+    public ICollection<MovieGenre> MovieGenres { get; private set; } = [];
+    public Vector? Embedding { get; private set; }
+    
+    private Movie() { }
+
+    public static Movie CreateManual(
+        string title,
+        string description,
+        int durationMinutes,
+        int releaseYear,
+        MovieStatus status)
+    {
+        var movie = new Movie
+        {
+            Id = new EntityId<Movie>(Guid.NewGuid()),
+            Title = title,
+            Description = description,
+            DurationMinutes = durationMinutes,
+            ReleaseYear = releaseYear,
+            Status = status,
+            ExternalId = null,
+            Rating = 0
+        };
+
+        return movie;
+    }
+    
+    public void ChangeStatus(MovieStatus newStatus)
+    {
+        Status = newStatus;
+    }
+    
+    public void Delete()
+    {
+        IsDeleted = true;
+    }
+    
+    public void Restore()
+    {
+        IsDeleted = false;
+    }
+    
+    public void ClearGenres()
+    {
+        MovieGenres.Clear();
+    }
+
+    private Movie(
+        EntityId<Movie> id,
+        int? externalId,
+        string title,
+        string? description,
+        int durationMinutes,
+        decimal rating,
+        int releaseYear,
+        string? posterUrl,
+        string? backdropUrl,
+        string? trailerUrl,
+        string? ageRestriction)
+    {
+        Id = id;
+        ExternalId = externalId;
+        Title = title;
+        Description = description;
+        DurationMinutes = durationMinutes;
+        Rating = rating;
+        ReleaseYear = releaseYear;
+        PosterUrl = posterUrl;
+        BackdropUrl = backdropUrl;
+        TrailerUrl = trailerUrl;
+        AgeRestriction = ageRestriction;
+    }
+
+    public static Movie Import(
+        int externalId,
+        string title,
+        string? description,
+        int duration,
+        decimal rating,
+        DateTime? releaseDate,
+        string? posterUrl,
+        string? backdropUrl,
+        string? trailerUrl,
+        string? ageRestriction = null)
+    {
+        var movie = new Movie(
+            EntityId<Movie>.New(),
+            externalId,
+            title,
+            description,
+            duration,
+            rating,
+            releaseDate?.Year ?? DateTime.UtcNow.Year,
+            posterUrl,
+            backdropUrl,
+            trailerUrl,
+            ageRestriction
+        );
+
+        return movie;
+    }
+
+    public void UpdateFromTmdb(
+        string title,
+        string? description,
+        int duration,
+        decimal rating,
+        DateTime? releaseDate,
+        string? posterUrl,
+        string? backdropUrl,
+        string? trailerUrl,
+        string? ageRestriction = null)
+    {
+        Title = title;
+        Description = description;
+        DurationMinutes = duration;
+        Rating = rating;
+        ReleaseYear = releaseDate?.Year ?? DateTime.UtcNow.Year;
+        PosterUrl = posterUrl;
+        BackdropUrl = backdropUrl;
+        TrailerUrl = trailerUrl;
+        AgeRestriction = ageRestriction;
+    }
+
+    public void SetAgeRestriction(string? ageRestriction)
+    {
+        AgeRestriction = ageRestriction;
+    }
+    
+    public void AddGenre(Genre genre)
+    {
+        if (!MovieGenres.Any(x => x.GenreId == genre.Id))
+        {
+            MovieGenres.Add(MovieGenre.Create(this, genre));
+        }
+    }
+
+    public void Rename(string newTitle)
+    {
+        if (string.IsNullOrWhiteSpace(newTitle)) throw new DomainException("Title cannot be empty.");
+        Title = newTitle;
+    }
+
+    public void UpdateImages(string? posterUrl, string? backdropUrl, string? trailerUrl)
+    {
+        PosterUrl = posterUrl;
+        BackdropUrl = backdropUrl;
+        TrailerUrl = trailerUrl;
+    }
+    
+    public void UpdateSpecs(string? description, int? durationMinutes, decimal? rating, int? releaseYear)
+    {
+        if (description is not null) Description = description;
+        if (durationMinutes.HasValue) DurationMinutes = durationMinutes.Value;
+        if (rating.HasValue) Rating = rating.Value;
+        if (releaseYear.HasValue) ReleaseYear = releaseYear.Value;
+    }
+    
+    public void SetEmbedding(float[] embedding)
+    {
+        Embedding = new Vector(embedding);
+    }
+}

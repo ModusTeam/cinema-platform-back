@@ -1,8 +1,8 @@
-using Cinema.Application.Genres.Commands.CreateGenre;
-using Cinema.Application.Genres.Commands.DeleteGenre;
-using Cinema.Application.Genres.Commands.UpdateGenre;
-using Cinema.Application.Genres.Dtos;
-using Cinema.Application.Genres.Queries.GetGenres;
+using Cinema.Catalog.Application.Genres.Commands.CreateGenre;
+using Cinema.Catalog.Application.Genres.Commands.DeleteGenre;
+using Cinema.Catalog.Application.Genres.Commands.UpdateGenre;
+using Cinema.Catalog.Application.Genres.Dtos;
+using Cinema.Catalog.Application.Genres.Queries.GetGenres;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

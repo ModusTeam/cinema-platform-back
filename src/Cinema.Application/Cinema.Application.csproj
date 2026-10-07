@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Cinema.Domain\Cinema.Domain.csproj" />
+    <ProjectReference Include="..\Modules\Catalog\Cinema.Catalog.Domain\Cinema.Catalog.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>

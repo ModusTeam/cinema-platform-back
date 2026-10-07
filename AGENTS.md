@@ -31,10 +31,12 @@ This file is the **Source of Truth** for AI coding agents working on the Cinema 
 
 ## 🏗 Architectural Layers
 
-Production projects live under `src/`. `src/Host/Cinema.Api` is the application host; the other three existing layers remain under `src/` during incremental module extraction. Tests live under `tests/`. Add future business modules only when they contain real production code. SharedKernel or Contracts projects should be introduced only when stable cross-module types need them.
+Production projects live under `src/`. `src/Host/Cinema.Api` is the application host; the three original layers remain under `src/` during incremental module extraction. Tests live under `tests/`. Add future business modules only when they contain real production code. Add further building blocks only when stable cross-module types need them.
 
-### 1. Cinema.Domain (The Core)
-*No dependencies on other projects.*
+The first extracted module lives at `src/Modules/Catalog/` with Domain, Application, and Infrastructure projects. Keep later modules under `src/Modules/<Name>/` only when their business code is ready to move. `src/BuildingBlocks/Cinema.SharedKernel` holds the existing domain primitives needed by both Catalog and the transitional domain; their legacy namespaces remain for compatibility. Catalog Application temporarily uses `IApplicationDbContext` from the transitional application layer, and Catalog Infrastructure uses that context interface for movie embeddings. The Host registers Catalog explicitly. The existing `ApplicationDbContext`, schema, and migration assembly remain shared until a later persistence-boundary step.
+
+### 1. Cinema.Domain (Transitional Core)
+*Depends on SharedKernel and Catalog.Domain for existing session-to-movie references; no application or infrastructure dependencies.*
 - **Entities**: Encapsulated state (private setters), factory methods, and domain logic. Inherit from `BaseEntity`.
 - **Value Objects / Shared**: `EntityId<T>` (Strongly-typed IDs), `Result<T>` (Functional errors).
 - **Events**: `IDomainEvent` for side-effects.

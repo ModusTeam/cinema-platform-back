@@ -1,0 +1,31 @@
+using Cinema.Domain.Common;
+using Cinema.Catalog.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Cinema.Catalog.Infrastructure.Persistence.Configurations;
+
+public class GenreConfiguration : IEntityTypeConfiguration<Genre>
+{
+    public void Configure(EntityTypeBuilder<Genre> builder)
+    {
+        builder.HasKey(x => x.Id);
+        
+        builder.Property(x => x.Id)
+            .HasConversion(x => x.Value, x => new EntityId<Genre>(x));
+
+        builder.Property(x => x.Name)
+            .IsRequired()
+            .HasMaxLength(100);
+
+        builder.Property(x => x.Slug)
+            .IsRequired(false)
+            .HasMaxLength(100);
+              
+        builder.HasIndex(x => x.ExternalId)
+            .IsUnique();
+        
+        builder.Property(x => x.ExternalId).IsRequired(false);
+        builder.HasIndex(x => x.ExternalId).IsUnique();
+    }
+}

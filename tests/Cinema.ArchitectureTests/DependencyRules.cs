@@ -14,9 +14,13 @@ public class DependencyRules
     private static readonly Assembly ApplicationAssembly = Assembly.Load("Cinema.Application");
     private static readonly Assembly InfrastructureAssembly = Assembly.Load("Cinema.Infrastructure");
     private static readonly Assembly ApiAssembly = Assembly.Load("Cinema.Api");
+    private static readonly Assembly CatalogDomainAssembly = Assembly.Load("Cinema.Catalog.Domain");
+    private static readonly Assembly CatalogApplicationAssembly = Assembly.Load("Cinema.Catalog.Application");
+    private static readonly Assembly CatalogInfrastructureAssembly = Assembly.Load("Cinema.Catalog.Infrastructure");
 
     private static readonly Architecture Architecture = new ArchLoader()
-        .LoadAssemblies(DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly)
+        .LoadAssemblies(DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly,
+            CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly)
         .Build();
 
     [Fact]
@@ -43,6 +47,48 @@ public class DependencyRules
     {
         IArchRule rule = Types().That().ResideInAssembly(InfrastructureAssembly).Should().NotDependOnAny(
             Types().That().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Catalog_Domain_Should_Not_Depend_On_Application_Infrastructure_Or_Host()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(CatalogDomainAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(CatalogApplicationAssembly)
+                .Or().ResideInAssembly(CatalogInfrastructureAssembly)
+                .Or().ResideInAssembly(DomainAssembly)
+                .Or().ResideInAssembly(ApplicationAssembly)
+                .Or().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Catalog_Application_Should_Not_Depend_On_Infrastructure_Or_Host()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(CatalogApplicationAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(CatalogInfrastructureAssembly)
+                .Or().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Catalog_Infrastructure_Should_Not_Depend_On_Host()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(CatalogInfrastructureAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Legacy_Domain_And_Application_Should_Not_Depend_On_Catalog_Implementation()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(DomainAssembly)
+            .Or().ResideInAssembly(ApplicationAssembly).Should().NotDependOnAny(
+                Types().That().ResideInAssembly(CatalogApplicationAssembly)
+                    .Or().ResideInAssembly(CatalogInfrastructureAssembly));
         rule.Check(Architecture);
     }
 }
