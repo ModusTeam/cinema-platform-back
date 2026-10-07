@@ -29,6 +29,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Cinema.Application\Cinema.Application.csproj" />
     <ProjectReference Include="..\..\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Modules\Catalog\Cinema.Catalog.Infrastructure\Cinema.Catalog.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Modules\Catalog\Cinema.Catalog.Application\Cinema.Catalog.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>

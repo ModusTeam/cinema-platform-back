@@ -1,5 +1,4 @@
-﻿using System.Text;
-using System.Text.Json;
+using System.Text;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
 using Cinema.Application.Services;
@@ -18,10 +17,8 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
-using Refit;
 using StackExchange.Redis;
 using Cinema.Infrastructure.Grpc.Loyalty;
 using Grpc.Net.Client;
@@ -232,49 +229,7 @@ public static class ConfigureInfrastructureServices
 
     private static IServiceCollection AddExternalServices(this IServiceCollection services, IConfiguration configuration)
     {
-        // 1. TMDB Service (Refit)
-        services.AddOptions<TmdbSettings>()
-            .Bind(configuration.GetSection(TmdbSettings.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
-        
-        var tmdbRefitSettings = new RefitSettings
-        {
-            ContentSerializer = new SystemTextJsonContentSerializer(new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-                PropertyNameCaseInsensitive = true,
-                WriteIndented = true
-            })
-        };
-
-        services.AddRefitClient<ITmdbApi>(tmdbRefitSettings)
-            .ConfigureHttpClient((sp, client) =>
-            {
-                var settings = sp.GetRequiredService<IOptions<TmdbSettings>>().Value;
-                client.BaseAddress = new Uri(settings.BaseUrl);
-            })
-            .AddStandardResilienceHandler();
-
-        services.AddScoped<ITmdbService, TmdbService>();
-
-        
-        // 2. Gemini AI Service (Refit)
-        services.AddOptions<GeminiOptions>()
-            .Bind(configuration.GetSection(GeminiOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
-
-        var geminiRefitSettings = new RefitSettings
-        {
-            ContentSerializer = new SystemTextJsonContentSerializer(new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                PropertyNameCaseInsensitive = true
-            })
-        };
-
-        // 3. gRPC Loyalty Service
+        // gRPC Loyalty Service
         services.AddGrpcClient<LoyaltyService.LoyaltyServiceClient>(o =>
         {
             var url = configuration["Grpc:LoyaltyServiceUrl"];
@@ -297,16 +252,6 @@ public static class ConfigureInfrastructureServices
             .Bind(configuration.GetSection(LoyaltySettings.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
-
-        services.AddRefitClient<IGeminiApi>(geminiRefitSettings)
-            .ConfigureHttpClient((sp, client) =>
-            {
-                var settings = sp.GetRequiredService<IOptions<GeminiOptions>>().Value;
-                client.BaseAddress = new Uri(settings.BaseUrl);
-            })
-            .AddStandardResilienceHandler();
-
-        services.AddScoped<IAiEmbeddingService, GeminiEmbeddingService>();
 
         return services;
     }

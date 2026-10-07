@@ -47,7 +47,7 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
             .HasConversion(x => x.Value, x => new EntityId<Movie>(x));
         
         builder.HasOne(x => x.Movie)
-            .WithMany(x => x.Sessions)
+            .WithMany()
             .HasForeignKey(x => x.MovieId)
             .OnDelete(DeleteBehavior.Cascade);
 

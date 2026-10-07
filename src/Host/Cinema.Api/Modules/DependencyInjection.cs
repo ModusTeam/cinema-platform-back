@@ -4,6 +4,8 @@ using Cinema.Api.Services;
 using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
+using Cinema.Catalog.Application;
+using Cinema.Catalog.Infrastructure;
 using Cinema.Infrastructure;
 using Cinema.Infrastructure.Services;
 using Microsoft.OpenApi.Models;
@@ -17,7 +19,9 @@ public static class DependencyInjection
         Mapster.TypeAdapterConfig.GlobalSettings.Scan(Assembly.GetExecutingAssembly());
 
         services.AddApplication();
+        services.AddCatalogApplication();
         services.AddInfrastructureServices(configuration);
+        services.AddCatalogInfrastructure(configuration);
 
         var appSettings = configuration.Get<ApplicationSettings>();
         if (appSettings != null)

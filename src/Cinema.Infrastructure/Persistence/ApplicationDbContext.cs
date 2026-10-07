@@ -1,4 +1,5 @@
 using System.Reflection;
+using Cinema.Catalog.Infrastructure.Persistence.Configurations;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
 using Cinema.Infrastructure.Persistence.Converters;
@@ -50,6 +51,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         modelBuilder.HasPostgresExtension("vector");
         
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(MovieConfiguration).Assembly);
         base.OnModelCreating(modelBuilder);
     }
     

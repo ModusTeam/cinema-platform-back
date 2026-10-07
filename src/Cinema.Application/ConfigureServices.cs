@@ -1,7 +1,6 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Cinema.Application.Common.Behaviours;
 using Cinema.Application.Common.Interfaces;
-using Cinema.Application.Movies.Services;
 using Cinema.Application.Services;
 using Cinema.Domain.Services;
 using FluentValidation;
@@ -36,7 +35,6 @@ public static class ConfigureServices
         services.AddScoped<IMapper, ServiceMapper>();
         services.AddScoped<SessionSchedulingService>();
         services.AddScoped<SeatLayoutService>();
-        services.AddScoped<IMovieTmdbSyncService, MovieTmdbSyncService>();
         services.AddScoped<IGoldUpgradePricingService, Cinema.Application.Orders.Services.GoldUpgradePricingService>();
         services.AddScoped<Cinema.Application.Common.Interfaces.IOrderCheckoutOrchestrator, Cinema.Application.Orders.Services.OrderCheckoutOrchestrator>();
         return services;
