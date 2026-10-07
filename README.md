@@ -160,6 +160,7 @@ cd cinema-platform-backend
 
 3. Restore, migrate, and run:
 ```bash
+dotnet tool restore
 dotnet restore
 dotnet ef database update --project Cinema.Infrastructure --startup-project Cinema.Api
 dotnet run --project Cinema.Api

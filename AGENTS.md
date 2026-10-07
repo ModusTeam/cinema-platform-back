@@ -157,6 +157,7 @@ dotnet run --project Cinema.Api
 dotnet watch --project Cinema.Api
 
 # Database
+dotnet tool restore # Restores the repository-local dotnet-ef 9.0.12 tool
 dotnet ef migrations add <Name> --project Cinema.Infrastructure --startup-project Cinema.Api
 dotnet ef database update --project Cinema.Infrastructure --startup-project Cinema.Api
 
