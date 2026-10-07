@@ -10,6 +10,7 @@ using Cinema.Catalog.Application;
 using Cinema.Catalog.Infrastructure;
 using Cinema.Infrastructure;
 using Cinema.Infrastructure.Services;
+using Cinema.Orders.Application;
 using Cinema.Scheduling.Application;
 using Cinema.Scheduling.Infrastructure;
 using Microsoft.OpenApi.Models;
@@ -26,6 +27,7 @@ public static class DependencyInjection
         services.AddCatalogApplication();
         services.AddSchedulingApplication();
         services.AddBookingApplication();
+        services.AddOrdersApplication();
         services.AddInfrastructureServices(configuration);
         services.AddCatalogInfrastructure(configuration);
         services.AddSchedulingInfrastructure();
