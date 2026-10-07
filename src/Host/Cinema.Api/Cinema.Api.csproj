@@ -35,6 +35,7 @@
     <ProjectReference Include="..\..\Modules\Scheduling\Cinema.Scheduling.Application\Cinema.Scheduling.Application.csproj" />
     <ProjectReference Include="..\..\Modules\Booking\Cinema.Booking.Application\Cinema.Booking.Application.csproj" />
     <ProjectReference Include="..\..\Modules\Booking\Cinema.Booking.Infrastructure\Cinema.Booking.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Modules\Orders\Cinema.Orders.Application\Cinema.Orders.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>
