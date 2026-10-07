@@ -260,7 +260,6 @@ public static class ConfigureInfrastructureServices
         services.AddTransient<IPaymentService, MockPaymentService>();
         services.AddSingleton<ISeatTypeProvider, SeatTypeProvider>();
         services.AddTransient<IPriceCalculator, PriceCalculator>();
-        services.AddSingleton<ISeatLockingService, RedisSeatLockingService>();
         services.AddTransient<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddTransient<ITokenService, TokenService>();
         services.AddTransient<IIdentityService, IdentityService>();

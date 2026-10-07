@@ -1,0 +1,11 @@
+# Booking boundary
+
+Booking Application owns the temporary seat lock/unlock commands, validators, and their request/response DTOs. Booking Infrastructure owns `RedisSeatLockingService` and its existing Redis key formats (`lock:session:{sessionId}:seatId` and `locked_seats:session:{sessionId}`), Lua scripts, retry policy, and notifications. The CLR namespaces of moved types remain unchanged for API and serialized type compatibility. The lock duration remains the 10 minute `OrderConstants.SeatLockDurationMinutes` value in the transitional application; Orders uses the same value for expiration.
+
+`ISeatLockingService`, `IApplicationDbContext`, `ICurrentUserService`, and the mixed `ITicketNotifier` remain in the transitional application. Booking Application depends on it for validation, current-user access, and the duration constant. Moving `ISeatLockingService` into Booking Application now would require the transitional application to reference Booking Application while Booking Application already references the transitional application. The host registers Booking's handlers, validators, and Redis implementation explicitly.
+
+`SeatLock` and its EF configuration remain in legacy Domain/Infrastructure. No runtime code reads or writes this entity; it is tied to legacy User, Session, and Seat relationships and the shared migration model. Active temporary reservations use Redis. No schema or migration changed.
+
+Order creation, checkout, cancellation, expiration jobs, and tickets remain transitional. Scheduling retains physical seats and sessions; its session detail query consumes the transitional lock interface. The booking-aware session seats query remains transitional. The shared database context, API controllers, and SignalR hub stay in their existing assemblies. Any persisted assembly-qualified names for the moved lock commands or Redis service should be checked before deploying, although no Hangfire jobs for those types are registered in this repository.
+
+The Redis integration test in `tests/Cinema.BookingTests` runs when `CINEMA_TEST_REDIS_CONNECTION` contains a working connection string. It uses unique session/seat keys and deletes them in a `finally` block; without a configured connection it is skipped.

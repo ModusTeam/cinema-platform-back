@@ -6,7 +6,7 @@ using Polly;
 using Polly.Retry;
 using StackExchange.Redis;
 
-namespace Cinema.Infrastructure.Services;
+namespace Cinema.Booking.Infrastructure.Services;
 
 public class RedisSeatLockingService : ISeatLockingService
 {

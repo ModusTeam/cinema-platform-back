@@ -4,6 +4,8 @@ using Cinema.Api.Services;
 using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Settings;
+using Cinema.Booking.Application;
+using Cinema.Booking.Infrastructure;
 using Cinema.Catalog.Application;
 using Cinema.Catalog.Infrastructure;
 using Cinema.Infrastructure;
@@ -23,9 +25,11 @@ public static class DependencyInjection
         services.AddApplication();
         services.AddCatalogApplication();
         services.AddSchedulingApplication();
+        services.AddBookingApplication();
         services.AddInfrastructureServices(configuration);
         services.AddCatalogInfrastructure(configuration);
         services.AddSchedulingInfrastructure();
+        services.AddBookingInfrastructure();
 
         var appSettings = configuration.Get<ApplicationSettings>();
         if (appSettings != null)

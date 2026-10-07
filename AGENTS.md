@@ -35,6 +35,8 @@ Production projects live under `src/`. `src/Host/Cinema.Api` is the application 
 
 The first extracted module lives at `src/Modules/Catalog/` with Domain, Application, and Infrastructure projects. Keep later modules under `src/Modules/<Name>/` only when their business code is ready to move. `src/BuildingBlocks/Cinema.SharedKernel` holds the existing domain primitives needed by both Catalog and the transitional domain; their legacy namespaces remain for compatibility. Catalog Application temporarily uses `IApplicationDbContext` from the transitional application layer, and Catalog Infrastructure uses that context interface for movie embeddings. The Host registers Catalog explicitly. The existing `ApplicationDbContext`, schema, and migration assembly remain shared until a later persistence-boundary step.
 
+`src/Modules/Booking/` contains Application and Infrastructure projects for temporary Redis seat locks. The existing lock commands, validators, DTOs, and Redis implementation live there with their original CLR namespaces retained. Booking Application temporarily depends on the legacy application for `IApplicationDbContext`, `ICurrentUserService`, `ISeatLockingService`, and `OrderConstants`; the mixed `ITicketNotifier` boundary also remains there. The Host registers Booking explicitly. Orders, tickets, the unused `SeatLock` EF entity/configuration, and the shared schema remain transitional; see the Booking README for boundary details.
+
 ### 1. Cinema.Domain (Transitional Core)
 *Depends on SharedKernel and Catalog.Domain for existing session-to-movie references; no application or infrastructure dependencies.*
 - **Entities**: Encapsulated state (private setters), factory methods, and domain logic. Inherit from `BaseEntity`.

@@ -20,11 +20,14 @@ public class DependencyRules
     private static readonly Assembly SchedulingDomainAssembly = Assembly.Load("Cinema.Scheduling.Domain");
     private static readonly Assembly SchedulingApplicationAssembly = Assembly.Load("Cinema.Scheduling.Application");
     private static readonly Assembly SchedulingInfrastructureAssembly = Assembly.Load("Cinema.Scheduling.Infrastructure");
+    private static readonly Assembly BookingApplicationAssembly = Assembly.Load("Cinema.Booking.Application");
+    private static readonly Assembly BookingInfrastructureAssembly = Assembly.Load("Cinema.Booking.Infrastructure");
 
     private static readonly Architecture Architecture = new ArchLoader()
         .LoadAssemblies(DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly,
             CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
-            SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly)
+            SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
+            BookingApplicationAssembly, BookingInfrastructureAssembly)
         .Build();
 
     [Fact]
@@ -147,6 +150,35 @@ public class DependencyRules
             .Or().ResideInAssembly(ApplicationAssembly).Should().NotDependOnAny(
                 Types().That().ResideInAssembly(SchedulingApplicationAssembly)
                     .Or().ResideInAssembly(SchedulingInfrastructureAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Booking_Application_Should_Not_Depend_On_Implementation_Or_Host()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(BookingApplicationAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(BookingInfrastructureAssembly)
+                .Or().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Booking_Infrastructure_Should_Not_Depend_On_Legacy_Infrastructure_Or_Host()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(BookingInfrastructureAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Catalog_And_Scheduling_Domains_Should_Not_Depend_On_Booking()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(CatalogDomainAssembly)
+            .Or().ResideInAssembly(SchedulingDomainAssembly).Should().NotDependOnAny(
+                Types().That().ResideInAssembly(BookingApplicationAssembly)
+                    .Or().ResideInAssembly(BookingInfrastructureAssembly));
         rule.Check(Architecture);
     }
 }
