@@ -54,7 +54,7 @@ services:
 
   # === СЕРВІС СІДИНГУ ===
   cinema-seeder:
-    image: mcr.microsoft.com/dotnet/sdk:8.0
+    image: mcr.microsoft.com/dotnet/sdk:10.0
     container_name: cinema-seeder
     restart: "no"
     working_dir: /app

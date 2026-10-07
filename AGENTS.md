@@ -11,10 +11,10 @@ This file is the **Source of Truth** for AI coding agents working on the Cinema 
 
 ## 🛠 Tech Stack Deep Dive
 
-- **Core**: .NET 8 / ASP.NET Core
+- **Core**: .NET 10 / ASP.NET Core
 - **Architecture**: Clean Architecture + CQRS (MediatR)
 - **Database**: PostgreSQL 16 + **pgvector** (Semantic AI search)
-- **Persistence**: Entity Framework Core 8 (Snake Case naming, DateTime UTC conversions)
+- **Persistence**: Entity Framework Core 9 (Snake Case naming, DateTime UTC conversions)
 - **Caching & Locking**: Redis (StackExchange.Redis) - used for:
     - Distributed caching
     - **Atomic Seat Locking** (Lua scripts)
