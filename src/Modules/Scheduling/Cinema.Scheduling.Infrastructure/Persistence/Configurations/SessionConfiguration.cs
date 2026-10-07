@@ -4,7 +4,7 @@ using Cinema.Infrastructure.Persistence.Converters;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Cinema.Infrastructure.Persistence.Configurations;
+namespace Cinema.Scheduling.Infrastructure.Persistence.Configurations;
 
 public class SessionConfiguration : IEntityTypeConfiguration<Session>
 {

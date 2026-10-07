@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\BuildingBlocks\Cinema.SharedKernel\Cinema.SharedKernel.csproj" />
     <ProjectReference Include="..\Modules\Catalog\Cinema.Catalog.Domain\Cinema.Catalog.Domain.csproj" />
+    <ProjectReference Include="..\Modules\Scheduling\Cinema.Scheduling.Domain\Cinema.Scheduling.Domain.csproj" />
     <PackageReference Include="MediatR.Contracts" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
     <PackageReference Include="Pgvector" />

@@ -19,7 +19,6 @@ public class RescheduleSessionCommandHandler(
         var sessionId = new EntityId<Session>(request.SessionId);
         
         var session = await context.Sessions
-            .Include(s => s.Tickets)
             .FirstOrDefaultAsync(s => s.Id == sessionId, ct);
 
         if (session == null)
@@ -27,8 +26,9 @@ public class RescheduleSessionCommandHandler(
             return Result.Failure(new Error("Session.NotFound", "Session not found."));
         }
         
-        var hasActiveTickets = session.Tickets.Any(t => 
-            t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used);
+        var hasActiveTickets = await context.Tickets.AnyAsync(t =>
+            t.SessionId == sessionId &&
+            (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
 
         if (hasActiveTickets)
         {

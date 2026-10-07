@@ -1,5 +1,6 @@
 using System.Reflection;
 using Cinema.Catalog.Infrastructure.Persistence.Configurations;
+using Cinema.Scheduling.Infrastructure.Persistence.Configurations;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
 using Cinema.Infrastructure.Persistence.Converters;
@@ -52,6 +53,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(MovieConfiguration).Assembly);
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(SessionConfiguration).Assembly);
         base.OnModelCreating(modelBuilder);
     }
     

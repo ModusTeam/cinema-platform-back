@@ -21,6 +21,9 @@
     <ProjectReference Include="..\..\src\Modules\Catalog\Cinema.Catalog.Domain\Cinema.Catalog.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Catalog\Cinema.Catalog.Application\Cinema.Catalog.Application.csproj" />
     <ProjectReference Include="..\..\src\Modules\Catalog\Cinema.Catalog.Infrastructure\Cinema.Catalog.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Scheduling\Cinema.Scheduling.Domain\Cinema.Scheduling.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Scheduling\Cinema.Scheduling.Application\Cinema.Scheduling.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Scheduling\Cinema.Scheduling.Infrastructure\Cinema.Scheduling.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

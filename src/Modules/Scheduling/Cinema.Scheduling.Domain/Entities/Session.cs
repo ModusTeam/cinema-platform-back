@@ -25,9 +25,6 @@ public class Session
 
     public string EventType { get; private set; } = "STANDARD";
 
-    private readonly List<Ticket> _tickets = new();
-    public IReadOnlyCollection<Ticket> Tickets => _tickets.AsReadOnly();
-
     private Session(
         EntityId<Session> id,
         DateTime startTime,
