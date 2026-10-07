@@ -56,6 +56,8 @@ public class RedisSeatLockingTests
         {
             await database.KeyDeleteAsync(lockKey);
             await database.KeyDeleteAsync(setKey);
+            (await database.KeyExistsAsync(lockKey)).Should().BeFalse();
+            (await database.KeyExistsAsync(setKey)).Should().BeFalse();
         }
     }
 }
