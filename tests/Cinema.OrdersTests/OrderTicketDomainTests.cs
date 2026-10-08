@@ -59,6 +59,30 @@ public class OrderTicketDomainTests
     }
 
     [Fact]
+    public void CreateWithoutTickets_Preserves_Validation_And_Order_Totals()
+    {
+        (Session session, Seat first, Seat second) = Seats();
+        Dictionary<EntityId<Seat>, decimal> prices = new() { [first.Id] = 25m, [second.Id] = 40m };
+        Order order = Order.CreateWithoutTickets(Guid.NewGuid(), session, [first, second], prices);
+
+        order.Status.Should().Be(OrderStatus.Pending);
+        order.TotalAmount.Should().Be(65m);
+        order.PaidAmount.Should().Be(65m);
+        order.Tickets.Should().BeEmpty();
+
+        Seat foreign = Seat.New(EntityId<Seat>.New(), "B", 1, 1, 1, SeatStatus.Active,
+            EntityId<Hall>.New(), first.SeatTypeId);
+        second.SetStatus(SeatStatus.Maintenance);
+        Action foreignSeat = () => Order.CreateWithoutTickets(Guid.NewGuid(), session, [foreign], prices);
+        Action inactiveSeat = () => Order.CreateWithoutTickets(Guid.NewGuid(), session, [second], prices);
+        Action missingPrice = () => Order.CreateWithoutTickets(Guid.NewGuid(), session, [first], new());
+
+        foreignSeat.Should().Throw<DomainException>().WithMessage("Seats belong to a different hall.");
+        inactiveSeat.Should().Throw<DomainException>().WithMessage("One or more seats are not active.");
+        missingPrice.Should().Throw<DomainException>().WithMessage("Price not found for seat *");
+    }
+
+    [Fact]
     public void Gold_Upgrade_Selects_Highest_Price_And_Adjusts_Totals()
     {
         (Session session, Seat first, Seat second) = Seats();

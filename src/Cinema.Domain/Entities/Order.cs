@@ -67,6 +67,31 @@ public class Order : BaseEntity
         List<Seat> seats,
         Dictionary<EntityId<Seat>, decimal> prices)
     {
+        Order order = CreateWithoutTickets(userId, session, seats, prices);
+
+        foreach (Seat seat in seats)
+        {
+            Ticket ticket = Ticket.New(
+                EntityId<Ticket>.New(),
+                prices[seat.Id],
+                TicketStatus.Valid,
+                order.Id,
+                session.Id,
+                seat.Id
+            );
+
+            order._tickets.Add(ticket);
+        }
+
+        return order;
+    }
+
+    public static Order CreateWithoutTickets(
+        Guid userId,
+        Session session,
+        List<Seat> seats,
+        Dictionary<EntityId<Seat>, decimal> prices)
+    {
         if (session.StartTime <= DateTime.UtcNow)
             throw new DomainException("Cannot create order for a started session.");
 
@@ -77,40 +102,14 @@ public class Order : BaseEntity
             throw new DomainException("One or more seats are not active.");
 
         decimal totalAmount = 0;
-        foreach (var seat in seats)
+        foreach (Seat seat in seats)
         {
-            if (!prices.TryGetValue(seat.Id, out var price))
+            if (!prices.TryGetValue(seat.Id, out decimal price))
                 throw new DomainException($"Price not found for seat {seat.Id}");
             totalAmount += price;
         }
 
-        var orderId = EntityId<Order>.New();
-        
-        var order = new Order(
-            orderId,
-            totalAmount,
-            DateTime.UtcNow,
-            OrderStatus.Pending,
-            null,
-            userId,
-            session.Id
-        );
-        
-        foreach (var seat in seats)
-        {
-            var ticket = Ticket.New(
-                EntityId<Ticket>.New(),
-                prices[seat.Id],
-                TicketStatus.Valid,
-                orderId,
-                session.Id,
-                seat.Id
-            );
-
-            order._tickets.Add(ticket);
-        }
-
-        return order;
+        return New(EntityId<Order>.New(), totalAmount, userId, session.Id);
     }
 
     public void ApplyLoyaltyDiscount(int pointsUsed)

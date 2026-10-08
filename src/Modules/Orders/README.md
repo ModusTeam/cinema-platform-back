@@ -4,4 +4,6 @@
 
 This is an application-only extraction. `Order`, `Ticket`, their statuses and domain events, EF configurations, the shared `ApplicationDbContext`, and migrations remain in the legacy layers. `TicketDto` and its mapping remain in the legacy application because ticket detail uses them.
 
+Reservation creates a validated order without tickets, then creates and tracks tickets explicitly in the same transaction and `SaveChangesAsync` call. `Order.Create()` remains transitional for existing consumers and tests that need an order with tickets; both order factories use the same session, seat, price, and total validation. The `Order.Tickets` and `Ticket.Order` navigations and their existing EF relationship remain in place for checkout, cancellation, history, and event handlers.
+
 Checkout and loyalty previews, shared application interfaces, and `CancelExpiredOrdersJob` remain transitional. The Orders application temporarily depends on `Cinema.Application` for those contracts and the shared context. Payment, loyalty, Booking locks, RabbitMQ messages, SignalR notifications, and Hangfire behavior are unchanged. Persisted assembly-qualified names for the moved service types should be checked before deployment if any external jobs serialize them.
