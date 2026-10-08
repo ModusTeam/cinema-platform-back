@@ -1,6 +1,5 @@
 using System.Reflection;
 using Cinema.Application.Common.Behaviours;
-using Cinema.Application.Common.Interfaces;
 using FluentValidation;
 using Mapster;
 using MapsterMapper;
@@ -31,8 +30,6 @@ public static class ConfigureServices
         
         services.AddSingleton(config);
         services.AddScoped<IMapper, ServiceMapper>();
-        services.AddScoped<IGoldUpgradePricingService, Cinema.Application.Orders.Services.GoldUpgradePricingService>();
-        services.AddScoped<Cinema.Application.Common.Interfaces.IOrderCheckoutOrchestrator, Cinema.Application.Orders.Services.OrderCheckoutOrchestrator>();
         return services;
     }
 }
