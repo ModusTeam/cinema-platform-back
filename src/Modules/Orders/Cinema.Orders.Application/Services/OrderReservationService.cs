@@ -53,8 +53,12 @@ public class OrderReservationService(
                     prices.Add(seat.Id, priceCalculator.CalculatePrice(pricing, seat.SeatTypeId, session.StartTime));
                 }
                 
-                var order = Order.Create(userId, session, seats, prices);
+                Order order = Order.CreateWithoutTickets(userId, session, seats, prices);
+                List<Ticket> tickets = seats.Select(seat => Ticket.New(
+                    EntityId<Ticket>.New(), prices[seat.Id], TicketStatus.Valid,
+                    order.Id, session.Id, seat.Id)).ToList();
                 context.Orders.Add(order);
+                context.Tickets.AddRange(tickets);
                 await context.SaveChangesAsync(ct);
                 
                 await transaction.CommitAsync(ct);

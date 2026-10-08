@@ -21,6 +21,28 @@ namespace Cinema.OrdersTests;
 public class OrderReservationPostgresTests
 {
     [Fact]
+    public async Task Reservation_Persists_Multiple_Tickets_With_One_Tracked_Order()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Seat second = await database.AddSeatAsync();
+
+        Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
+
+        reserved.IsSuccess.Should().BeTrue();
+        await using ApplicationDbContext verify = database.NewContext();
+        Order order = await verify.Orders.Include(o => o.Tickets)
+            .SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value), TestContext.Current.CancellationToken);
+        order.Status.Should().Be(OrderStatus.Pending);
+        order.TotalAmount.Should().Be(100m);
+        order.PaidAmount.Should().Be(100m);
+        order.Tickets.Should().HaveCount(2);
+        order.Tickets.Select(t => t.SeatId).Should().BeEquivalentTo([database.Seat.Id, second.Id]);
+        order.Tickets.Should().OnlyContain(t => t.OrderId == order.Id && t.Order == order &&
+            t.SessionId == database.Session.Id && t.PriceSnapshot == 50m && t.TicketStatus == TicketStatus.Valid);
+        (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+    }
+
+    [Fact]
     public async Task Reservation_Creates_Pending_Order_With_Valid_Ticket_And_Rejects_Resale()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
@@ -60,6 +82,22 @@ public class OrderReservationPostgresTests
 
         Func<Task> reserve = async () => await database.ReserveAsync(database.Seat.Id.Value, calculator: failingCalculator);
         await reserve.Should().ThrowAsync<InvalidOperationException>();
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+        (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+        (await database.ReserveAsync(database.Seat.Id.Value)).IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Persistence_Failure_Rolls_Back_Order_And_Tickets_And_Allows_Retry()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        IPriceCalculator overflowingCalculator = Substitute.For<IPriceCalculator>();
+        overflowingCalculator.CalculatePrice(Arg.Any<Pricing>(), Arg.Any<EntityId<SeatType>>(), Arg.Any<DateTime>())
+            .Returns(999999999999999999m);
+
+        Func<Task> reserve = async () => await database.ReserveAsync(database.Seat.Id.Value, calculator: overflowingCalculator);
+        await reserve.Should().ThrowAsync<DbUpdateException>();
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Orders.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
         (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
@@ -287,14 +325,26 @@ public class OrderReservationPostgresTests
             return new ApplicationDbContext(options);
         }
 
+        public async Task<Seat> AddSeatAsync()
+        {
+            Seat second = Seat.New(EntityId<Seat>.New(), "A", 2, 1, 2, SeatStatus.Active,
+                Seat.HallId, Seat.SeatTypeId);
+            Context.Seats.Add(second);
+            await Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return second;
+        }
+
         public async Task<Result<Guid>> ReserveAsync(Guid seatId, Guid? sessionId = null, IPriceCalculator? calculator = null)
+            => await ReserveAsync([seatId], sessionId, calculator);
+
+        public async Task<Result<Guid>> ReserveAsync(List<Guid> seatIds, Guid? sessionId = null, IPriceCalculator? calculator = null)
         {
             IPriceCalculator priceCalculator = calculator ?? Substitute.For<IPriceCalculator>();
             if (calculator is null)
                 priceCalculator.CalculatePrice(Arg.Any<Pricing>(), Arg.Any<EntityId<SeatType>>(), Arg.Any<DateTime>()).Returns(50m);
             await using ApplicationDbContext context = NewContext();
             return await new OrderReservationService(context, priceCalculator)
-                .ReserveOrderAsync(_userId, sessionId ?? Session.Id.Value, [seatId], TestContext.Current.CancellationToken);
+                .ReserveOrderAsync(_userId, sessionId ?? Session.Id.Value, seatIds, TestContext.Current.CancellationToken);
         }
 
         public async ValueTask DisposeAsync()
