@@ -126,6 +126,90 @@ public class OrderReservationPostgresTests
         persisted.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
     }
 
+    [Fact]
+    public async Task Saving_Order_Tracks_Tickets_And_Database_Cascades_Their_Deletion()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Order order = Order.Create(database.UserId, database.Session, [database.Seat],
+            new() { [database.Seat.Id] = 50m });
+        database.Context.Orders.Add(order);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext verify = database.NewContext();
+        Ticket ticket = await verify.Tickets.AsNoTracking()
+            .Include(t => t.Order).Include(t => t.Session).Include(t => t.Seat)
+            .SingleAsync(TestContext.Current.CancellationToken);
+        ticket.OrderId.Should().Be(order.Id);
+        ticket.Order!.Id.Should().Be(order.Id);
+        ticket.Session!.Id.Should().Be(database.Session.Id);
+        ticket.Seat!.Id.Should().Be(database.Seat.Id);
+
+        await verify.Orders.Where(o => o.Id == order.Id).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+        await using ApplicationDbContext afterDelete = database.NewContext();
+        (await afterDelete.Tickets.IgnoreQueryFilters().CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(TicketStatus.Valid)]
+    [InlineData(TicketStatus.Used)]
+    public async Task Partial_Index_Rejects_Valid_Or_Used_Duplicate_But_Allows_Refunded_Tickets(TicketStatus existingStatus)
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Order first = Order.Create(database.UserId, database.Session, [database.Seat],
+            new() { [database.Seat.Id] = 50m });
+        database.Context.Orders.Add(first);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Ticket original = first.Tickets.Single();
+        if (existingStatus == TicketStatus.Used)
+        {
+            original.MarkAsUsed();
+            await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using (ApplicationDbContext duplicateContext = database.NewContext())
+        {
+            Order duplicate = Order.Create(database.UserId, database.Session, [database.Seat],
+                new() { [database.Seat.Id] = 50m });
+            duplicateContext.Orders.Add(duplicate);
+            Func<Task> saveDuplicate = () => duplicateContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+            DbUpdateException failure = (await saveDuplicate.Should().ThrowAsync<DbUpdateException>()).Which;
+            failure.InnerException.Should().BeOfType<PostgresException>()
+                .Which.SqlState.Should().Be(PostgresErrorCodes.UniqueViolation);
+        }
+
+        // Refunded tickets are outside the partial index, including multiple tickets for one seat.
+        Order refundedOne = Order.Create(database.UserId, database.Session, [database.Seat],
+            new() { [database.Seat.Id] = 50m });
+        refundedOne.Tickets.Single().MarkAsRefunded();
+        Order refundedTwo = Order.Create(database.UserId, database.Session, [database.Seat],
+            new() { [database.Seat.Id] = 50m });
+        refundedTwo.Tickets.Single().MarkAsRefunded();
+        database.Context.Orders.AddRange(refundedOne, refundedTwo);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(3);
+        (await verify.Tickets.CountAsync(t => t.TicketStatus == TicketStatus.Refunded,
+            TestContext.Current.CancellationToken)).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Ticket_Query_Filter_Hides_Tickets_In_Inactive_Halls()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Order order = Order.Create(database.UserId, database.Session, [database.Seat],
+            new() { [database.Seat.Id] = 50m });
+        database.Context.Orders.Add(order);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        (await database.Context.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+
+        Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
+        hall.Deactivate();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+        (await verify.Tickets.IgnoreQueryFilters().CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
     private sealed class ReservationDatabase : IAsyncDisposable
     {
         public string ConnectionString { get; }

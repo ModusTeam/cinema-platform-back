@@ -3,7 +3,10 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Orders.Commands.CancelOrder;
 using Cinema.Application.Orders.Queries.GetMyOrders;
+using Cinema.Application.Jobs;
+using Cinema.Application.Tickets.Queries.GetTicketDetails;
 using Cinema.Catalog.Domain.Entities;
+using Cinema.Catalog.Domain.Enums;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
@@ -11,6 +14,7 @@ using Cinema.Infrastructure.Persistence;
 using Cinema.Orders.Application;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
 
@@ -130,12 +134,19 @@ public class OrderHandlersTests
         await using ApplicationDbContext context = CreateContext();
         Guid userId = Guid.NewGuid();
         Hall hall = Hall.Create(EntityId<Hall>.New(), "Orders test hall");
+        Movie movie = Movie.CreateManual($"Orders test {Guid.NewGuid():N}", "test", 90,
+            DateTime.UtcNow.Year, MovieStatus.ComingSoon);
         Session session = Session.Create(EntityId<Session>.New(), DateTime.UtcNow.AddDays(2),
-            DateTime.UtcNow.AddDays(2).AddHours(2), EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
-        Order active = Order.New(EntityId<Order>.New(), 20m, userId, session.Id);
+            DateTime.UtcNow.AddDays(2).AddHours(2), movie.Id, hall.Id, EntityId<Pricing>.New());
+        SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
+        Seat seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
+        hall.ApplyLayout([seat]);
+        Order active = Order.Create(userId, session, [seat], new() { [seat.Id] = 20m });
         Order cancelled = Order.New(EntityId<Order>.New(), 30m, userId, session.Id);
         cancelled.MarkAsCancelled();
         context.Halls.Add(hall);
+        context.Movies.Add(movie);
+        context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
         context.Orders.AddRange(active, cancelled);
         await context.SaveChangesAsync(CancellationToken.None);
@@ -150,7 +161,81 @@ public class OrderHandlersTests
 
         result.IsSuccess.Should().BeTrue();
         result.Value.ActiveOrders.Select(x => x.Id).Should().ContainSingle().Which.Should().Be(active.Id.Value);
+        result.Value.ActiveOrders.Single().Tickets.Should().ContainSingle()
+            .Which.Price.Should().Be(20m);
+        result.Value.ActiveOrders.Single().Tickets.Single().Status.Should().Be(nameof(TicketStatus.Valid));
         result.Value.PastOrders.Select(x => x.Id).Should().ContainSingle().Which.Should().Be(cancelled.Id.Value);
+    }
+
+    [Fact]
+    public async Task Ticket_Detail_Uses_Order_Ownership_And_Returns_Ticket_Information()
+    {
+        await using ApplicationDbContext context = CreateContext();
+        Guid ownerId = Guid.NewGuid();
+        Hall hall = Hall.Create(EntityId<Hall>.New(), "Ticket detail hall");
+        Movie movie = Movie.CreateManual($"Ticket detail {Guid.NewGuid():N}", "test", 90,
+            DateTime.UtcNow.Year, MovieStatus.ComingSoon);
+        SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
+        Seat seat = Seat.New(EntityId<Seat>.New(), "A", 3, 1, 3, SeatStatus.Active, hall.Id, seatType.Id);
+        hall.ApplyLayout([seat]);
+        DateTime start = DateTime.UtcNow.AddDays(2);
+        Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
+            movie.Id, hall.Id, EntityId<Pricing>.New());
+        Order order = Order.Create(ownerId, session, [seat], new() { [seat.Id] = 35m });
+        context.Halls.Add(hall);
+        context.Movies.Add(movie);
+        context.SeatTypes.Add(seatType);
+        context.Sessions.Add(session);
+        context.Orders.Add(order);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Microsoft.Extensions.DependencyInjection.ServiceCollection services = new();
+        services.AddApplication();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        GetTicketDetailsQueryHandler handler = new(context, currentUser);
+        Guid ticketId = order.Tickets.Single().Id.Value;
+
+        currentUser.UserId.Returns(Guid.NewGuid());
+        (await handler.Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken))
+            .Error.Code.Should().Be("Ticket.AccessDenied");
+        currentUser.UserId.Returns(ownerId);
+        Cinema.Domain.Shared.Result<Cinema.Application.Orders.Dtos.TicketDto> detail =
+            await handler.Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken);
+        detail.IsSuccess.Should().BeTrue();
+        detail.Value.Id.Should().Be(ticketId);
+        detail.Value.Price.Should().Be(35m);
+        detail.Value.Status.Should().Be(nameof(TicketStatus.Valid));
+        detail.Value.RowLabel.Should().Be("A");
+        detail.Value.SeatNumber.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Expiration_Cancels_Order_But_Leaves_Ticket_Valid()
+    {
+        await using ApplicationDbContext context = CreateContext();
+        Hall hall = Hall.Create(EntityId<Hall>.New(), "Expiration hall");
+        SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
+        Seat seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
+        hall.ApplyLayout([seat]);
+        DateTime start = DateTime.UtcNow.AddDays(2);
+        Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
+            EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
+        Order order = Order.Create(Guid.NewGuid(), session, [seat], new() { [seat.Id] = 25m });
+        context.Halls.Add(hall);
+        context.SeatTypes.Add(seatType);
+        context.Sessions.Add(session);
+        context.Orders.Add(order);
+        context.Entry(order).Property(x => x.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+
+        await new CancelExpiredOrdersJob(context, locks, NullLogger<CancelExpiredOrdersJob>.Instance)
+            .Process(TestContext.Current.CancellationToken);
+
+        Order persisted = await context.Orders.Include(x => x.Tickets).SingleAsync(TestContext.Current.CancellationToken);
+        persisted.Status.Should().Be(OrderStatus.Cancelled);
+        persisted.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
+        await locks.Received(1).UnlockSeatAsync(session.Id.Value, seat.Id.Value, order.UserId,
+            Arg.Any<CancellationToken>());
     }
 
     private static ApplicationDbContext CreateContext()
