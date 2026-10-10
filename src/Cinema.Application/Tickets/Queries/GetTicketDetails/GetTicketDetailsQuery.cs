@@ -23,7 +23,6 @@ public class GetTicketDetailsQueryHandler(
 
         var ticket = await context.Tickets
             .AsNoTracking()
-            .Include(t => t.Order)
             .Include(t => t.Session!).ThenInclude(s => s.Movie)
             .Include(t => t.Session!).ThenInclude(s => s.Hall)
             .Include(t => t.Seat!).ThenInclude(s => s.SeatType)
@@ -32,7 +31,11 @@ public class GetTicketDetailsQueryHandler(
         if (ticket == null)
             return Result.Failure<TicketDto>(new Error("Ticket.NotFound", "Ticket not found."));
 
-        if (ticket.Order?.UserId != userId)
+        bool ownsOrder = await context.Orders
+            .AsNoTracking()
+            .AnyAsync(order => order.Id == ticket.OrderId && order.UserId == userId, ct);
+
+        if (!ownsOrder)
             return Result.Failure<TicketDto>(new Error("Ticket.AccessDenied", "This ticket belongs to another user."));
 
         var dto = ticket.Adapt<TicketDto>();
