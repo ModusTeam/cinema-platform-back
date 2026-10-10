@@ -1,6 +1,9 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Orders.Commands.CreateOrder;
+using Cinema.Application.Orders.Commands.CancelOrder;
+using Cinema.Application.Orders.EventHandlers;
+using Cinema.Application.Common.Models.DomainEventNotification;
 using Cinema.Application.Orders.IntegrationEvents;
 using Cinema.Application.Orders.Services;
 using Cinema.Application.Services;
@@ -11,7 +14,10 @@ using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using Cinema.Infrastructure.Persistence;
+using Cinema.Infrastructure.Persistence.Interceptors;
+using Cinema.Domain.Events;
 using FluentAssertions;
+using MediatR;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -24,6 +30,73 @@ namespace Cinema.OrdersTests;
 // Only run with a disposable pgvector PostgreSQL database named cinema_orders_test_*.
 public class OrderReservationPostgresTests
 {
+    [Fact]
+    public async Task Cancellation_Loads_Tracked_Tickets_And_Dispatches_Seat_Side_Effects()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Seat second = await database.AddSeatAsync();
+        Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
+        reserved.IsSuccess.Should().BeTrue();
+
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        IPublisher publisher = Substitute.For<IPublisher>();
+        OrderCancelledEventHandler eventHandler = new(locks, notifier,
+            NullLogger<OrderCancelledEventHandler>.Instance);
+        publisher.Publish(Arg.Any<INotification>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<INotification>(0) is DomainEventNotification<OrderCancelledDomainEvent> notification
+                ? eventHandler.Handle(notification, call.ArgAt<CancellationToken>(1))
+                : Task.CompletedTask);
+        await using ApplicationDbContext cancellation = database.NewContext(publisher);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment)
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        Order trackedOrder = cancellation.ChangeTracker.Entries<Order>().Single().Entity;
+        trackedOrder.Tickets.Should().HaveCount(2);
+        trackedOrder.Tickets.Should().OnlyContain(t => t.Order == trackedOrder && t.TicketStatus == TicketStatus.Refunded);
+        await locks.Received(1).UnlockSeatsAsync(database.Session.Id.Value,
+            Arg.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(new[] { database.Seat.Id.Value, second.Id.Value })),
+            database.UserId, Arg.Any<CancellationToken>());
+        await notifier.Received(1).NotifySeatUnlockedAsync(database.Session.Id.Value, database.Seat.Id.Value,
+            Arg.Any<CancellationToken>());
+        await notifier.Received(1).NotifySeatUnlockedAsync(database.Session.Id.Value, second.Id.Value,
+            Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value), TestContext.Current.CancellationToken))
+            .Status.Should().Be(OrderStatus.Cancelled);
+        (await verify.Tickets.Where(t => t.OrderId == new EntityId<Order>(reserved.Value))
+            .ToListAsync(TestContext.Current.CancellationToken)).Should().OnlyContain(t => t.TicketStatus == TicketStatus.Refunded);
+    }
+
+    [Fact]
+    public async Task Cancellation_Respects_Ticket_Filter_In_Fresh_Context()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        reserved.IsSuccess.Should().BeTrue();
+        Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
+        hall.Deactivate();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await using ApplicationDbContext cancellation = database.NewContext();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.IsInRole("Admin").Returns(true);
+
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, Substitute.For<IPaymentService>())
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        cancellation.ChangeTracker.Entries<Ticket>().Should().BeEmpty();
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+        (await verify.Tickets.IgnoreQueryFilters().SingleAsync(TestContext.Current.CancellationToken))
+            .TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
     [Fact]
     public async Task Reservation_Persists_Multiple_Tickets_With_One_Tracked_Order()
     {
@@ -453,10 +526,13 @@ public class OrderReservationPostgresTests
             }
         }
 
-        public ApplicationDbContext NewContext()
+        public ApplicationDbContext NewContext(IPublisher? publisher = null)
         {
-            DbContextOptions<ApplicationDbContext> options = new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseNpgsql(ConnectionString, x => x.UseVector()).UseSnakeCaseNamingConvention().Options;
+            DbContextOptionsBuilder<ApplicationDbContext> builder = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseNpgsql(ConnectionString, x => x.UseVector()).UseSnakeCaseNamingConvention();
+            if (publisher is not null)
+                builder.AddInterceptors(new DispatchDomainEventsInterceptor(publisher));
+            DbContextOptions<ApplicationDbContext> options = builder.Options;
             return new ApplicationDbContext(options);
         }
 

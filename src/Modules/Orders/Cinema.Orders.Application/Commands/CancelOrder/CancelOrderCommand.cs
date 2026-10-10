@@ -22,8 +22,6 @@ public class CancelOrderCommandHandler(
         var currentUserId = currentUser.UserId;
 
         var order = await context.Orders
-            .Include(o => o.Tickets!)
-            .ThenInclude(t => t.Session)
             .FirstOrDefaultAsync(o => o.Id == orderId, ct);
 
         if (order == null)
@@ -39,9 +37,14 @@ public class CancelOrderCommandHandler(
         if (order.Status == OrderStatus.Cancelled || order.Status == OrderStatus.Failed)
             return Result.Failure(new Error("Order.AlreadyCancelled", "Order is already cancelled."));
 
+        List<Ticket> tickets = await context.Tickets
+            .Include(t => t.Session)
+            .Where(t => t.OrderId == order.Id)
+            .ToListAsync(ct);
+
         if (!isAdmin)
         {
-            var sessionStart = order.Tickets!.First().Session!.StartTime;
+            var sessionStart = tickets.First().Session!.StartTime;
             if (sessionStart <= DateTime.UtcNow.AddMinutes(10))
             {
                 return Result.Failure(new Error("Order.TooLate", "Cancellation is only allowed up to 10 minutes before the session starts."));
@@ -59,7 +62,7 @@ public class CancelOrderCommandHandler(
 
         order.MarkAsCancelled();
         
-        foreach (var ticket in order.Tickets!)
+        foreach (Ticket ticket in tickets)
         {
             ticket.MarkAsRefunded();
         }
