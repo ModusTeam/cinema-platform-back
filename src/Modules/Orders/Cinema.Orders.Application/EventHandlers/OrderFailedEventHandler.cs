@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace Cinema.Application.Orders.EventHandlers;
 
 public class OrderFailedEventHandler(
+    IApplicationDbContext context,
     ISeatLockingService seatLockingService,
     ILogger<OrderFailedEventHandler> logger)
     : INotificationHandler<DomainEventNotification<OrderFailedDomainEvent>>
@@ -18,9 +19,10 @@ public class OrderFailedEventHandler(
 
         logger.LogInformation("Domain Event: {DomainEvent} triggered for Order {OrderId}", domainEvent.GetType().Name, order.Id.Value);
 
-        if (order.Tickets != null && order.Tickets.Any())
+        var tickets = await OrderEventTickets.LoadAsync(context, order.Id, ct);
+        if (tickets.Count > 0)
         {
-            var seatIds = order.Tickets.Select(t => t.SeatId.Value).ToList();
+            var seatIds = tickets.Select(t => t.SeatId.Value).ToList();
             await seatLockingService.UnlockSeatsAsync(order.SessionId.Value, seatIds, order.UserId, ct);
         }
     }

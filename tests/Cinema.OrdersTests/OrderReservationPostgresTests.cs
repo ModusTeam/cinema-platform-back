@@ -25,11 +25,74 @@ using Npgsql;
 using NSubstitute;
 using Xunit;
 
+// Paid notifications intentionally call the existing overload without a cancellation token.
+#pragma warning disable xUnit1051
+
 namespace Cinema.OrdersTests;
 
 // Only run with a disposable pgvector PostgreSQL database named cinema_orders_test_*.
 public class OrderReservationPostgresTests
 {
+    [Fact]
+    public async Task Paid_Event_Queries_Persisted_Tickets_During_SaveChanges()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Seat second = await database.AddSeatAsync();
+        Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
+        reserved.IsSuccess.Should().BeTrue();
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        IPublisher publisher = Substitute.For<IPublisher>();
+        OrderPaidEventHandler? handler = null;
+        publisher.Publish(Arg.Any<INotification>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<INotification>(0) is DomainEventNotification<OrderPaidEvent> notification
+                ? handler!.Handle(notification, call.ArgAt<CancellationToken>(1))
+                : Task.CompletedTask);
+        await using ApplicationDbContext context = database.NewContext(publisher);
+        handler = new(context, notifier, locks, NullLogger<OrderPaidEventHandler>.Instance);
+        Order order = await context.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken);
+        order.Tickets.Should().BeEmpty();
+
+        order.MarkAsPaid("paid-test");
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value, database.UserId);
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, second.Id.Value, database.UserId);
+        await notifier.Received(1).NotifyOrderCompleted(database.UserId, reserved.Value);
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == order.Id, TestContext.Current.CancellationToken))
+            .Status.Should().Be(OrderStatus.Paid);
+    }
+
+    [Fact]
+    public async Task Paid_Event_Includes_Added_Ticket_Before_Insert()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        IPublisher publisher = Substitute.For<IPublisher>();
+        OrderPaidEventHandler? handler = null;
+        publisher.Publish(Arg.Any<INotification>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<INotification>(0) is DomainEventNotification<OrderPaidEvent> notification
+                ? handler!.Handle(notification, call.ArgAt<CancellationToken>(1))
+                : Task.CompletedTask);
+        await using ApplicationDbContext context = database.NewContext(publisher);
+        handler = new(context, notifier, locks, NullLogger<OrderPaidEventHandler>.Instance);
+        Order order = Order.Create(database.UserId, database.Session, [database.Seat],
+            new() { [database.Seat.Id] = 50m });
+        order.MarkAsPaid("paid-on-insert");
+        context.Orders.Add(order);
+
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value, database.UserId);
+        await notifier.Received(1).NotifyOrderCompleted(database.UserId, order.Id.Value);
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Tickets.SingleAsync(t => t.OrderId == order.Id, TestContext.Current.CancellationToken))
+            .TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
     [Fact]
     public async Task Cancellation_Loads_Tracked_Tickets_And_Dispatches_Seat_Side_Effects()
     {
@@ -41,13 +104,14 @@ public class OrderReservationPostgresTests
         ISeatLockingService locks = Substitute.For<ISeatLockingService>();
         ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
         IPublisher publisher = Substitute.For<IPublisher>();
-        OrderCancelledEventHandler eventHandler = new(locks, notifier,
-            NullLogger<OrderCancelledEventHandler>.Instance);
+        OrderCancelledEventHandler? eventHandler = null;
         publisher.Publish(Arg.Any<INotification>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<INotification>(0) is DomainEventNotification<OrderCancelledDomainEvent> notification
-                ? eventHandler.Handle(notification, call.ArgAt<CancellationToken>(1))
+                ? eventHandler!.Handle(notification, call.ArgAt<CancellationToken>(1))
                 : Task.CompletedTask);
         await using ApplicationDbContext cancellation = database.NewContext(publisher);
+        eventHandler = new(cancellation, locks, notifier,
+            NullLogger<OrderCancelledEventHandler>.Instance);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(database.UserId);
         IPaymentService payment = Substitute.For<IPaymentService>();
