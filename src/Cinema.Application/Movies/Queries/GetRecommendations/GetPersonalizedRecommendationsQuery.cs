@@ -21,10 +21,10 @@ public class GetPersonalizedRecommendationsQueryHandler(
         var userId = currentUserService.UserId;
         if (userId == null) return Result.Failure<List<MovieRecommendationResult>>(new Error("Auth.Required", "User not found"));
         
-        var userHistoryVectors = await context.Orders
+        var userHistoryVectors = await context.Tickets
             .AsNoTracking()
-            .Where(o => o.UserId == userId && o.Status == Domain.Enums.OrderStatus.Paid)
-            .SelectMany(o => o.Tickets)
+            .Where(t => context.Orders.Any(o => o.Id == t.OrderId &&
+                o.UserId == userId && o.Status == Domain.Enums.OrderStatus.Paid))
             .Select(t => t.Session!.Movie!)
             .Where(m => m.Embedding != null)
             .Select(m => m.Embedding!)
@@ -55,9 +55,8 @@ public class GetPersonalizedRecommendationsQueryHandler(
         
         var userPreferenceVector = new Vector(avgVector);
 
-        var watchedMovieIds = await context.Orders
-            .Where(o => o.UserId == userId)
-            .SelectMany(o => o.Tickets)
+        var watchedMovieIds = await context.Tickets
+            .Where(t => context.Orders.Any(o => o.Id == t.OrderId && o.UserId == userId))
             .Select(t => t.Session!.MovieId)
             .Distinct()
             .ToListAsync(ct);
