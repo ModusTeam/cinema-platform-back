@@ -10,6 +10,7 @@ using Cinema.Catalog.Domain.Enums;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
+using Cinema.Domain.Exceptions;
 using Cinema.Infrastructure.Persistence;
 using Cinema.Orders.Application;
 using FluentAssertions;
@@ -22,6 +23,78 @@ namespace Cinema.OrdersTests;
 
 public class OrderHandlersTests
 {
+    [Theory]
+    [InlineData(false, 20, true, null)]
+    [InlineData(false, 5, false, "Order.TooLate")]
+    [InlineData(true, 5, true, null)]
+    public async Task Cancel_Uses_Ticket_Session_Cutoff_In_Fresh_Context(
+        bool isAdmin, int minutesUntilStart, bool succeeds, string? errorCode)
+    {
+        string databaseName = Guid.NewGuid().ToString();
+        (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, minutesUntilStart);
+        await using ApplicationDbContext context = CreateContext(databaseName);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(userId);
+        currentUser.IsInRole("Admin").Returns(isAdmin);
+
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser,
+            Substitute.For<IPaymentService>()).Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().Be(succeeds);
+        if (!succeeds)
+            result.Error.Code.Should().Be(errorCode);
+        await using ApplicationDbContext verify = CreateContext(databaseName);
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(orderId), TestContext.Current.CancellationToken)).Status
+            .Should().Be(succeeds ? OrderStatus.Cancelled : OrderStatus.Pending);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus
+            .Should().Be(succeeds ? TicketStatus.Refunded : TicketStatus.Valid);
+    }
+
+    [Fact]
+    public async Task Cancel_Paid_Order_Refunds_Before_Marking_Tickets()
+    {
+        string databaseName = Guid.NewGuid().ToString();
+        (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, 20, paid: true);
+        await using ApplicationDbContext context = CreateContext(databaseName);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(userId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("transaction-1", Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                context.ChangeTracker.Entries<Order>().Single().Entity.Status.Should().Be(OrderStatus.Paid);
+                context.ChangeTracker.Entries<Ticket>().Single().Entity.TicketStatus.Should().Be(TicketStatus.Valid);
+                return PaymentResult.Success("refund-1");
+            });
+
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment)
+            .Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        await payment.Received(1).RefundPaymentAsync("transaction-1", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = CreateContext(databaseName);
+        (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Cancelled);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Refunded);
+    }
+
+    [Fact]
+    public async Task Cancel_Used_Ticket_Preserves_Domain_Exception()
+    {
+        string databaseName = Guid.NewGuid().ToString();
+        (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, 20, used: true);
+        await using ApplicationDbContext context = CreateContext(databaseName);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(userId);
+
+        Func<Task> cancel = async () => await new CancelOrderCommandHandler(context, currentUser,
+            Substitute.For<IPaymentService>()).Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
+
+        await cancel.Should().ThrowAsync<DomainException>();
+        await using ApplicationDbContext verify = CreateContext(databaseName);
+        (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Pending);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Used);
+    }
+
     [Fact]
     public async Task Cancel_Returns_NotFound_Without_Calling_Payment()
     {
@@ -56,13 +129,16 @@ public class OrderHandlersTests
         order.Status.Should().Be(OrderStatus.Pending);
     }
 
-    [Fact]
-    public async Task Cancel_Rejects_Already_Cancelled_Order()
+    [Theory]
+    [InlineData(OrderStatus.Cancelled)]
+    [InlineData(OrderStatus.Failed)]
+    public async Task Cancel_Rejects_Already_Cancelled_Or_Failed_Order(OrderStatus status)
     {
         await using ApplicationDbContext context = CreateContext();
         Guid userId = Guid.NewGuid();
         Order order = Order.New(EntityId<Order>.New(), 25m, userId, EntityId<Session>.New());
-        order.MarkAsCancelled();
+        if (status == OrderStatus.Cancelled) order.MarkAsCancelled();
+        else order.MarkAsFailed();
         context.Orders.Add(order);
         await context.SaveChangesAsync(CancellationToken.None);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
@@ -238,10 +314,33 @@ public class OrderHandlersTests
             Arg.Any<CancellationToken>());
     }
 
-    private static ApplicationDbContext CreateContext()
+    private static async Task<(Guid OrderId, Guid UserId, Guid SeatId)> SeedCancellationOrderAsync(
+        string databaseName, int minutesUntilStart, bool paid = false, bool used = false)
+    {
+        await using ApplicationDbContext context = CreateContext(databaseName);
+        Guid userId = Guid.NewGuid();
+        Hall hall = Hall.Create(EntityId<Hall>.New(), "Cancellation hall");
+        SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
+        Seat seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
+        hall.ApplyLayout([seat]);
+        DateTime start = DateTime.UtcNow.AddMinutes(minutesUntilStart);
+        Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
+            EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
+        Order order = Order.Create(userId, session, [seat], new() { [seat.Id] = 25m });
+        if (paid) order.MarkAsPaid("transaction-1");
+        if (used) order.Tickets.Single().MarkAsUsed();
+        context.Halls.Add(hall);
+        context.SeatTypes.Add(seatType);
+        context.Sessions.Add(session);
+        context.Orders.Add(order);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return (order.Id.Value, userId, seat.Id.Value);
+    }
+
+    private static ApplicationDbContext CreateContext(string? databaseName = null)
     {
         DbContextOptions<ApplicationDbContext> options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseInMemoryDatabase(databaseName ?? Guid.NewGuid().ToString())
             .Options;
         return new OrdersTestDbContext(options);
     }
