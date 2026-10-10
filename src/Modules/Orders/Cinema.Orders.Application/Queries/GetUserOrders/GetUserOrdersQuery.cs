@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Orders.Dtos;
+using Cinema.Application.Orders.Queries;
 using Cinema.Domain.Shared;
 using Mapster;
 using MediatR;
@@ -20,6 +21,8 @@ public class GetUserOrdersQueryHandler(IApplicationDbContext context)
             .OrderByDescending(o => o.BookingDate)
             .ProjectToType<OrderDto>() 
             .ToListAsync(ct);
+
+        await OrderHistoryTickets.PopulateAsync(context, orders, ct);
 
         return Result.Success(orders);
     }

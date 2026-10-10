@@ -3,6 +3,7 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Orders.Commands.CancelOrder;
 using Cinema.Application.Orders.Queries.GetMyOrders;
+using Cinema.Application.Orders.Queries.GetUserOrders;
 using Cinema.Application.Jobs;
 using Cinema.Application.Tickets.Queries.GetTicketDetails;
 using Cinema.Catalog.Domain.Entities;
@@ -241,6 +242,129 @@ public class OrderHandlersTests
             .Which.Price.Should().Be(20m);
         result.Value.ActiveOrders.Single().Tickets.Single().Status.Should().Be(nameof(TicketStatus.Valid));
         result.Value.PastOrders.Select(x => x.Id).Should().ContainSingle().Which.Should().Be(cancelled.Id.Value);
+    }
+
+    [Fact]
+    public async Task GetMyOrders_Requires_Authentication_And_Returns_Empty_History()
+    {
+        await using ApplicationDbContext context = CreateContext();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        GetMyOrdersQueryHandler handler = new(context, currentUser);
+
+        (await handler.Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken))
+            .Error.Code.Should().Be("Auth.Required");
+        currentUser.UserId.Returns(Guid.NewGuid());
+        Cinema.Domain.Shared.Result<OrderHistoryVm> empty =
+            await handler.Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken);
+        empty.IsSuccess.Should().BeTrue();
+        empty.Value.ActiveOrders.Should().BeEmpty();
+        empty.Value.PastOrders.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Ticket_OrderId_Batch_Filter_Translates_For_Postgres()
+    {
+        DbContextOptions<ApplicationDbContext> options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql("Host=localhost;Database=cinema_orders_test_translation;Username=test;Password=test",
+                npgsql => npgsql.UseVector())
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        using ApplicationDbContext context = new(options);
+        EntityId<Order>[] orderIds = [EntityId<Order>.New(), EntityId<Order>.New()];
+
+        string sql = context.Tickets.AsNoTracking()
+            .Where(ticket => orderIds.Contains(ticket.OrderId))
+            .ToQueryString();
+
+        sql.Should().Contain("tickets").And.Contain("order_id");
+        sql.Should().Contain("is_active");
+    }
+
+    [Fact]
+    public async Task History_Composes_Only_Selected_Orders_Tickets_And_Preserves_Dto_Values()
+    {
+        string databaseName = Guid.NewGuid().ToString();
+        Guid userId = Guid.NewGuid();
+        Guid otherUserId = Guid.NewGuid();
+        DateTime start = DateTime.UtcNow.AddDays(3);
+        await using ApplicationDbContext seed = CreateContext(databaseName);
+        Hall hall = Hall.Create(EntityId<Hall>.New(), "History hall");
+        Movie movie = Movie.CreateManual($"History {Guid.NewGuid():N}", "test", 90,
+            DateTime.UtcNow.Year, MovieStatus.ComingSoon);
+        SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Premium", null);
+        Seat firstSeat = Seat.New(EntityId<Seat>.New(), "B", 1, 2, 1, SeatStatus.Active, hall.Id, seatType.Id);
+        Seat secondSeat = Seat.New(EntityId<Seat>.New(), "B", 2, 2, 2, SeatStatus.Active, hall.Id, seatType.Id);
+        hall.ApplyLayout([firstSeat, secondSeat]);
+        Session earlier = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
+            movie.Id, hall.Id, EntityId<Pricing>.New());
+        Session later = Session.Create(EntityId<Session>.New(), start.AddDays(1), start.AddDays(1).AddHours(2),
+            movie.Id, hall.Id, EntityId<Pricing>.New());
+        DateTime pastStart = DateTime.UtcNow.AddDays(-2);
+        Session pastSession = Session.Create(EntityId<Session>.New(), start.AddDays(2), start.AddDays(2).AddHours(2),
+            movie.Id, hall.Id, EntityId<Pricing>.New());
+        Order first = Order.Create(userId, earlier, [firstSeat, secondSeat],
+            new() { [firstSeat.Id] = 25m, [secondSeat.Id] = 35m });
+        first.ApplyLoyaltyDiscount(10);
+        Order second = Order.Create(userId, later, [firstSeat], new() { [firstSeat.Id] = 40m });
+        Order cancelled = Order.New(EntityId<Order>.New(), 15m, userId, earlier.Id);
+        cancelled.MarkAsCancelled();
+        Order failed = Order.New(EntityId<Order>.New(), 16m, userId, later.Id);
+        failed.MarkAsFailed();
+        Order historical = Order.New(EntityId<Order>.New(), 17m, userId, pastSession.Id);
+        Order foreign = Order.Create(otherUserId, earlier, [firstSeat], new() { [firstSeat.Id] = 99m });
+        seed.Halls.Add(hall);
+        seed.Movies.Add(movie);
+        seed.SeatTypes.Add(seatType);
+        seed.Sessions.AddRange(earlier, later, pastSession);
+        seed.Entry(pastSession).Property(session => session.StartTime).CurrentValue = pastStart;
+        seed.Orders.AddRange(first, second, cancelled, failed, historical, foreign);
+        await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Microsoft.Extensions.DependencyInjection.ServiceCollection services = new();
+        services.AddApplication();
+        services.AddOrdersApplication();
+        await using ApplicationDbContext context = CreateContext(databaseName);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(userId);
+
+        Cinema.Domain.Shared.Result<OrderHistoryVm> mine = await new GetMyOrdersQueryHandler(context, currentUser)
+            .Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken);
+        mine.IsSuccess.Should().BeTrue();
+        mine.Value.ActiveOrders.Select(order => order.Id).Should().Equal(first.Id.Value, second.Id.Value);
+        mine.Value.PastOrders.Select(order => order.Id).Should().Equal(failed.Id.Value, cancelled.Id.Value,
+            historical.Id.Value);
+        mine.Value.ActiveOrders.Concat(mine.Value.PastOrders).Select(order => order.Id).Should().OnlyHaveUniqueItems();
+        mine.Value.ActiveOrders[0].Tickets.Select(ticket => ticket.Id)
+            .Should().BeEquivalentTo(first.Tickets.Select(ticket => ticket.Id.Value));
+        mine.Value.ActiveOrders[1].Tickets.Should().ContainSingle();
+        mine.Value.PastOrders.Should().OnlyContain(order => order.Tickets.Count == 0);
+        mine.Value.ActiveOrders[0].TotalAmount.Should().Be(60m);
+        mine.Value.ActiveOrders[0].PointsUsed.Should().Be(10);
+        mine.Value.ActiveOrders[0].AmountPaid.Should().Be(50m);
+        mine.Value.ActiveOrders[0].CreatedAt.Should().Be(first.BookingDate);
+        mine.Value.ActiveOrders[0].Status.Should().Be(nameof(OrderStatus.Pending));
+        Cinema.Application.Orders.Dtos.TicketDto ticketDto = mine.Value.ActiveOrders[0].Tickets
+            .Single(ticket => ticket.SeatNumber == 1);
+        ticketDto.Price.Should().Be(25m);
+        ticketDto.Status.Should().Be(nameof(TicketStatus.Valid));
+        ticketDto.MovieTitle.Should().Be(movie.Title);
+        ticketDto.PosterUrl.Should().Be(movie.PosterUrl);
+        ticketDto.HallName.Should().Be(hall.Name);
+        ticketDto.SessionStart.Should().Be(start);
+        ticketDto.RowLabel.Should().Be("B");
+        ticketDto.SeatType.Should().Be(seatType.Name);
+        ticketDto.SecretCode.Should().Be(ticketDto.Id.ToString()[..8].ToUpperInvariant());
+
+        Cinema.Domain.Shared.Result<List<Cinema.Application.Orders.Dtos.OrderDto>> admin =
+            await new GetUserOrdersQueryHandler(context).Handle(new GetUserOrdersQuery(userId),
+                TestContext.Current.CancellationToken);
+        admin.IsSuccess.Should().BeTrue();
+        admin.Value.Select(order => order.Id).Should().BeEquivalentTo(new[]
+            { first.Id.Value, second.Id.Value, cancelled.Id.Value, failed.Id.Value, historical.Id.Value });
+        admin.Value.Select(order => order.CreatedAt).Should().BeInDescendingOrder();
+        admin.Value.Single(order => order.Id == first.Id.Value).Tickets.Should().HaveCount(2);
+        admin.Value.Should().OnlyContain(order => order.Id != foreign.Id.Value);
+        (await new GetUserOrdersQueryHandler(context).Handle(new GetUserOrdersQuery(Guid.NewGuid()),
+            TestContext.Current.CancellationToken)).Value.Should().BeEmpty();
     }
 
     [Fact]
