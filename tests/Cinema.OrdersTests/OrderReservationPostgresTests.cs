@@ -12,6 +12,7 @@ using Cinema.Application.Common.Models.DomainEventNotification;
 using Cinema.Application.Orders.IntegrationEvents;
 using Cinema.Application.Orders.Services;
 using Cinema.Application.Services;
+using Cinema.Application.Tickets.Queries.GetTicketDetails;
 using Cinema.Catalog.Domain.Entities;
 using Cinema.Catalog.Domain.Enums;
 using Cinema.Domain.Common;
@@ -42,6 +43,69 @@ namespace Cinema.OrdersTests;
 // Only run with a disposable pgvector PostgreSQL database named cinema_orders_test_*.
 public class OrderReservationPostgresTests
 {
+    [Fact]
+    public async Task Ticket_Details_Use_Persisted_Order_Ownership_And_Preserve_Original_Dto()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Order order = Order.Create(database.UserId, database.Session, [database.Seat],
+            new() { [database.Seat.Id] = 50m });
+        database.Context.Orders.Add(order);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Guid ticketId = order.Tickets.Single().Id.Value;
+        new Microsoft.Extensions.DependencyInjection.ServiceCollection().AddApplication();
+
+        HistoryCommandCounter baselineCounter = new();
+        await using ApplicationDbContext baselineContext = database.NewContext(interceptor: baselineCounter);
+        Ticket baselineTicket = await baselineContext.Tickets.AsNoTracking()
+            .Include(ticket => ticket.Order)
+            .Include(ticket => ticket.Session!).ThenInclude(session => session.Movie)
+            .Include(ticket => ticket.Session!).ThenInclude(session => session.Hall)
+            .Include(ticket => ticket.Seat!).ThenInclude(seat => seat.SeatType)
+            .SingleAsync(ticket => ticket.Id == new EntityId<Ticket>(ticketId), TestContext.Current.CancellationToken);
+        baselineTicket.Order!.UserId.Should().Be(database.UserId);
+        TicketDto baselineDto = baselineTicket.Adapt<TicketDto>();
+        baselineCounter.Commands.Should().ContainSingle();
+
+        HistoryCommandCounter counter = new();
+        await using ApplicationDbContext queryContext = database.NewContext(interceptor: counter);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        GetTicketDetailsQueryHandler handler = new(queryContext, currentUser);
+
+        Result<TicketDto> owner = await handler.Handle(new GetTicketDetailsQuery(ticketId),
+            TestContext.Current.CancellationToken);
+        owner.IsSuccess.Should().BeTrue();
+        owner.Value.Should().Be(baselineDto);
+        counter.Commands.Should().HaveCount(2);
+        counter.Commands[0].Should().Contain("tickets").And.Contain("is_active");
+        counter.Commands[1].Should().Contain("orders").And.Contain("user_id").And.Contain("id");
+        counter.Commands[1].Should().NotContain("tickets");
+
+        counter.Commands.Clear();
+        currentUser.UserId.Returns(Guid.NewGuid());
+        Result<TicketDto> stranger = await handler.Handle(new GetTicketDetailsQuery(ticketId),
+            TestContext.Current.CancellationToken);
+        stranger.IsFailure.Should().BeTrue();
+        stranger.Error.Code.Should().Be("Ticket.AccessDenied");
+        counter.Commands.Should().HaveCount(2);
+
+        counter.Commands.Clear();
+        currentUser.UserId.Returns(database.UserId);
+        Result<TicketDto> missing = await handler.Handle(new GetTicketDetailsQuery(Guid.NewGuid()),
+            TestContext.Current.CancellationToken);
+        missing.Error.Code.Should().Be("Ticket.NotFound");
+        counter.Commands.Should().ContainSingle();
+
+        Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
+        hall.Deactivate();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        counter.Commands.Clear();
+        Result<TicketDto> hidden = await handler.Handle(new GetTicketDetailsQuery(ticketId),
+            TestContext.Current.CancellationToken);
+        hidden.Error.Code.Should().Be("Ticket.NotFound");
+        counter.Commands.Should().ContainSingle();
+    }
+
     [Fact]
     public async Task History_Batches_Tickets_And_Matches_Original_Projection()
     {
