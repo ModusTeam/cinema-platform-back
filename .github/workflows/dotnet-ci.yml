@@ -1,0 +1,49 @@
+name: .NET CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  dotnet-tests:
+    name: dotnet-tests
+    runs-on: ubuntu-latest
+    env:
+      CINEMA_TEST_POSTGRES_CONNECTION: Host=localhost;Port=5432;Database=cinema_orders_test_ci;Username=postgres;Password=postgres_password
+      CINEMA_TEST_REDIS_CONNECTION: localhost:6379
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_password
+          POSTGRES_DB: cinema_orders_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cinema_orders_test_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore Cinema.sln
+      - name: Build
+        run: dotnet build Cinema.sln --configuration Release --no-restore
+      - name: Test
+        run: dotnet test Cinema.sln --configuration Release --no-build -- --fail-skips on
