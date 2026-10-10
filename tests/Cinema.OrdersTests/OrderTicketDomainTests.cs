@@ -83,7 +83,7 @@ public class OrderTicketDomainTests
     }
 
     [Fact]
-    public void Gold_Upgrade_Selects_Highest_Price_And_Adjusts_Totals()
+    public void Gold_Discount_Adjusts_Totals_For_Separately_Upgraded_Tickets()
     {
         (Session session, Seat first, Seat second) = Seats();
         Order order = Order.Create(Guid.NewGuid(), session, [first, second], new()
@@ -92,7 +92,9 @@ public class OrderTicketDomainTests
             [second.Id] = 70m
         });
 
-        order.ApplyGoldSeatUpgrade(30m);
+        Ticket secondTicket = order.Tickets.Single(t => t.SeatId == second.Id);
+        secondTicket.ApplyGoldUpgrade(30m);
+        order.ApplyGoldDiscount(40m);
 
         order.Tickets.Single(t => t.SeatId == second.Id).PriceSnapshot.Should().Be(30m);
         order.Tickets.Single(t => t.SeatId == second.Id).IsGoldUpgraded.Should().BeTrue();
@@ -101,16 +103,19 @@ public class OrderTicketDomainTests
         order.PaidAmount.Should().Be(70m);
 
         // Current behavior allows a second upgrade on another eligible ticket.
-        order.ApplyGoldSeatUpgrade(30m);
+        Ticket firstTicket = order.Tickets.Single(t => t.SeatId == first.Id);
+        firstTicket.ApplyGoldUpgrade(30m);
+        order.ApplyGoldDiscount(10m);
         order.TotalAmount.Should().Be(60m);
         order.PaidAmount.Should().Be(60m);
         order.Tickets.Should().OnlyContain(t => t.IsGoldUpgraded && t.PriceSnapshot == 30m);
-        Action thirdUpgrade = () => order.ApplyGoldSeatUpgrade(30m);
-        thirdUpgrade.Should().Throw<DomainException>().WithMessage("No tickets found to upgrade.");
+        Action thirdUpgrade = () => secondTicket.ApplyGoldUpgrade(30m);
+        thirdUpgrade.Should().Throw<DomainException>().WithMessage("Ticket is already gold upgraded.");
+        order.TotalAmount.Should().Be(60m);
     }
 
     [Fact]
-    public void Gold_Upgrade_Rejects_When_Highest_Remaining_Ticket_Is_Ineligible()
+    public void Gold_Discount_Clamps_Paid_Amount_After_Loyalty_Discount()
     {
         (Session session, Seat first, Seat second) = Seats();
         Order order = Order.Create(Guid.NewGuid(), session, [first, second], new()
@@ -119,11 +124,29 @@ public class OrderTicketDomainTests
             [second.Id] = 30m
         });
 
-        Action upgrade = () => order.ApplyGoldSeatUpgrade(30m);
+        order.ApplyLoyaltyDiscount(5);
+        order.ApplyGoldDiscount(10m);
 
-        upgrade.Should().Throw<DomainException>().WithMessage("No eligible ticket found for gold upgrade*");
-        order.TotalAmount.Should().Be(50m);
+        order.TotalAmount.Should().Be(40m);
+        order.PaidAmount.Should().Be(40m);
         order.Tickets.Should().OnlyContain(t => !t.IsGoldUpgraded);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(51)]
+    public void Gold_Discount_Rejects_Invalid_Adjustment_Without_Changing_Amounts(decimal discount)
+    {
+        Order order = Order.New(EntityId<Order>.New(), 50m, Guid.NewGuid(), EntityId<Session>.New());
+        order.ApplyLoyaltyDiscount(10);
+
+        Action apply = () => order.ApplyGoldDiscount(discount);
+
+        apply.Should().Throw<DomainException>()
+            .WithMessage("Gold discount must be positive and cannot exceed the order total.");
+        order.TotalAmount.Should().Be(50m);
+        order.PaidAmount.Should().Be(40m);
     }
 
     [Fact]

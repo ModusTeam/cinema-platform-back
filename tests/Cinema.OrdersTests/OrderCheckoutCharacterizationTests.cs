@@ -7,6 +7,7 @@ using Cinema.Catalog.Domain.Entities;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
+using Cinema.Domain.Exceptions;
 using Cinema.Domain.Shared;
 using Cinema.Infrastructure.Persistence;
 using FluentAssertions;
@@ -225,11 +226,129 @@ public class OrderCheckoutCharacterizationTests
 
         result.IsSuccess.Should().BeTrue();
         fixture.Order.TotalAmount.Should().Be(30m);
+        fixture.Order.PaidAmount.Should().Be(30m);
+        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(30m);
         fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
         await fixture.Payment.Received(1).ProcessPaymentAsync(30m, "UAH", "token", Arg.Any<CancellationToken>());
         await fixture.Gold.Received(1).CalculateAsync(Arg.Is<Session>(s => s.Id == fixture.Session.Id),
             Arg.Is<IReadOnlyCollection<GoldUpgradeTicketPrice>>(t => t.Count == 1 && t.Single().SeatId == fixture.Seat.Id.Value),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Gold_Upgrade_Selects_Highest_Remaining_Ticket_Even_When_Quote_Seat_Differs()
+    {
+        await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync(ticketPrices: [40m, 70m]);
+        Seat highestSeat = fixture.Seats[1];
+        fixture.Gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new GoldUpgradePricingQuote(true, 30m, 10m, fixture.Seat.Id.Value, 40m, 30m, null)));
+        fixture.Loyalty.UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>()).Returns((true, ""));
+        fixture.Payment.ProcessPaymentAsync(70m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("gold-highest"));
+
+        Result<Guid> result = await fixture.CheckoutAsync(gold: true);
+
+        result.IsSuccess.Should().BeTrue();
+        fixture.Order.Tickets.Single(t => t.SeatId == highestSeat.Id).PriceSnapshot.Should().Be(30m);
+        fixture.Order.Tickets.Single(t => t.SeatId == highestSeat.Id).IsGoldUpgraded.Should().BeTrue();
+        fixture.Order.Tickets.Single(t => t.SeatId == fixture.Seat.Id).PriceSnapshot.Should().Be(40m);
+        fixture.Order.TotalAmount.Should().Be(70m);
+        fixture.Order.PaidAmount.Should().Be(70m);
+        await fixture.Payment.Received(1).ProcessPaymentAsync(70m, "UAH", "token", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Gold_Upgrade_Calculates_Loyalty_Discount_From_Reduced_Total()
+    {
+        await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
+        fixture.Gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new GoldUpgradePricingQuote(true, 30m, 20m, fixture.Seat.Id.Value, 50m, 30m, null)));
+        fixture.Loyalty.UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>()).Returns((true, ""));
+        fixture.Loyalty.CalculateDiscountAsync(fixture.UserId, 30m, Arg.Any<CancellationToken>())
+            .Returns((true, 10, 20m));
+        fixture.Loyalty.DeductPointsAsync(fixture.UserId, 10, fixture.Order.Id.Value, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((true, 90, ""));
+        fixture.Payment.ProcessPaymentAsync(20m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("gold-and-points"));
+
+        Result<Guid> result = await fixture.CheckoutAsync(gold: true, usePoints: true);
+
+        result.IsSuccess.Should().BeTrue();
+        fixture.Order.TotalAmount.Should().Be(30m);
+        fixture.Order.PaidAmount.Should().Be(20m);
+        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(30m);
+        await fixture.Loyalty.Received(1).CalculateDiscountAsync(fixture.UserId, 30m, Arg.Any<CancellationToken>());
+        await fixture.Payment.Received(1).ProcessPaymentAsync(20m, "UAH", "token", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Gold_Upgrade_Uses_First_Equal_Priced_Ticket_And_Can_Upgrade_Another_Later()
+    {
+        await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync(loyaltyAllowed: false, ticketPrices: [50m, 50m]);
+        Ticket firstTicket = fixture.Order.Tickets.First();
+        Ticket otherTicket = fixture.Order.Tickets.Single(t => t.Id != firstTicket.Id);
+        fixture.Gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new GoldUpgradePricingQuote(true, 30m, 20m, otherTicket.SeatId.Value, 50m, 30m, null)));
+        fixture.Loyalty.UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>()).Returns((true, ""));
+
+        Result<Guid> first = await fixture.CheckoutAsync(gold: true, usePoints: true);
+        first.Error.Code.Should().Be("Order.LoyaltyNotAllowed");
+        firstTicket.IsGoldUpgraded.Should().BeTrue();
+        firstTicket.PriceSnapshot.Should().Be(30m);
+        otherTicket.IsGoldUpgraded.Should().BeFalse();
+        fixture.Order.TotalAmount.Should().Be(80m);
+
+        Result<Guid> second = await fixture.CheckoutAsync(gold: true, usePoints: true);
+        second.Error.Code.Should().Be("Order.LoyaltyNotAllowed");
+        otherTicket.IsGoldUpgraded.Should().BeTrue();
+        otherTicket.PriceSnapshot.Should().Be(30m);
+        fixture.Order.TotalAmount.Should().Be(60m);
+        fixture.Order.PaidAmount.Should().Be(60m);
+        await fixture.Loyalty.Received(2).UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());
+
+        Func<Task> third = async () => await fixture.CheckoutAsync(gold: true, usePoints: true);
+        await third.Should().ThrowAsync<DomainException>().WithMessage("No tickets found to upgrade.");
+        fixture.Order.TotalAmount.Should().Be(60m);
+        await fixture.Payment.DidNotReceiveWithAnyArgs().ProcessPaymentAsync(default, default!, default!, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Gold_Upgrade_With_Inconsistent_Applied_Quote_Preserves_Domain_Exception()
+    {
+        await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync(ticketPrices: [30m]);
+        fixture.Gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new GoldUpgradePricingQuote(true, 30m, 0m, fixture.Seat.Id.Value, 30m, 30m, null)));
+        fixture.Loyalty.UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>()).Returns((true, ""));
+
+        Func<Task> checkout = async () => await fixture.CheckoutAsync(gold: true);
+
+        await checkout.Should().ThrowAsync<DomainException>()
+            .WithMessage("No eligible ticket found for gold upgrade*");
+        fixture.Order.TotalAmount.Should().Be(30m);
+        fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Gold_Upgrade_Invalid_Discount_Does_Not_Mutate_Ticket_Or_Order()
+    {
+        await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
+        fixture.Gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new GoldUpgradePricingQuote(true, -10m, 60m, fixture.Seat.Id.Value, 50m, -10m, null)));
+        fixture.Loyalty.UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>()).Returns((true, ""));
+
+        Func<Task> checkout = async () => await fixture.CheckoutAsync(gold: true);
+
+        await checkout.Should().ThrowAsync<DomainException>()
+            .WithMessage("Gold discount must be positive and cannot exceed the order total.");
+        fixture.Order.TotalAmount.Should().Be(50m);
+        fixture.Order.PaidAmount.Should().Be(50m);
+        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(50m);
+        fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
+        fixture.Context.ChangeTracker.Clear();
+        Order persisted = await fixture.Context.Orders.Include(o => o.Tickets)
+            .SingleAsync(o => o.Id == fixture.Order.Id, TestContext.Current.CancellationToken);
+        persisted.TotalAmount.Should().Be(50m);
+        persisted.Tickets.Single().PriceSnapshot.Should().Be(50m);
     }
 
     [Theory]
@@ -306,8 +425,17 @@ public class OrderCheckoutCharacterizationTests
         result.Error.Code.Should().Be("Payment.Failed");
         fixture.Order.Status.Should().Be(OrderStatus.Failed);
         fixture.Order.TotalAmount.Should().Be(30m);
+        fixture.Order.PaidAmount.Should().Be(30m);
+        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(30m);
         fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
         await fixture.Loyalty.Received(1).RollbackGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());
+        fixture.Context.ChangeTracker.Clear();
+        Order persisted = await fixture.Context.Orders.Include(o => o.Tickets)
+            .SingleAsync(o => o.Id == fixture.Order.Id, TestContext.Current.CancellationToken);
+        persisted.TotalAmount.Should().Be(30m);
+        persisted.PaidAmount.Should().Be(30m);
+        persisted.Tickets.Single().PriceSnapshot.Should().Be(30m);
+        persisted.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
     }
 
     private sealed class CheckoutFixture : IAsyncDisposable
@@ -316,6 +444,7 @@ public class OrderCheckoutCharacterizationTests
         public Guid UserId { get; } = Guid.NewGuid();
         public Session Session { get; private set; } = null!;
         public Seat Seat { get; private set; } = null!;
+        public List<Seat> Seats { get; } = [];
         public Order Order { get; private set; } = null!;
         public IPaymentService Payment { get; } = Substitute.For<IPaymentService>();
         public ILoyaltyService Loyalty { get; } = Substitute.For<ILoyaltyService>();
@@ -330,18 +459,25 @@ public class OrderCheckoutCharacterizationTests
             Context = new CheckoutDbContext(options);
         }
 
-        public static async Task<CheckoutFixture> CreateAsync(bool loyaltyAllowed = true)
+        public static async Task<CheckoutFixture> CreateAsync(bool loyaltyAllowed = true, decimal[]? ticketPrices = null)
         {
             CheckoutFixture fixture = new();
             Hall hall = Hall.Create(EntityId<Hall>.New(), "Checkout test hall");
             SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Premium", null);
             fixture.Seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
-            hall.ApplyLayout([fixture.Seat]);
+            fixture.Seats.Add(fixture.Seat);
+            decimal[] prices = ticketPrices ?? [50m];
+            for (int index = 1; index < prices.Length; index++)
+                fixture.Seats.Add(Seat.New(EntityId<Seat>.New(), "A", index + 1, 1, index + 1,
+                    SeatStatus.Active, hall.Id, seatType.Id));
+            hall.ApplyLayout(fixture.Seats);
             Pricing pricing = Pricing.New(EntityId<Pricing>.New(), "Checkout test pricing");
             fixture.Session = Session.Create(EntityId<Session>.New(), DateTime.UtcNow.AddDays(2),
                 DateTime.UtcNow.AddDays(2).AddHours(2), EntityId<Movie>.New(), hall.Id, pricing.Id, loyaltyAllowed);
-            fixture.Order = Order.Create(fixture.UserId, fixture.Session, [fixture.Seat],
-                new Dictionary<EntityId<Seat>, decimal> { [fixture.Seat.Id] = 50m });
+            Dictionary<EntityId<Seat>, decimal> seatPrices = fixture.Seats
+                .Select((seat, index) => (seat, price: prices[index]))
+                .ToDictionary(item => item.seat.Id, item => item.price);
+            fixture.Order = Order.Create(fixture.UserId, fixture.Session, fixture.Seats, seatPrices);
             fixture.Context.Halls.Add(hall);
             fixture.Context.SeatTypes.Add(seatType);
             fixture.Context.Pricings.Add(pricing);

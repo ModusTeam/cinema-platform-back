@@ -1,5 +1,7 @@
 using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Orders.Commands.CreateOrder;
+using Cinema.Application.Orders.Services;
 using Cinema.Application.Services;
 using Cinema.Catalog.Domain.Entities;
 using Cinema.Catalog.Domain.Enums;
@@ -9,6 +11,7 @@ using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using Cinema.Infrastructure.Persistence;
 using FluentAssertions;
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -40,6 +43,41 @@ public class OrderReservationPostgresTests
         order.Tickets.Should().OnlyContain(t => t.OrderId == order.Id && t.Order == order &&
             t.SessionId == database.Session.Id && t.PriceSnapshot == 50m && t.TicketStatus == TicketStatus.Valid);
         (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Gold_Checkout_Persists_Ticket_And_Order_Discount_Together()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        reserved.IsSuccess.Should().BeTrue();
+        await using ApplicationDbContext checkoutContext = database.NewContext();
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        loyalty.UseGoldUpgradeAsync(database.UserId, reserved.Value, Arg.Any<CancellationToken>())
+            .Returns((true, ""));
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.ProcessPaymentAsync(30m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("gold-postgres"));
+        IGoldUpgradePricingService gold = Substitute.For<IGoldUpgradePricingService>();
+        gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new GoldUpgradePricingQuote(true, 30m, 20m,
+                database.Seat.Id.Value, 50m, 30m, null)));
+        OrderCheckoutOrchestrator checkout = new(checkoutContext, loyalty, payment,
+            Substitute.For<ISeatLockingService>(), gold, Substitute.For<IPublishEndpoint>(),
+            NullLogger<OrderCheckoutOrchestrator>.Instance);
+
+        Result<Guid> result = await checkout.ProcessCheckoutAsync(database.UserId, database.Session.Id.Value,
+            [database.Seat.Id.Value], reserved.Value, true, false, "token", TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        await using ApplicationDbContext verify = database.NewContext();
+        Order persisted = await verify.Orders.Include(o => o.Tickets)
+            .SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value), TestContext.Current.CancellationToken);
+        persisted.TotalAmount.Should().Be(30m);
+        persisted.PaidAmount.Should().Be(30m);
+        persisted.Tickets.Single().PriceSnapshot.Should().Be(30m);
+        persisted.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
+        persisted.Tickets.Single().Order.Should().Be(persisted);
     }
 
     [Fact]
