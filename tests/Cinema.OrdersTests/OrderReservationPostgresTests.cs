@@ -49,10 +49,10 @@ public class OrderReservationPostgresTests
         Seat secondSeat = await database.AddSeatAsync();
         Order first = Order.Create(database.UserId, database.Session, [database.Seat, secondSeat],
             new() { [database.Seat.Id] = 50m, [secondSeat.Id] = 60m });
-        Order second = Order.New(EntityId<Order>.New(), 20m, database.UserId, database.Session.Id);
         Session foreignSession = Session.Create(EntityId<Session>.New(),
             database.Session.StartTime.AddDays(1), database.Session.StartTime.AddDays(1).AddHours(2),
             database.Session.MovieId, database.Session.HallId, database.Session.PricingId);
+        Order second = Order.New(EntityId<Order>.New(), 20m, database.UserId, foreignSession.Id);
         User foreignUser = new() { Id = Guid.NewGuid(), UserName = $"foreign-{Guid.NewGuid():N}" };
         Order foreign = Order.Create(foreignUser.Id, foreignSession, [secondSeat],
             new() { [secondSeat.Id] = 70m });
@@ -85,6 +85,7 @@ public class OrderReservationPostgresTests
             .Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken);
         mine.IsSuccess.Should().BeTrue();
         mine.Value.ActiveOrders.Should().HaveCount(2);
+        mine.Value.ActiveOrders.Select(order => order.Id).Should().Equal(first.Id.Value, second.Id.Value);
         mine.Value.ActiveOrders.Single(order => order.Id == first.Id.Value).Tickets.Should().HaveCount(2);
         mine.Value.ActiveOrders.Single(order => order.Id == second.Id.Value).Tickets.Should().BeEmpty();
         counter.Commands.Should().HaveCount(3);
@@ -95,6 +96,7 @@ public class OrderReservationPostgresTests
             .Handle(new GetUserOrdersQuery(database.UserId), TestContext.Current.CancellationToken);
         counter.Commands.Should().HaveCount(2);
         admin.Value.Should().BeEquivalentTo(baseline);
+        admin.Value.Select(order => order.Id).Should().Equal(baseline.Select(order => order.Id));
         admin.Value.Select(order => order.Id).Should().NotContain(foreign.Id.Value);
 
         Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
