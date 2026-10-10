@@ -5,6 +5,7 @@ using Cinema.Application.Orders.IntegrationEvents;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
+using Cinema.Domain.Exceptions;
 using Cinema.Domain.Shared;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
@@ -97,7 +98,20 @@ public class OrderCheckoutOrchestrator(
                 return Result.Failure<Guid>(new Error("Order.GoldUpgradeFailed", $"Gold upgrade failed: {goldUpgradeResult.Error}"));
             }
 
-            order.ApplyGoldSeatUpgrade(goldUpgradeQuote.BasePrice);
+            Ticket? ticketToUpgrade = order.Tickets
+                .Where(t => !t.IsGoldUpgraded)
+                .OrderByDescending(t => t.PriceSnapshot)
+                .FirstOrDefault();
+
+            if (ticketToUpgrade is null)
+                throw new DomainException("No tickets found to upgrade.");
+
+            if (ticketToUpgrade.PriceSnapshot <= goldUpgradeQuote.BasePrice)
+                throw new DomainException("No eligible ticket found for gold upgrade (ticket price is already less than or equal to standard price).");
+
+            decimal priceDifference = ticketToUpgrade.PriceSnapshot - goldUpgradeQuote.BasePrice;
+            ticketToUpgrade.ApplyGoldUpgrade(goldUpgradeQuote.BasePrice);
+            order.ApplyGoldDiscount(priceDifference);
             await context.SaveChangesAsync(ct);
             logger.LogInformation("Applied Gold Upgrade to order {OrderId} for user {UserId}", orderId, userId);
         }
