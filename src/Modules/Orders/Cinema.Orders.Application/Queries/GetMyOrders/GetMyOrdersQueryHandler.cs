@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Orders.Dtos;
+using Cinema.Application.Orders.Queries;
 using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using Mapster;
@@ -36,6 +37,8 @@ public class GetMyOrdersQueryHandler(
             .OrderByDescending(o => o.Session!.StartTime)
             .ProjectToType<OrderDto>()
             .ToListAsync(ct);
+
+        await OrderHistoryTickets.PopulateAsync(context, activeOrders.Concat(pastOrders).ToList(), ct);
 
         return Result.Success(new OrderHistoryVm
         {

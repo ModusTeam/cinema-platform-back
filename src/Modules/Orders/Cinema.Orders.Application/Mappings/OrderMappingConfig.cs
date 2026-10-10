@@ -13,6 +13,6 @@ public class OrderMappingConfig : IRegister
             .Map(dest => dest.TotalAmount, src => src.TotalAmount)
             .Map(dest => dest.CreatedAt, src => src.BookingDate)
             .Map(dest => dest.Status, src => src.Status.ToString())
-            .Map(dest => dest.Tickets, src => src.Tickets);
+            .Ignore(dest => dest.Tickets);
     }
 }

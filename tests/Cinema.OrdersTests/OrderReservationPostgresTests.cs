@@ -1,7 +1,12 @@
+using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Orders.Commands.CreateOrder;
 using Cinema.Application.Orders.Commands.CancelOrder;
+using Cinema.Application.Orders.Dtos;
+using Cinema.Application.Orders.Queries.GetMyOrders;
+using Cinema.Application.Orders.Queries.GetUserOrders;
+using Cinema.Application.Common.Mappings.Orders;
 using Cinema.Application.Orders.EventHandlers;
 using Cinema.Application.Common.Models.DomainEventNotification;
 using Cinema.Application.Orders.IntegrationEvents;
@@ -15,14 +20,18 @@ using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using Cinema.Infrastructure.Persistence;
 using Cinema.Infrastructure.Persistence.Interceptors;
+using Cinema.Orders.Application;
 using Cinema.Domain.Events;
 using FluentAssertions;
 using MediatR;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using NSubstitute;
+using Mapster;
+using System.Data.Common;
 using Xunit;
 
 // Paid notifications intentionally call the existing overload without a cancellation token.
@@ -33,6 +42,87 @@ namespace Cinema.OrdersTests;
 // Only run with a disposable pgvector PostgreSQL database named cinema_orders_test_*.
 public class OrderReservationPostgresTests
 {
+    [Fact]
+    public async Task History_Batches_Tickets_And_Matches_Original_Projection()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Seat secondSeat = await database.AddSeatAsync();
+        Order first = Order.Create(database.UserId, database.Session, [database.Seat, secondSeat],
+            new() { [database.Seat.Id] = 50m, [secondSeat.Id] = 60m });
+        Order second = Order.New(EntityId<Order>.New(), 20m, database.UserId, database.Session.Id);
+        Session foreignSession = Session.Create(EntityId<Session>.New(),
+            database.Session.StartTime.AddDays(1), database.Session.StartTime.AddDays(1).AddHours(2),
+            database.Session.MovieId, database.Session.HallId, database.Session.PricingId);
+        User foreignUser = new() { Id = Guid.NewGuid(), UserName = $"foreign-{Guid.NewGuid():N}" };
+        Order foreign = Order.Create(foreignUser.Id, foreignSession, [secondSeat],
+            new() { [secondSeat.Id] = 70m });
+        database.Context.Users.Add(foreignUser);
+        database.Context.Sessions.Add(foreignSession);
+        database.Context.Orders.AddRange(first, second, foreign);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        TypeAdapterConfig original = new();
+        new TicketMappingConfig().Register(original);
+        original.NewConfig<Order, OrderDto>()
+            .Map(dest => dest.Id, src => src.Id.Value)
+            .Map(dest => dest.TotalAmount, src => src.TotalAmount)
+            .Map(dest => dest.CreatedAt, src => src.BookingDate)
+            .Map(dest => dest.Status, src => src.Status.ToString())
+            .Map(dest => dest.Tickets, src => src.Tickets);
+        Microsoft.Extensions.DependencyInjection.ServiceCollection services = new();
+        services.AddApplication();
+        services.AddOrdersApplication();
+        await using ApplicationDbContext baselineContext = database.NewContext();
+        List<OrderDto> baseline = await baselineContext.Orders.AsNoTracking()
+            .Where(order => order.UserId == database.UserId)
+            .OrderByDescending(order => order.BookingDate)
+            .ProjectToType<OrderDto>(original).ToListAsync(TestContext.Current.CancellationToken);
+        HistoryCommandCounter counter = new();
+        await using ApplicationDbContext queryContext = database.NewContext(interceptor: counter);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+
+        Result<OrderHistoryVm> mine = await new GetMyOrdersQueryHandler(queryContext, currentUser)
+            .Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken);
+        mine.IsSuccess.Should().BeTrue();
+        mine.Value.ActiveOrders.Should().HaveCount(2);
+        mine.Value.ActiveOrders.Single(order => order.Id == first.Id.Value).Tickets.Should().HaveCount(2);
+        mine.Value.ActiveOrders.Single(order => order.Id == second.Id.Value).Tickets.Should().BeEmpty();
+        counter.Commands.Should().HaveCount(3);
+        counter.Commands.Last().Should().Contain("tickets").And.Contain("order_id");
+
+        counter.Commands.Clear();
+        Result<List<OrderDto>> admin = await new GetUserOrdersQueryHandler(queryContext)
+            .Handle(new GetUserOrdersQuery(database.UserId), TestContext.Current.CancellationToken);
+        counter.Commands.Should().HaveCount(2);
+        admin.Value.Should().BeEquivalentTo(baseline);
+        admin.Value.Select(order => order.Id).Should().NotContain(foreign.Id.Value);
+
+        Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
+        hall.Deactivate();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await using ApplicationDbContext filtered = database.NewContext();
+        List<OrderDto> filteredBaseline = await filtered.Orders.AsNoTracking()
+            .Where(order => order.UserId == database.UserId)
+            .ProjectToType<OrderDto>(original).ToListAsync(TestContext.Current.CancellationToken);
+        Result<List<OrderDto>> filteredHistory = await new GetUserOrdersQueryHandler(filtered)
+            .Handle(new GetUserOrdersQuery(database.UserId), TestContext.Current.CancellationToken);
+        filteredHistory.Value.Should().BeEquivalentTo(filteredBaseline);
+        filteredHistory.Value.Should().OnlyContain(order => order.Tickets.Count == 0);
+    }
+
+    private sealed class HistoryCommandCounter : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = new();
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
     [Fact]
     public async Task Paid_Event_Queries_Persisted_Tickets_During_SaveChanges()
     {
@@ -590,12 +680,14 @@ public class OrderReservationPostgresTests
             }
         }
 
-        public ApplicationDbContext NewContext(IPublisher? publisher = null)
+        public ApplicationDbContext NewContext(IPublisher? publisher = null, DbCommandInterceptor? interceptor = null)
         {
             DbContextOptionsBuilder<ApplicationDbContext> builder = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseNpgsql(ConnectionString, x => x.UseVector()).UseSnakeCaseNamingConvention();
             if (publisher is not null)
                 builder.AddInterceptors(new DispatchDomainEventsInterceptor(publisher));
+            if (interceptor is not null)
+                builder.AddInterceptors(interceptor);
             DbContextOptions<ApplicationDbContext> options = builder.Options;
             return new ApplicationDbContext(options);
         }
