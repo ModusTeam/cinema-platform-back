@@ -132,6 +132,23 @@ public class OrderTicketDomainTests
         order.Tickets.Should().OnlyContain(t => !t.IsGoldUpgraded);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(51)]
+    public void Gold_Discount_Rejects_Invalid_Adjustment_Without_Changing_Amounts(decimal discount)
+    {
+        Order order = Order.New(EntityId<Order>.New(), 50m, Guid.NewGuid(), EntityId<Session>.New());
+        order.ApplyLoyaltyDiscount(10);
+
+        Action apply = () => order.ApplyGoldDiscount(discount);
+
+        apply.Should().Throw<DomainException>()
+            .WithMessage("Gold discount must be positive and cannot exceed the order total.");
+        order.TotalAmount.Should().Be(50m);
+        order.PaidAmount.Should().Be(40m);
+    }
+
     [Fact]
     public void Ticket_Use_And_Refund_Rules_Preserve_Current_States()
     {

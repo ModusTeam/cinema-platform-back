@@ -110,8 +110,8 @@ public class OrderCheckoutOrchestrator(
                 throw new DomainException("No eligible ticket found for gold upgrade (ticket price is already less than or equal to standard price).");
 
             decimal priceDifference = ticketToUpgrade.PriceSnapshot - goldUpgradeQuote.BasePrice;
-            ticketToUpgrade.ApplyGoldUpgrade(goldUpgradeQuote.BasePrice);
             order.ApplyGoldDiscount(priceDifference);
+            ticketToUpgrade.ApplyGoldUpgrade(goldUpgradeQuote.BasePrice);
             await context.SaveChangesAsync(ct);
             logger.LogInformation("Applied Gold Upgrade to order {OrderId} for user {UserId}", orderId, userId);
         }

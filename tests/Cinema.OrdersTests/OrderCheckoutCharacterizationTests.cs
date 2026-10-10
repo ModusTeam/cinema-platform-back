@@ -328,6 +328,29 @@ public class OrderCheckoutCharacterizationTests
         fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task Gold_Upgrade_Invalid_Discount_Does_Not_Mutate_Ticket_Or_Order()
+    {
+        await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
+        fixture.Gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new GoldUpgradePricingQuote(true, -10m, 60m, fixture.Seat.Id.Value, 50m, -10m, null)));
+        fixture.Loyalty.UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>()).Returns((true, ""));
+
+        Func<Task> checkout = async () => await fixture.CheckoutAsync(gold: true);
+
+        await checkout.Should().ThrowAsync<DomainException>()
+            .WithMessage("Gold discount must be positive and cannot exceed the order total.");
+        fixture.Order.TotalAmount.Should().Be(50m);
+        fixture.Order.PaidAmount.Should().Be(50m);
+        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(50m);
+        fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
+        fixture.Context.ChangeTracker.Clear();
+        Order persisted = await fixture.Context.Orders.Include(o => o.Tickets)
+            .SingleAsync(o => o.Id == fixture.Order.Id, TestContext.Current.CancellationToken);
+        persisted.TotalAmount.Should().Be(50m);
+        persisted.Tickets.Single().PriceSnapshot.Should().Be(50m);
+    }
+
     [Theory]
     [InlineData(50, true)]
     [InlineData(30, false)]

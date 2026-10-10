@@ -155,6 +155,9 @@ public class Order : BaseEntity
 
     public void ApplyGoldDiscount(decimal priceDifference)
     {
+        if (priceDifference <= 0 || priceDifference > TotalAmount)
+            throw new DomainException("Gold discount must be positive and cannot exceed the order total.");
+
         TotalAmount -= priceDifference;
         
         if (PaidAmount > TotalAmount)
