@@ -33,7 +33,6 @@ public class OrderCheckoutOrchestrator(
         CancellationToken ct)
     {
         var order = await context.Orders
-            .Include(o => o.Tickets)
             .FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId) && o.UserId == userId, ct);
 
         if (order == null)
@@ -52,8 +51,12 @@ public class OrderCheckoutOrchestrator(
             return Result.Failure<Guid>(new Error("Order.InvalidState", "Cannot checkout a failed order."));
         }
 
+        List<Ticket> tickets = await context.Tickets
+            .Where(t => t.OrderId == order.Id)
+            .ToListAsync(ct);
+
         Guid trustedSessionId = order.SessionId.Value;
-        List<Guid> trustedSeatIds = order.Tickets.Select(t => t.SeatId.Value).ToList();
+        List<Guid> trustedSeatIds = tickets.Select(t => t.SeatId.Value).ToList();
 
         if (applyGoldUpgrade)
         {
@@ -70,7 +73,7 @@ public class OrderCheckoutOrchestrator(
 
             var goldUpgradeQuoteResult = await goldUpgradePricingService.CalculateAsync(
                 sessionWithPricing,
-                order.Tickets
+                tickets
                     .Where(t => !t.IsGoldUpgraded)
                     .Select(t => new GoldUpgradeTicketPrice(t.SeatId.Value, t.PriceSnapshot))
                     .ToList(),
@@ -98,7 +101,7 @@ public class OrderCheckoutOrchestrator(
                 return Result.Failure<Guid>(new Error("Order.GoldUpgradeFailed", $"Gold upgrade failed: {goldUpgradeResult.Error}"));
             }
 
-            Ticket? ticketToUpgrade = order.Tickets
+            Ticket? ticketToUpgrade = tickets
                 .Where(t => !t.IsGoldUpgraded)
                 .OrderByDescending(t => t.PriceSnapshot)
                 .FirstOrDefault();
@@ -280,7 +283,6 @@ public class OrderCheckoutOrchestrator(
         Guid sessionId, List<Guid> seatIds, int pointsUsed, CancellationToken ct)
     {
         var order = await context.Orders
-            .Include(o => o.Tickets)
             .FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), ct);
 
         if (order == null)
@@ -291,11 +293,13 @@ public class OrderCheckoutOrchestrator(
 
         order.MarkAsPaid(transactionId);
 
+        int ticketCount = await context.Tickets.CountAsync(t => t.OrderId == order.Id, ct);
+
         await publishEndpoint.Publish(new TicketPurchasedEvent(
             userId,
             orderId,
             order.TotalAmount,
-            order.Tickets.Count,
+            ticketCount,
             DateTime.UtcNow
         ), ct);
 
