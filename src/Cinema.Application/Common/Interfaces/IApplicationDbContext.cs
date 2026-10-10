@@ -3,6 +3,7 @@ using Cinema.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Cinema.Application.Common.Interfaces;
 
@@ -18,6 +19,7 @@ public interface IApplicationDbContext
     DbSet<Order> Orders { get; }
     DbSet<User> Users { get; }
     DbSet<Ticket> Tickets { get; }
+    ChangeTracker ChangeTracker { get; }
     DbSet<Pricing> Pricings { get; }
     DbSet<HallTechnology> HallTechnologies { get; } 
     DbSet<Technology> Technologies { get; }

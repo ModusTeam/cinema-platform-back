@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace Cinema.Application.Orders.EventHandlers;
 
 public class OrderCancelledEventHandler(
+    IApplicationDbContext context,
     ISeatLockingService seatLockingService,
     ITicketNotifier ticketNotifier,
     ILogger<OrderCancelledEventHandler> logger)
@@ -19,13 +20,14 @@ public class OrderCancelledEventHandler(
 
         logger.LogInformation("Domain Event: {DomainEvent} triggered for Order {OrderId}", domainEvent.GetType().Name, order.Id.Value);
 
-        if (order.Tickets != null && order.Tickets.Any())
+        var tickets = await OrderEventTickets.LoadAsync(context, order.Id, ct);
+        if (tickets.Count > 0)
         {
-            var seatIds = order.Tickets.Select(t => t.SeatId.Value).ToList();
+            var seatIds = tickets.Select(t => t.SeatId.Value).ToList();
             
             await seatLockingService.UnlockSeatsAsync(order.SessionId.Value, seatIds, order.UserId, ct);
 
-            foreach (var ticket in order.Tickets)
+            foreach (var ticket in tickets)
             {
                 try
                 {

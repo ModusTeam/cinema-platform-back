@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Cinema.Application.Orders.EventHandlers;
 
 public class OrderPaidEventHandler(
+    IApplicationDbContext context,
     ITicketNotifier ticketNotifier,
     ISeatLockingService seatLockingService,
     ILogger<OrderPaidEventHandler> logger)
@@ -22,8 +23,9 @@ public class OrderPaidEventHandler(
         logger.LogInformation("Event: Order {OrderId} paid. Starting background tasks.", order.Id.Value);
         
         var sessionId = order.SessionId.Value;
+        var tickets = await OrderEventTickets.LoadAsync(context, order.Id, cancellationToken);
 
-        foreach (var ticket in order.Tickets)
+        foreach (var ticket in tickets)
         {
             try
             {

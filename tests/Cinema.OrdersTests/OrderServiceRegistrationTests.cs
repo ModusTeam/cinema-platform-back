@@ -1,11 +1,15 @@
 using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Models.DomainEventNotification;
+using Cinema.Application.Orders.EventHandlers;
 using Cinema.Application.Orders.Services;
 using Cinema.Application.Services;
 using Cinema.Infrastructure;
 using Cinema.Orders.Application;
+using Cinema.Domain.Events;
 using FluentAssertions;
 using MassTransit;
+using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -40,6 +44,7 @@ public class OrderServiceRegistrationTests
         services.AddScoped(_ => Substitute.For<IPaymentService>());
         services.AddScoped(_ => Substitute.For<ILoyaltyService>());
         services.AddScoped(_ => Substitute.For<ISeatLockingService>());
+        services.AddScoped(_ => Substitute.For<ITicketNotifier>());
         services.AddScoped(_ => Substitute.For<IPublishEndpoint>());
 
         using ServiceProvider provider = services.BuildServiceProvider();
@@ -47,6 +52,12 @@ public class OrderServiceRegistrationTests
         scope.ServiceProvider.GetRequiredService<IOrderReservationService>().Should().BeOfType<OrderReservationService>();
         scope.ServiceProvider.GetRequiredService<IOrderCheckoutOrchestrator>().Should().BeOfType<OrderCheckoutOrchestrator>();
         scope.ServiceProvider.GetRequiredService<IGoldUpgradePricingService>().Should().BeOfType<GoldUpgradePricingService>();
+        scope.ServiceProvider.GetServices<INotificationHandler<DomainEventNotification<OrderPaidEvent>>>()
+            .Should().ContainSingle().Which.Should().BeOfType<OrderPaidEventHandler>();
+        scope.ServiceProvider.GetServices<INotificationHandler<DomainEventNotification<OrderFailedDomainEvent>>>()
+            .Should().ContainSingle().Which.Should().BeOfType<OrderFailedEventHandler>();
+        scope.ServiceProvider.GetServices<INotificationHandler<DomainEventNotification<OrderCancelledDomainEvent>>>()
+            .Should().ContainSingle().Which.Should().BeOfType<OrderCancelledEventHandler>();
     }
 
     private static void AssertRegistration<TService, TImplementation>(IServiceCollection services)

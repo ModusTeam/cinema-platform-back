@@ -25,7 +25,6 @@ public class CancelExpiredOrdersJob(
         while (hasMore)
         {
             var expiredOrdersBatch = await context.Orders
-                .Include(o => o.Tickets)
                 .Where(o => o.Status == OrderStatus.Pending && o.BookingDate < timeoutThreshold)
                 .Take(BatchSize)
                 .ToListAsync(ct);
@@ -36,13 +35,20 @@ public class CancelExpiredOrdersJob(
                 break;
             }
 
+            var orderIds = expiredOrdersBatch.Select(o => o.Id).ToList();
+            var ticketsByOrder = (await context.Tickets
+                    .Where(t => orderIds.Contains(t.OrderId))
+                    .ToListAsync(ct))
+                .GroupBy(t => t.OrderId)
+                .ToDictionary(group => group.Key, group => group.ToList());
+
             foreach (var order in expiredOrdersBatch)
             {
                 try
                 {
-                    if (order.Tickets != null)
+                    if (ticketsByOrder.TryGetValue(order.Id, out var tickets))
                     {
-                        foreach (var ticket in order.Tickets)
+                        foreach (var ticket in tickets)
                         {
                             await seatLockingService.UnlockSeatAsync(
                                 order.SessionId.Value, 
