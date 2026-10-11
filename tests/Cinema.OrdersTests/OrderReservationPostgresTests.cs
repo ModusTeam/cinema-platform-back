@@ -47,9 +47,8 @@ public class OrderReservationPostgresTests
     public async Task Ticket_Details_Use_Persisted_Order_Ownership_And_Preserve_Original_Dto()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
-        Order order = Order.Create(database.UserId, database.Session, [database.Seat],
+        Order order = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
-        database.Context.Orders.Add(order);
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
         Guid ticketId = order.Tickets.Single().Id.Value;
         new Microsoft.Extensions.DependencyInjection.ServiceCollection().AddApplication();
@@ -111,18 +110,18 @@ public class OrderReservationPostgresTests
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
         Seat secondSeat = await database.AddSeatAsync();
-        Order first = Order.Create(database.UserId, database.Session, [database.Seat, secondSeat],
+        Order first = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat, secondSeat],
             new() { [database.Seat.Id] = 50m, [secondSeat.Id] = 60m });
         Session foreignSession = Session.Create(EntityId<Session>.New(),
             database.Session.StartTime.AddDays(1), database.Session.StartTime.AddDays(1).AddHours(2),
             database.Session.MovieId, database.Session.HallId, database.Session.PricingId);
         Order second = Order.New(EntityId<Order>.New(), 20m, database.UserId, foreignSession.Id);
         User foreignUser = new() { Id = Guid.NewGuid(), UserName = $"foreign-{Guid.NewGuid():N}" };
-        Order foreign = Order.Create(foreignUser.Id, foreignSession, [secondSeat],
+        Order foreign = OrderTicketFixture.CreateAndTrack(database.Context, foreignUser.Id, foreignSession, [secondSeat],
             new() { [secondSeat.Id] = 70m });
         database.Context.Users.Add(foreignUser);
         database.Context.Sessions.Add(foreignSession);
-        database.Context.Orders.AddRange(first, second, foreign);
+        database.Context.Orders.Add(second);
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
         TypeAdapterConfig original = new();
         new TicketMappingConfig().Register(original);
@@ -235,10 +234,9 @@ public class OrderReservationPostgresTests
                 : Task.CompletedTask);
         await using ApplicationDbContext context = database.NewContext(publisher);
         handler = new(context, notifier, locks, NullLogger<OrderPaidEventHandler>.Instance);
-        Order order = Order.Create(database.UserId, database.Session, [database.Seat],
+        Order order = OrderTicketFixture.CreateAndTrack(context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
         order.MarkAsPaid("paid-on-insert");
-        context.Orders.Add(order);
 
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -596,9 +594,8 @@ public class OrderReservationPostgresTests
     public async Task Saving_Order_Tracks_Tickets_And_Database_Cascades_Their_Deletion()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
-        Order order = Order.Create(database.UserId, database.Session, [database.Seat],
+        Order order = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
-        database.Context.Orders.Add(order);
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await using ApplicationDbContext verify = database.NewContext();
@@ -621,9 +618,8 @@ public class OrderReservationPostgresTests
     public async Task Partial_Index_Rejects_Valid_Or_Used_Duplicate_But_Allows_Refunded_Tickets(TicketStatus existingStatus)
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
-        Order first = Order.Create(database.UserId, database.Session, [database.Seat],
+        Order first = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
-        database.Context.Orders.Add(first);
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
         Ticket original = first.Tickets.Single();
         if (existingStatus == TicketStatus.Used)
@@ -634,9 +630,8 @@ public class OrderReservationPostgresTests
 
         await using (ApplicationDbContext duplicateContext = database.NewContext())
         {
-            Order duplicate = Order.Create(database.UserId, database.Session, [database.Seat],
+            Order duplicate = OrderTicketFixture.CreateAndTrack(duplicateContext, database.UserId, database.Session, [database.Seat],
                 new() { [database.Seat.Id] = 50m });
-            duplicateContext.Orders.Add(duplicate);
             Func<Task> saveDuplicate = () => duplicateContext.SaveChangesAsync(TestContext.Current.CancellationToken);
             DbUpdateException failure = (await saveDuplicate.Should().ThrowAsync<DbUpdateException>()).Which;
             failure.InnerException.Should().BeOfType<PostgresException>()
@@ -644,13 +639,12 @@ public class OrderReservationPostgresTests
         }
 
         // Refunded tickets are outside the partial index, including multiple tickets for one seat.
-        Order refundedOne = Order.Create(database.UserId, database.Session, [database.Seat],
+        Order refundedOne = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
         refundedOne.Tickets.Single().MarkAsRefunded();
-        Order refundedTwo = Order.Create(database.UserId, database.Session, [database.Seat],
+        Order refundedTwo = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
         refundedTwo.Tickets.Single().MarkAsRefunded();
-        database.Context.Orders.AddRange(refundedOne, refundedTwo);
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(3);
@@ -662,9 +656,8 @@ public class OrderReservationPostgresTests
     public async Task Ticket_Query_Filter_Hides_Tickets_In_Inactive_Halls()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
-        Order order = Order.Create(database.UserId, database.Session, [database.Seat],
+        Order order = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
-        database.Context.Orders.Add(order);
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
         (await database.Context.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
 

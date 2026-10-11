@@ -132,12 +132,11 @@ public class TicketDetailsTests
         DateTime start = DateTime.UtcNow.AddDays(2);
         Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
             movie.Id, hall.Id, EntityId<Pricing>.New());
-        Order order = Order.Create(ownerId, session, [seat], new() { [seat.Id] = 35m });
+        Order order = OrderTicketFixture.CreateAndTrack(context, ownerId, session, [seat], new() { [seat.Id] = 35m });
         context.Halls.Add(hall);
         context.Movies.Add(movie);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
-        context.Orders.Add(order);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         return (databaseName, order.Tickets.Single().Id.Value, ownerId, start);
     }

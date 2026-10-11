@@ -477,12 +477,11 @@ public class OrderCheckoutCharacterizationTests
             Dictionary<EntityId<Seat>, decimal> seatPrices = fixture.Seats
                 .Select((seat, index) => (seat, price: prices[index]))
                 .ToDictionary(item => item.seat.Id, item => item.price);
-            fixture.Order = Order.Create(fixture.UserId, fixture.Session, fixture.Seats, seatPrices);
+            fixture.Order = OrderTicketFixture.CreateAndTrack(fixture.Context, fixture.UserId, fixture.Session, fixture.Seats, seatPrices);
             fixture.Context.Halls.Add(hall);
             fixture.Context.SeatTypes.Add(seatType);
             fixture.Context.Pricings.Add(pricing);
             fixture.Context.Sessions.Add(fixture.Session);
-            fixture.Context.Orders.Add(fixture.Order);
             await fixture.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
             return fixture;
         }

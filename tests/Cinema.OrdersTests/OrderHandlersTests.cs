@@ -183,14 +183,13 @@ public class OrderHandlersTests
         hall.ApplyLayout([seat]);
         Session session = Session.Create(EntityId<Session>.New(), DateTime.UtcNow.AddDays(1),
             DateTime.UtcNow.AddDays(1).AddHours(2), EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
-        Order order = Order.Create(Guid.NewGuid(), session, [seat], new Dictionary<EntityId<Seat>, decimal>
+        Order order = OrderTicketFixture.CreateAndTrack(context, Guid.NewGuid(), session, [seat], new Dictionary<EntityId<Seat>, decimal>
         {
             [seat.Id] = 25m
         });
         context.Halls.Add(hall);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
-        context.Orders.Add(order);
         await context.SaveChangesAsync(CancellationToken.None);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.IsInRole("Admin").Returns(true);
@@ -218,14 +217,14 @@ public class OrderHandlersTests
         SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
         Seat seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
         hall.ApplyLayout([seat]);
-        Order active = Order.Create(userId, session, [seat], new() { [seat.Id] = 20m });
+        Order active = OrderTicketFixture.CreateAndTrack(context, userId, session, [seat], new() { [seat.Id] = 20m });
         Order cancelled = Order.New(EntityId<Order>.New(), 30m, userId, session.Id);
         cancelled.MarkAsCancelled();
         context.Halls.Add(hall);
         context.Movies.Add(movie);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
-        context.Orders.AddRange(active, cancelled);
+        context.Orders.Add(cancelled);
         await context.SaveChangesAsync(CancellationToken.None);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(userId);
@@ -302,22 +301,22 @@ public class OrderHandlersTests
         DateTime pastStart = DateTime.UtcNow.AddDays(-2);
         Session pastSession = Session.Create(EntityId<Session>.New(), start.AddDays(2), start.AddDays(2).AddHours(2),
             movie.Id, hall.Id, EntityId<Pricing>.New());
-        Order first = Order.Create(userId, earlier, [firstSeat, secondSeat],
+        Order first = OrderTicketFixture.CreateAndTrack(seed, userId, earlier, [firstSeat, secondSeat],
             new() { [firstSeat.Id] = 25m, [secondSeat.Id] = 35m });
         first.ApplyLoyaltyDiscount(10);
-        Order second = Order.Create(userId, later, [firstSeat], new() { [firstSeat.Id] = 40m });
+        Order second = OrderTicketFixture.CreateAndTrack(seed, userId, later, [firstSeat], new() { [firstSeat.Id] = 40m });
         Order cancelled = Order.New(EntityId<Order>.New(), 15m, userId, earlier.Id);
         cancelled.MarkAsCancelled();
         Order failed = Order.New(EntityId<Order>.New(), 16m, userId, later.Id);
         failed.MarkAsFailed();
         Order historical = Order.New(EntityId<Order>.New(), 17m, userId, pastSession.Id);
-        Order foreign = Order.Create(otherUserId, earlier, [firstSeat], new() { [firstSeat.Id] = 99m });
+        Order foreign = OrderTicketFixture.CreateAndTrack(seed, otherUserId, earlier, [firstSeat], new() { [firstSeat.Id] = 99m });
         seed.Halls.Add(hall);
         seed.Movies.Add(movie);
         seed.SeatTypes.Add(seatType);
         seed.Sessions.AddRange(earlier, later, pastSession);
         seed.Entry(pastSession).Property(session => session.StartTime).CurrentValue = pastStart;
-        seed.Orders.AddRange(first, second, cancelled, failed, historical, foreign);
+        seed.Orders.AddRange(cancelled, failed, historical);
         await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
         Microsoft.Extensions.DependencyInjection.ServiceCollection services = new();
         services.AddApplication();
@@ -381,12 +380,11 @@ public class OrderHandlersTests
         DateTime start = DateTime.UtcNow.AddDays(2);
         Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
             movie.Id, hall.Id, EntityId<Pricing>.New());
-        Order order = Order.Create(ownerId, session, [seat], new() { [seat.Id] = 35m });
+        Order order = OrderTicketFixture.CreateAndTrack(context, ownerId, session, [seat], new() { [seat.Id] = 35m });
         context.Halls.Add(hall);
         context.Movies.Add(movie);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
-        context.Orders.Add(order);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         Microsoft.Extensions.DependencyInjection.ServiceCollection services = new();
         services.AddApplication();
@@ -419,11 +417,10 @@ public class OrderHandlersTests
         DateTime start = DateTime.UtcNow.AddDays(2);
         Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
             EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
-        Order order = Order.Create(Guid.NewGuid(), session, [seat], new() { [seat.Id] = 25m });
+        Order order = OrderTicketFixture.CreateAndTrack(context, Guid.NewGuid(), session, [seat], new() { [seat.Id] = 25m });
         context.Halls.Add(hall);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
-        context.Orders.Add(order);
         context.Entry(order).Property(x => x.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         ISeatLockingService locks = Substitute.For<ISeatLockingService>();
@@ -450,13 +447,12 @@ public class OrderHandlersTests
         DateTime start = DateTime.UtcNow.AddMinutes(minutesUntilStart);
         Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
             EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
-        Order order = Order.Create(userId, session, [seat], new() { [seat.Id] = 25m });
+        Order order = OrderTicketFixture.CreateAndTrack(context, userId, session, [seat], new() { [seat.Id] = 25m });
         if (paid) order.MarkAsPaid("transaction-1");
         if (used) order.Tickets.Single().MarkAsUsed();
         context.Halls.Add(hall);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
-        context.Orders.Add(order);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         return (order.Id.Value, userId, seat.Id.Value);
     }
