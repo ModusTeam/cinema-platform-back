@@ -43,36 +43,14 @@ src/Host/Cinema.Api/       # Controllers, Middleware, SignalR Hubs, Entry Point
 ├── Middleware/           # RequestLogContextMiddleware
 └── Services/             # CurrentUserService, SignalRTicketNotifier, TicketNotificationWorker
 
-src/Cinema.Application/    # Business Logic, CQRS Handlers, DTOs, Validators
-├── Account/              # Profile & password commands/queries
-├── Achievements/         # Achievements logic & queries
-├── Auth/                 # Login, Register, RefreshToken
-├── Genres/               # Genre CRUD
-├── Halls/                # Hall CRUD + technologies management
-├── Loyalty/              # Loyalty system integration and rules
-├── Movies/               # Movie CRUD + TMDB import + AI embeddings
-├── Orders/               # CreateOrder, CancelOrder, GetMyOrders, ValidateTicket
-│   ├── EventHandlers/    # OrderPaidIntegrationEventHandler (publishes to RabbitMQ)
-│   └── Services/         # OrderCheckoutOrchestrator for complex checkout sagas
-├── Pricings/             # Pricing CRUD + price calculation
-├── Seats/                # Seat types, locking logic
-├── Sessions/             # Session scheduling, reschedule, cancel
-├── Stats/                # Dashboard KPIs and analytics
-├── Technologies/         # Hall technologies (IMAX, 3D, Dolby Atmos)
-├── Users/                # Role management
-├── Jobs/                 # CancelExpiredOrdersJob (Hangfire recurring job)
-└── Common/
-    ├── Behaviours/       # ValidationBehavior, IdempotencyBehavior
-    ├── Contracts/        # TicketPurchasedMessage (message contract)
-    ├── Interfaces/       # IPaymentService, IPriceCalculator, ITicketNotifier, IEmailService, etc.
-    └── Mappings/         # Mapster configuration
-
-src/Cinema.Domain/          # Core: Entities, Value Objects, Enums, Events
-├── Entities/             # Movie, Hall, Session, Seat, Order, Ticket, Genre, Pricing, etc.
-├── Enums/                # MovieStatus, SeatStatus, SessionStatus, OrderStatus, TicketStatus
-├── Events/               # OrderPaidEvent (domain events)
-└── Shared/               # Result<T>, Error, EntityId<T>
-
+src/BuildingBlocks/Cinema.SharedKernel/  # EntityId<T>, BaseEntity, Result, domain primitives
+src/Modules/Catalog/                # Catalog Domain, Application, Infrastructure
+src/Modules/Scheduling/             # Scheduling Domain, Application, Infrastructure
+src/Modules/Booking/                # Redis seat locks: Application, Infrastructure
+src/Modules/Orders/                 # Order domain and application workflows
+src/Modules/Tickets/                # Ticket domain
+src/Cinema.Domain/                  # Transitional domain: User, RefreshToken, SeatLock, etc.
+src/Cinema.Application/             # Transitional application features and shared interfaces
 src/Cinema.Infrastructure/ # Data, Caching, External APIs, Identity, Messaging
 ├── Persistence/
 │   ├── Configurations/   # EF Core entity configurations
@@ -84,6 +62,12 @@ src/Cinema.Infrastructure/ # Data, Caching, External APIs, Identity, Messaging
 ```
 
 ---
+
+### Current module dependencies
+
+`Catalog.Domain → SharedKernel`; `Scheduling.Domain → Catalog.Domain, SharedKernel`; `Orders.Domain → Scheduling.Domain, SharedKernel`; `Tickets.Domain → Orders.Domain, Scheduling.Domain, SharedKernel`. Tickets uses `EntityId<Order>` for its order foreign key, so the dependency points only from Tickets to Orders. The extracted domain assemblies do not depend on legacy Cinema.Domain or higher layers.
+
+Order, Ticket, their statuses, and order events keep their existing CLR namespaces, but now live in the Orders and Tickets domain assemblies. The shared `ApplicationDbContext`, EF configurations, and migrations remain in Cinema.Infrastructure to preserve the existing model and schema. Legacy application interfaces and ticket features remain transitional; see the [Orders](src/Modules/Orders/README.md) and [Tickets](src/Modules/Tickets/README.md) module notes. Persisted assembly-qualified type names may need migration or compatibility handling in external serialized jobs or consumers.
 
 ## 🚀 Getting Started
 

@@ -36,64 +36,67 @@ public class DependencyRules
         .Build();
 
     [Fact]
-    public void Orders_And_Tickets_Domains_Own_Their_Types()
+    public void Orders_And_Tickets_Domains_Have_Exactly_One_Owner_For_Each_Extracted_Type()
     {
-        Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Entities.Order).Assembly);
-        Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Enums.OrderStatus).Assembly);
-        Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Events.OrderPaidEvent).Assembly);
-        Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Events.OrderFailedDomainEvent).Assembly);
-        Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Events.OrderCancelledDomainEvent).Assembly);
-        Assert.Equal(TicketsDomainAssembly, typeof(Cinema.Domain.Entities.Ticket).Assembly);
-        Assert.Equal(TicketsDomainAssembly, typeof(Cinema.Domain.Enums.TicketStatus).Assembly);
+        Assembly[] projectAssemblies =
+        [
+            DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly,
+            CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
+            SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
+            BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly,
+            TicketsDomainAssembly, OrdersApplicationAssembly, Assembly.Load("Cinema.SharedKernel")
+        ];
+
+        (System.Type Type, Assembly Owner)[] extractedTypes =
+        [
+            (typeof(Cinema.Domain.Entities.Order), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Enums.OrderStatus), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Events.OrderPaidEvent), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Events.OrderFailedDomainEvent), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Events.OrderCancelledDomainEvent), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Entities.Ticket), TicketsDomainAssembly),
+            (typeof(Cinema.Domain.Enums.TicketStatus), TicketsDomainAssembly)
+        ];
+
+        foreach ((System.Type type, Assembly owner) in extractedTypes)
+        {
+            Assert.Equal(owner, type.Assembly);
+            Assert.Equal([owner], projectAssemblies.Where(assembly => assembly.GetType(type.FullName!) is not null));
+        }
     }
 
     [Fact]
-    public void Orders_Domain_Should_Reference_Only_SharedKernel_And_Scheduling_Among_Project_Assemblies()
+    public void Extracted_Domains_Have_Only_Allowed_Project_Dependencies()
     {
-        string[] projectReferences = OrdersDomainAssembly.GetReferencedAssemblies()
-            .Select(assembly => assembly.Name!)
+        string[] ordersDependencies = ["Cinema.Scheduling.Domain", "Cinema.SharedKernel"];
+        string[] ticketsDependencies = ["Cinema.Orders.Domain", "Cinema.Scheduling.Domain", "Cinema.SharedKernel"];
+
+        Assert.Equal(ordersDependencies, GetProjectReferences(OrdersDomainAssembly));
+        Assert.Equal(ticketsDependencies, GetProjectReferences(TicketsDomainAssembly));
+        Assert.Equal(ordersDependencies, GetCompiledProjectReferences(OrdersDomainAssembly));
+        Assert.Equal(ticketsDependencies, GetCompiledProjectReferences(TicketsDomainAssembly));
+    }
+
+    private static string[] GetCompiledProjectReferences(Assembly assembly) =>
+        assembly.GetReferencedAssemblies()
+            .Select(reference => reference.Name!)
             .Where(name => name.StartsWith("Cinema.", StringComparison.Ordinal))
             .OrderBy(name => name)
             .ToArray();
 
-        Assert.Equal(["Cinema.Scheduling.Domain", "Cinema.SharedKernel"], projectReferences);
-    }
-
-    [Fact]
-    public void Orders_Domain_Should_Not_Depend_On_Legacy_Or_Higher_Layers()
+    private static string[] GetProjectReferences(Assembly assembly)
     {
-        IArchRule rule = Types().That().ResideInAssembly(OrdersDomainAssembly).Should().NotDependOnAny(
-            Types().That().ResideInAssembly(DomainAssembly)
-                .Or().ResideInAssembly(ApplicationAssembly)
-                .Or().ResideInAssembly(InfrastructureAssembly)
-                .Or().ResideInAssembly(OrdersApplicationAssembly)
-                .Or().ResideInAssembly(TicketsDomainAssembly)
-                .Or().ResideInAssembly(ApiAssembly));
-        rule.Check(Architecture);
-    }
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Cinema.sln")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
 
-    [Fact]
-    public void Tickets_Domain_Should_Reference_Only_Orders_Scheduling_And_SharedKernel_Among_Project_Assemblies()
-    {
-        string[] projectReferences = TicketsDomainAssembly.GetReferencedAssemblies()
-            .Select(assembly => assembly.Name!)
-            .Where(name => name.StartsWith("Cinema.", StringComparison.Ordinal))
+        string project = Directory.GetFiles(Path.Combine(directory.FullName, "src"),
+                $"{assembly.GetName().Name}.csproj", SearchOption.AllDirectories).Single();
+        return XDocument.Load(project).Descendants("ProjectReference")
+            .Select(reference => Path.GetFileNameWithoutExtension(reference.Attribute("Include")!.Value.Replace('\\', '/')))
             .OrderBy(name => name)
             .ToArray();
-
-        Assert.Equal(["Cinema.Orders.Domain", "Cinema.Scheduling.Domain", "Cinema.SharedKernel"], projectReferences);
-    }
-
-    [Fact]
-    public void Tickets_Domain_Should_Not_Depend_On_Legacy_Or_Higher_Layers()
-    {
-        IArchRule rule = Types().That().ResideInAssembly(TicketsDomainAssembly).Should().NotDependOnAny(
-            Types().That().ResideInAssembly(DomainAssembly)
-                .Or().ResideInAssembly(ApplicationAssembly)
-                .Or().ResideInAssembly(InfrastructureAssembly)
-                .Or().ResideInAssembly(OrdersApplicationAssembly)
-                .Or().ResideInAssembly(ApiAssembly));
-        rule.Check(Architecture);
     }
 
     [Fact]
