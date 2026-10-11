@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Host\Cinema.Api\Cinema.Api.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Tickets\Cinema.Tickets.Domain\Cinema.Tickets.Domain.csproj" />
     <ProjectReference Include="..\..\src\Cinema.Application\Cinema.Application.csproj" />
     <ProjectReference Include="..\..\src\Cinema.Domain\Cinema.Domain.csproj" />
     <ProjectReference Include="..\..\src\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />

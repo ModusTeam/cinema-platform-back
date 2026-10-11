@@ -15,6 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Tickets\Cinema.Tickets.Domain\Cinema.Tickets.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Orders\Cinema.Orders.Application\Cinema.Orders.Application.csproj" />
   </ItemGroup>
 </Project>

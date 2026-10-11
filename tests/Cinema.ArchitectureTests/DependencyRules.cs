@@ -24,26 +24,27 @@ public class DependencyRules
     private static readonly Assembly BookingApplicationAssembly = Assembly.Load("Cinema.Booking.Application");
     private static readonly Assembly BookingInfrastructureAssembly = Assembly.Load("Cinema.Booking.Infrastructure");
     private static readonly Assembly OrdersDomainAssembly = Assembly.Load("Cinema.Orders.Domain");
+    private static readonly Assembly TicketsDomainAssembly = Assembly.Load("Cinema.Tickets.Domain");
     private static readonly Assembly OrdersApplicationAssembly = Assembly.Load("Cinema.Orders.Application");
 
     private static readonly Architecture Architecture = new ArchLoader()
         .LoadAssemblies(DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly,
             CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
             SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
-            BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly,
+            BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly, TicketsDomainAssembly,
             OrdersApplicationAssembly)
         .Build();
 
     [Fact]
-    public void Orders_Domain_Owns_Order_Status_And_Events_While_Ticket_Remains_Legacy()
+    public void Orders_And_Tickets_Domains_Own_Their_Types()
     {
         Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Entities.Order).Assembly);
         Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Enums.OrderStatus).Assembly);
         Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Events.OrderPaidEvent).Assembly);
         Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Events.OrderFailedDomainEvent).Assembly);
         Assert.Equal(OrdersDomainAssembly, typeof(Cinema.Domain.Events.OrderCancelledDomainEvent).Assembly);
-        Assert.Equal(DomainAssembly, typeof(Cinema.Domain.Entities.Ticket).Assembly);
-        Assert.Equal(DomainAssembly, typeof(Cinema.Domain.Enums.TicketStatus).Assembly);
+        Assert.Equal(TicketsDomainAssembly, typeof(Cinema.Domain.Entities.Ticket).Assembly);
+        Assert.Equal(TicketsDomainAssembly, typeof(Cinema.Domain.Enums.TicketStatus).Assembly);
     }
 
     [Fact]
@@ -62,6 +63,31 @@ public class DependencyRules
     public void Orders_Domain_Should_Not_Depend_On_Legacy_Or_Higher_Layers()
     {
         IArchRule rule = Types().That().ResideInAssembly(OrdersDomainAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(DomainAssembly)
+                .Or().ResideInAssembly(ApplicationAssembly)
+                .Or().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(OrdersApplicationAssembly)
+                .Or().ResideInAssembly(TicketsDomainAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Tickets_Domain_Should_Reference_Only_Orders_Scheduling_And_SharedKernel_Among_Project_Assemblies()
+    {
+        string[] projectReferences = TicketsDomainAssembly.GetReferencedAssemblies()
+            .Select(assembly => assembly.Name!)
+            .Where(name => name.StartsWith("Cinema.", StringComparison.Ordinal))
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(["Cinema.Orders.Domain", "Cinema.Scheduling.Domain", "Cinema.SharedKernel"], projectReferences);
+    }
+
+    [Fact]
+    public void Tickets_Domain_Should_Not_Depend_On_Legacy_Or_Higher_Layers()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(TicketsDomainAssembly).Should().NotDependOnAny(
             Types().That().ResideInAssembly(DomainAssembly)
                 .Or().ResideInAssembly(ApplicationAssembly)
                 .Or().ResideInAssembly(InfrastructureAssembly)

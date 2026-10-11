@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cinema.Scheduling.Domain\Cinema.Scheduling.Domain.csproj" />
+    <ProjectReference Include="..\..\Tickets\Cinema.Tickets.Domain\Cinema.Tickets.Domain.csproj" />
     <ProjectReference Include="..\..\..\Cinema.Application\Cinema.Application.csproj" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
     <PackageReference Include="Mapster" />
