@@ -194,7 +194,7 @@ public class OrderEventTicketAccessTests
         await context.SaveChangesAsync(CancellationToken.None);
         context.ClearChangeTracker();
         Order unloaded = await context.Orders.SingleAsync(o => o.Id == order.Id);
-        unloaded.Tickets.Should().BeEmpty();
+        context.ChangeTracker.Entries<Ticket>().Should().BeEmpty();
         return (unloaded, tickets, unrelated);
     }
 

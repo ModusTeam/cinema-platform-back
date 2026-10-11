@@ -11,7 +11,6 @@ public class Ticket
     public TicketStatus TicketStatus { get; private set; }
 
     public EntityId<Order> OrderId { get; private set; }
-    public Order? Order { get; private set; }
 
     public EntityId<Session> SessionId { get; private set; }
     public Session? Session { get; private set; }

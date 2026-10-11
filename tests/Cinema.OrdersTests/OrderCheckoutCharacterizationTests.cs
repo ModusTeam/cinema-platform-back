@@ -119,7 +119,7 @@ public class OrderCheckoutCharacterizationTests
         result.Error.Code.Should().Be("Payment.Failed");
         result.Error.Description.Should().Be(providerThrows ? "Payment system error" : "declined");
         fixture.Order.Status.Should().Be(OrderStatus.Failed);
-        fixture.Order.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid); // Existing sold-seat state.
+        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid); // Existing sold-seat state.
         await fixture.Locks.DidNotReceiveWithAnyArgs().UnlockSeatsAsync(default, default!, default, TestContext.Current.CancellationToken);
         await fixture.Publisher.DidNotReceiveWithAnyArgs().Publish(Arg.Any<TicketPurchasedEvent>(), TestContext.Current.CancellationToken);
     }
@@ -129,7 +129,7 @@ public class OrderCheckoutCharacterizationTests
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         fixture.Order.Status.Should().Be(OrderStatus.Pending);
-        fixture.Order.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
+        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
     }
 
     [Fact]
@@ -227,8 +227,8 @@ public class OrderCheckoutCharacterizationTests
         result.IsSuccess.Should().BeTrue();
         fixture.Order.TotalAmount.Should().Be(30m);
         fixture.Order.PaidAmount.Should().Be(30m);
-        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(30m);
-        fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
+        fixture.Tickets.Single().PriceSnapshot.Should().Be(30m);
+        fixture.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
         await fixture.Payment.Received(1).ProcessPaymentAsync(30m, "UAH", "token", Arg.Any<CancellationToken>());
         await fixture.Gold.Received(1).CalculateAsync(Arg.Is<Session>(s => s.Id == fixture.Session.Id),
             Arg.Is<IReadOnlyCollection<GoldUpgradeTicketPrice>>(t => t.Count == 1 && t.Single().SeatId == fixture.Seat.Id.Value),
@@ -249,9 +249,9 @@ public class OrderCheckoutCharacterizationTests
         Result<Guid> result = await fixture.CheckoutAsync(gold: true);
 
         result.IsSuccess.Should().BeTrue();
-        fixture.Order.Tickets.Single(t => t.SeatId == highestSeat.Id).PriceSnapshot.Should().Be(30m);
-        fixture.Order.Tickets.Single(t => t.SeatId == highestSeat.Id).IsGoldUpgraded.Should().BeTrue();
-        fixture.Order.Tickets.Single(t => t.SeatId == fixture.Seat.Id).PriceSnapshot.Should().Be(40m);
+        fixture.Tickets.Single(t => t.SeatId == highestSeat.Id).PriceSnapshot.Should().Be(30m);
+        fixture.Tickets.Single(t => t.SeatId == highestSeat.Id).IsGoldUpgraded.Should().BeTrue();
+        fixture.Tickets.Single(t => t.SeatId == fixture.Seat.Id).PriceSnapshot.Should().Be(40m);
         fixture.Order.TotalAmount.Should().Be(70m);
         fixture.Order.PaidAmount.Should().Be(70m);
         await fixture.Payment.Received(1).ProcessPaymentAsync(70m, "UAH", "token", Arg.Any<CancellationToken>());
@@ -276,7 +276,7 @@ public class OrderCheckoutCharacterizationTests
         result.IsSuccess.Should().BeTrue();
         fixture.Order.TotalAmount.Should().Be(30m);
         fixture.Order.PaidAmount.Should().Be(20m);
-        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(30m);
+        fixture.Tickets.Single().PriceSnapshot.Should().Be(30m);
         await fixture.Loyalty.Received(1).CalculateDiscountAsync(fixture.UserId, 30m, Arg.Any<CancellationToken>());
         await fixture.Payment.Received(1).ProcessPaymentAsync(20m, "UAH", "token", Arg.Any<CancellationToken>());
     }
@@ -285,8 +285,8 @@ public class OrderCheckoutCharacterizationTests
     public async Task Gold_Upgrade_Uses_First_Equal_Priced_Ticket_And_Can_Upgrade_Another_Later()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync(loyaltyAllowed: false, ticketPrices: [50m, 50m]);
-        Ticket firstTicket = fixture.Order.Tickets.First();
-        Ticket otherTicket = fixture.Order.Tickets.Single(t => t.Id != firstTicket.Id);
+        Ticket firstTicket = fixture.Tickets.First();
+        Ticket otherTicket = fixture.Tickets.Single(t => t.Id != firstTicket.Id);
         fixture.Gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
             .Returns(Result.Success(new GoldUpgradePricingQuote(true, 30m, 20m, otherTicket.SeatId.Value, 50m, 30m, null)));
         fixture.Loyalty.UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>()).Returns((true, ""));
@@ -325,7 +325,7 @@ public class OrderCheckoutCharacterizationTests
         await checkout.Should().ThrowAsync<DomainException>()
             .WithMessage("No eligible ticket found for gold upgrade*");
         fixture.Order.TotalAmount.Should().Be(30m);
-        fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
+        fixture.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
     }
 
     [Fact]
@@ -342,13 +342,13 @@ public class OrderCheckoutCharacterizationTests
             .WithMessage("Gold discount must be positive and cannot exceed the order total.");
         fixture.Order.TotalAmount.Should().Be(50m);
         fixture.Order.PaidAmount.Should().Be(50m);
-        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(50m);
-        fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
+        fixture.Tickets.Single().PriceSnapshot.Should().Be(50m);
+        fixture.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
         fixture.Context.ChangeTracker.Clear();
-        Order persisted = await fixture.Context.Orders.Include(o => o.Tickets)
+        Order persisted = await fixture.Context.Orders
             .SingleAsync(o => o.Id == fixture.Order.Id, TestContext.Current.CancellationToken);
         persisted.TotalAmount.Should().Be(50m);
-        persisted.Tickets.Single().PriceSnapshot.Should().Be(50m);
+        (await fixture.Context.Tickets.SingleAsync(t => t.OrderId == persisted.Id, TestContext.Current.CancellationToken)).PriceSnapshot.Should().Be(50m);
     }
 
     [Theory]
@@ -426,16 +426,16 @@ public class OrderCheckoutCharacterizationTests
         fixture.Order.Status.Should().Be(OrderStatus.Failed);
         fixture.Order.TotalAmount.Should().Be(30m);
         fixture.Order.PaidAmount.Should().Be(30m);
-        fixture.Order.Tickets.Single().PriceSnapshot.Should().Be(30m);
-        fixture.Order.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
+        fixture.Tickets.Single().PriceSnapshot.Should().Be(30m);
+        fixture.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
         await fixture.Loyalty.Received(1).RollbackGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());
         fixture.Context.ChangeTracker.Clear();
-        Order persisted = await fixture.Context.Orders.Include(o => o.Tickets)
+        Order persisted = await fixture.Context.Orders
             .SingleAsync(o => o.Id == fixture.Order.Id, TestContext.Current.CancellationToken);
         persisted.TotalAmount.Should().Be(30m);
         persisted.PaidAmount.Should().Be(30m);
-        persisted.Tickets.Single().PriceSnapshot.Should().Be(30m);
-        persisted.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
+        (await fixture.Context.Tickets.SingleAsync(t => t.OrderId == persisted.Id, TestContext.Current.CancellationToken)).PriceSnapshot.Should().Be(30m);
+        (await fixture.Context.Tickets.SingleAsync(t => t.OrderId == persisted.Id, TestContext.Current.CancellationToken)).IsGoldUpgraded.Should().BeTrue();
     }
 
     private sealed class CheckoutFixture : IAsyncDisposable
@@ -446,6 +446,7 @@ public class OrderCheckoutCharacterizationTests
         public Seat Seat { get; private set; } = null!;
         public List<Seat> Seats { get; } = [];
         public Order Order { get; private set; } = null!;
+        public List<Ticket> Tickets => Context.Tickets.Where(t => t.OrderId == Order.Id).ToList();
         public IPaymentService Payment { get; } = Substitute.For<IPaymentService>();
         public ILoyaltyService Loyalty { get; } = Substitute.For<ILoyaltyService>();
         public ISeatLockingService Locks { get; } = Substitute.For<ISeatLockingService>();

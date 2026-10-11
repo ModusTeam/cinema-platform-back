@@ -138,7 +138,7 @@ public class TicketDetailsTests
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
-        return (databaseName, order.Tickets.Single().Id.Value, ownerId, start);
+        return (databaseName, (await OrderTicketFixture.ForOrder(context, order).SingleAsync(TestContext.Current.CancellationToken)).Id.Value, ownerId, start);
     }
 
     private static ApplicationDbContext CreateContext(string databaseName)

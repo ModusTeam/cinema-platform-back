@@ -28,13 +28,13 @@ public class RecommendationTicketAccessPostgresTests
         Guid userId = Guid.NewGuid();
         string oldVectors = context.Orders.AsNoTracking()
             .Where(o => o.UserId == userId && o.Status == OrderStatus.Paid)
-            .SelectMany(o => o.Tickets).Select(t => t.Session!.Movie!)
+            .Join(context.Tickets, o => o.Id, t => t.OrderId, (_, t) => t).Select(t => t.Session!.Movie!)
             .Where(m => m.Embedding != null).Select(m => m.Embedding!).ToQueryString();
         string newVectors = context.Tickets.AsNoTracking()
             .Where(t => context.Orders.Any(o => o.Id == t.OrderId && o.UserId == userId && o.Status == OrderStatus.Paid))
             .Select(t => t.Session!.Movie!).Where(m => m.Embedding != null).Select(m => m.Embedding!).ToQueryString();
         string oldWatched = context.Orders.Where(o => o.UserId == userId)
-            .SelectMany(o => o.Tickets).Select(t => t.Session!.MovieId).Distinct().ToQueryString();
+            .Join(context.Tickets, o => o.Id, t => t.OrderId, (_, t) => t).Select(t => t.Session!.MovieId).Distinct().ToQueryString();
         string newWatched = context.Tickets.Where(t => context.Orders.Any(o => o.Id == t.OrderId && o.UserId == userId))
             .Select(t => t.Session!.MovieId).Distinct().ToQueryString();
 
@@ -86,7 +86,7 @@ public class RecommendationTicketAccessPostgresTests
     }
 
     [Fact]
-    public async Task Ticket_Queries_Match_Navigation_Queries_And_Preserve_Recommendations()
+    public async Task Ticket_Queries_Match_Order_Joins_And_Preserve_Recommendations()
     {
         await using RecommendationDatabase database = await RecommendationDatabase.CreateAsync();
         Movie paidA = database.AddMovie("Paid A", [1f, 0f]);
@@ -111,13 +111,13 @@ public class RecommendationTicketAccessPostgresTests
         await using ApplicationDbContext comparison = database.NewContext();
         IQueryable<Vector> oldVectors = comparison.Orders.AsNoTracking()
             .Where(o => o.UserId == database.UserId && o.Status == OrderStatus.Paid)
-            .SelectMany(o => o.Tickets).Select(t => t.Session!.Movie!)
+            .Join(comparison.Tickets, o => o.Id, t => t.OrderId, (_, t) => t).Select(t => t.Session!.Movie!)
             .Where(m => m.Embedding != null).Select(m => m.Embedding!);
         IQueryable<Vector> newVectors = comparison.Tickets.AsNoTracking()
             .Where(t => comparison.Orders.Any(o => o.Id == t.OrderId && o.UserId == database.UserId && o.Status == OrderStatus.Paid))
             .Select(t => t.Session!.Movie!).Where(m => m.Embedding != null).Select(m => m.Embedding!);
         IQueryable<EntityId<Movie>> oldWatched = comparison.Orders.Where(o => o.UserId == database.UserId)
-            .SelectMany(o => o.Tickets).Select(t => t.Session!.MovieId).Distinct();
+            .Join(comparison.Tickets, o => o.Id, t => t.OrderId, (_, t) => t).Select(t => t.Session!.MovieId).Distinct();
         IQueryable<EntityId<Movie>> newWatched = comparison.Tickets
             .Where(t => comparison.Orders.Any(o => o.Id == t.OrderId && o.UserId == database.UserId))
             .Select(t => t.Session!.MovieId).Distinct();

@@ -25,8 +25,8 @@ public class TicketConfiguration : IEntityTypeConfiguration<Ticket>
         builder.Property(x => x.OrderId)
             .HasConversion(x => x.Value, x => new EntityId<Order>(x));
 
-        builder.HasOne(x => x.Order)
-            .WithMany(x => x.Tickets)
+        builder.HasOne<Order>()
+            .WithMany()
             .HasForeignKey(x => x.OrderId)
             .OnDelete(DeleteBehavior.Cascade);
 

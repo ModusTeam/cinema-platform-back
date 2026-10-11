@@ -26,4 +26,10 @@ internal static class OrderTicketFixture
         context.Tickets.AddRange(tickets);
         return order;
     }
+
+    public static IQueryable<Ticket> ForOrder(ApplicationDbContext context, Order order) =>
+        context.Tickets.Where(ticket => ticket.OrderId == order.Id);
+
+    public static IEnumerable<Ticket> TrackedForOrder(ApplicationDbContext context, Order order) =>
+        context.Tickets.Local.Where(ticket => ticket.OrderId == order.Id);
 }

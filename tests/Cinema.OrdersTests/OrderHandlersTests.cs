@@ -200,7 +200,8 @@ public class OrderHandlersTests
 
         result.IsSuccess.Should().BeTrue();
         order.Status.Should().Be(OrderStatus.Cancelled);
-        order.Tickets.Should().ContainSingle().Which.TicketStatus.Should().Be(TicketStatus.Refunded);
+        (await OrderTicketFixture.ForOrder(context, order).SingleAsync(TestContext.Current.CancellationToken))
+            .TicketStatus.Should().Be(TicketStatus.Refunded);
         await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, TestContext.Current.CancellationToken);
     }
 
@@ -333,7 +334,7 @@ public class OrderHandlersTests
             historical.Id.Value);
         mine.Value.ActiveOrders.Concat(mine.Value.PastOrders).Select(order => order.Id).Should().OnlyHaveUniqueItems();
         mine.Value.ActiveOrders[0].Tickets.Select(ticket => ticket.Id)
-            .Should().BeEquivalentTo(first.Tickets.Select(ticket => ticket.Id.Value));
+            .Should().BeEquivalentTo(OrderTicketFixture.ForOrder(context, first).Select(ticket => ticket.Id.Value));
         mine.Value.ActiveOrders[1].Tickets.Should().ContainSingle();
         mine.Value.PastOrders.Should().OnlyContain(order => order.Tickets.Count == 0);
         mine.Value.ActiveOrders[0].TotalAmount.Should().Be(60m);
@@ -390,7 +391,8 @@ public class OrderHandlersTests
         services.AddApplication();
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         GetTicketDetailsQueryHandler handler = new(context, currentUser);
-        Guid ticketId = order.Tickets.Single().Id.Value;
+        Guid ticketId = (await OrderTicketFixture.ForOrder(context, order)
+            .SingleAsync(TestContext.Current.CancellationToken)).Id.Value;
 
         currentUser.UserId.Returns(Guid.NewGuid());
         (await handler.Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken))
@@ -428,9 +430,10 @@ public class OrderHandlersTests
         await new CancelExpiredOrdersJob(context, locks, NullLogger<CancelExpiredOrdersJob>.Instance)
             .Process(TestContext.Current.CancellationToken);
 
-        Order persisted = await context.Orders.Include(x => x.Tickets).SingleAsync(TestContext.Current.CancellationToken);
+        Order persisted = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
         persisted.Status.Should().Be(OrderStatus.Cancelled);
-        persisted.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
+        (await OrderTicketFixture.ForOrder(context, persisted).SingleAsync(TestContext.Current.CancellationToken))
+            .TicketStatus.Should().Be(TicketStatus.Valid);
         await locks.Received(1).UnlockSeatAsync(session.Id.Value, seat.Id.Value, order.UserId,
             Arg.Any<CancellationToken>());
     }
@@ -449,7 +452,7 @@ public class OrderHandlersTests
             EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
         Order order = OrderTicketFixture.CreateAndTrack(context, userId, session, [seat], new() { [seat.Id] = 25m });
         if (paid) order.MarkAsPaid("transaction-1");
-        if (used) order.Tickets.Single().MarkAsUsed();
+        if (used) OrderTicketFixture.TrackedForOrder(context, order).Single().MarkAsUsed();
         context.Halls.Add(hall);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);

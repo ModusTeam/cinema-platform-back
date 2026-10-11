@@ -68,7 +68,9 @@ public class OrderTicketDomainTests
         order.Status.Should().Be(OrderStatus.Pending);
         order.TotalAmount.Should().Be(65m);
         order.PaidAmount.Should().Be(65m);
-        order.Tickets.Should().BeEmpty();
+        using ApplicationDbContext context = CreateContext();
+        context.Orders.Add(order);
+        context.ChangeTracker.Entries<Ticket>().Should().BeEmpty();
 
         Seat foreign = Seat.New(EntityId<Seat>.New(), "B", 1, 1, 1, SeatStatus.Active,
             EntityId<Hall>.New(), first.SeatTypeId);

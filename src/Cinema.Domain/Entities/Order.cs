@@ -21,8 +21,6 @@ public class Order : BaseEntity
 
     public User? User { get; private set; }
     public Session? Session { get; private set; }
-    private readonly List<Ticket> _tickets = new();
-    public IReadOnlyCollection<Ticket> Tickets => _tickets.AsReadOnly();
     
 
     private Order(
