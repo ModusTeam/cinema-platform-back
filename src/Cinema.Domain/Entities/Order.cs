@@ -19,7 +19,6 @@ public class Order : BaseEntity
 
     public int PointsUsed { get; private set; }
 
-    public User? User { get; private set; }
     public Session? Session { get; private set; }
     
 

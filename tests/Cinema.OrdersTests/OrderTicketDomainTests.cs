@@ -18,6 +18,22 @@ namespace Cinema.OrdersTests;
 public class OrderTicketDomainTests
 {
     [Fact]
+    public void Order_User_Relationship_Keeps_Foreign_Key_Without_Domain_Navigation()
+    {
+        using ApplicationDbContext context = CreateContext();
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType orderType = context.Model.FindEntityType(typeof(Order))!;
+        Microsoft.EntityFrameworkCore.Metadata.IForeignKey userForeignKey = orderType.GetForeignKeys()
+            .Single(fk => fk.PrincipalEntityType.ClrType == typeof(User));
+
+        orderType.FindProperty(nameof(Order.UserId)).Should().NotBeNull();
+        userForeignKey.Properties.Should().ContainSingle(property => property.Name == nameof(Order.UserId));
+        userForeignKey.DependentToPrincipal.Should().BeNull();
+        userForeignKey.DeleteBehavior.Should().Be(DeleteBehavior.Restrict);
+        orderType.GetIndexes().Should().Contain(index =>
+            index.Properties.Count == 1 && index.Properties[0].Name == nameof(Order.UserId));
+    }
+
+    [Fact]
     public void Separate_Creation_Uses_Seat_Prices_For_Tickets_And_Order_Totals()
     {
         (Session session, Seat first, Seat second) = Seats();

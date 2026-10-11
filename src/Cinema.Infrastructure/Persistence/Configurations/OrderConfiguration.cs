@@ -32,7 +32,7 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(x => x.PaymentTransactionId)
             .HasMaxLength(255);
 
-        builder.HasOne(x => x.User)
+        builder.HasOne<User>()
             .WithMany()
             .HasForeignKey(x => x.UserId)
             .OnDelete(DeleteBehavior.Restrict);
