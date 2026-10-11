@@ -21,8 +21,6 @@ public class Order : BaseEntity
 
     public User? User { get; private set; }
     public Session? Session { get; private set; }
-    private readonly List<Ticket> _tickets = new();
-    public IReadOnlyCollection<Ticket> Tickets => _tickets.AsReadOnly();
     
 
     private Order(
@@ -61,31 +59,6 @@ public class Order : BaseEntity
         );
     }
     
-    public static Order Create(
-        Guid userId,
-        Session session,
-        List<Seat> seats,
-        Dictionary<EntityId<Seat>, decimal> prices)
-    {
-        Order order = CreateWithoutTickets(userId, session, seats, prices);
-
-        foreach (Seat seat in seats)
-        {
-            Ticket ticket = Ticket.New(
-                EntityId<Ticket>.New(),
-                prices[seat.Id],
-                TicketStatus.Valid,
-                order.Id,
-                session.Id,
-                seat.Id
-            );
-
-            order._tickets.Add(ticket);
-        }
-
-        return order;
-    }
-
     public static Order CreateWithoutTickets(
         Guid userId,
         Session session,

@@ -18,12 +18,12 @@ namespace Cinema.OrdersTests;
 public class OrderTicketDomainTests
 {
     [Fact]
-    public void Create_Uses_Seat_Prices_For_Tickets_And_Order_Totals()
+    public void Separate_Creation_Uses_Seat_Prices_For_Tickets_And_Order_Totals()
     {
         (Session session, Seat first, Seat second) = Seats();
         Guid userId = Guid.NewGuid();
 
-        Order order = Order.Create(userId, session, [first, second], new()
+        (Order order, List<Ticket> tickets) = OrderTicketFixture.Create(userId, session, [first, second], new()
         {
             [first.Id] = 25m,
             [second.Id] = 40m
@@ -34,24 +34,24 @@ public class OrderTicketDomainTests
         order.SessionId.Should().Be(session.Id);
         order.TotalAmount.Should().Be(65m);
         order.PaidAmount.Should().Be(65m);
-        order.Tickets.Should().HaveCount(2);
-        order.Tickets.Should().OnlyContain(t => t.OrderId == order.Id &&
+        tickets.Should().HaveCount(2);
+        tickets.Should().OnlyContain(t => t.OrderId == order.Id &&
             t.SessionId == session.Id && t.TicketStatus == TicketStatus.Valid);
-        order.Tickets.Should().ContainSingle(t => t.SeatId == first.Id && t.PriceSnapshot == 25m);
-        order.Tickets.Should().ContainSingle(t => t.SeatId == second.Id && t.PriceSnapshot == 40m);
+        tickets.Should().ContainSingle(t => t.SeatId == first.Id && t.PriceSnapshot == 25m);
+        tickets.Should().ContainSingle(t => t.SeatId == second.Id && t.PriceSnapshot == 40m);
     }
 
     [Fact]
-    public void Create_Rejects_Foreign_Or_Inactive_Seat_And_Missing_Price()
+    public void CreateWithoutTickets_Rejects_Foreign_Or_Inactive_Seat_And_Missing_Price()
     {
         (Session session, Seat first, Seat second) = Seats();
         Seat foreign = Seat.New(EntityId<Seat>.New(), "B", 1, 1, 1, SeatStatus.Active,
             EntityId<Hall>.New(), first.SeatTypeId);
         second.SetStatus(SeatStatus.Maintenance);
 
-        Action foreignSeat = () => Order.Create(Guid.NewGuid(), session, [foreign], new() { [foreign.Id] = 25m });
-        Action inactiveSeat = () => Order.Create(Guid.NewGuid(), session, [second], new() { [second.Id] = 25m });
-        Action missingPrice = () => Order.Create(Guid.NewGuid(), session, [first], new());
+        Action foreignSeat = () => Order.CreateWithoutTickets(Guid.NewGuid(), session, [foreign], new() { [foreign.Id] = 25m });
+        Action inactiveSeat = () => Order.CreateWithoutTickets(Guid.NewGuid(), session, [second], new() { [second.Id] = 25m });
+        Action missingPrice = () => Order.CreateWithoutTickets(Guid.NewGuid(), session, [first], new());
 
         foreignSeat.Should().Throw<DomainException>().WithMessage("Seats belong to a different hall.");
         inactiveSeat.Should().Throw<DomainException>().WithMessage("One or more seats are not active.");
@@ -68,7 +68,9 @@ public class OrderTicketDomainTests
         order.Status.Should().Be(OrderStatus.Pending);
         order.TotalAmount.Should().Be(65m);
         order.PaidAmount.Should().Be(65m);
-        order.Tickets.Should().BeEmpty();
+        using ApplicationDbContext context = CreateContext();
+        context.Orders.Add(order);
+        context.ChangeTracker.Entries<Ticket>().Should().BeEmpty();
 
         Seat foreign = Seat.New(EntityId<Seat>.New(), "B", 1, 1, 1, SeatStatus.Active,
             EntityId<Hall>.New(), first.SeatTypeId);
@@ -86,29 +88,29 @@ public class OrderTicketDomainTests
     public void Gold_Discount_Adjusts_Totals_For_Separately_Upgraded_Tickets()
     {
         (Session session, Seat first, Seat second) = Seats();
-        Order order = Order.Create(Guid.NewGuid(), session, [first, second], new()
+        (Order order, List<Ticket> tickets) = OrderTicketFixture.Create(Guid.NewGuid(), session, [first, second], new()
         {
             [first.Id] = 40m,
             [second.Id] = 70m
         });
 
-        Ticket secondTicket = order.Tickets.Single(t => t.SeatId == second.Id);
+        Ticket secondTicket = tickets.Single(t => t.SeatId == second.Id);
         secondTicket.ApplyGoldUpgrade(30m);
         order.ApplyGoldDiscount(40m);
 
-        order.Tickets.Single(t => t.SeatId == second.Id).PriceSnapshot.Should().Be(30m);
-        order.Tickets.Single(t => t.SeatId == second.Id).IsGoldUpgraded.Should().BeTrue();
-        order.Tickets.Single(t => t.SeatId == first.Id).PriceSnapshot.Should().Be(40m);
+        tickets.Single(t => t.SeatId == second.Id).PriceSnapshot.Should().Be(30m);
+        tickets.Single(t => t.SeatId == second.Id).IsGoldUpgraded.Should().BeTrue();
+        tickets.Single(t => t.SeatId == first.Id).PriceSnapshot.Should().Be(40m);
         order.TotalAmount.Should().Be(70m);
         order.PaidAmount.Should().Be(70m);
 
         // Current behavior allows a second upgrade on another eligible ticket.
-        Ticket firstTicket = order.Tickets.Single(t => t.SeatId == first.Id);
+        Ticket firstTicket = tickets.Single(t => t.SeatId == first.Id);
         firstTicket.ApplyGoldUpgrade(30m);
         order.ApplyGoldDiscount(10m);
         order.TotalAmount.Should().Be(60m);
         order.PaidAmount.Should().Be(60m);
-        order.Tickets.Should().OnlyContain(t => t.IsGoldUpgraded && t.PriceSnapshot == 30m);
+        tickets.Should().OnlyContain(t => t.IsGoldUpgraded && t.PriceSnapshot == 30m);
         Action thirdUpgrade = () => secondTicket.ApplyGoldUpgrade(30m);
         thirdUpgrade.Should().Throw<DomainException>().WithMessage("Ticket is already gold upgraded.");
         order.TotalAmount.Should().Be(60m);
@@ -118,7 +120,7 @@ public class OrderTicketDomainTests
     public void Gold_Discount_Clamps_Paid_Amount_After_Loyalty_Discount()
     {
         (Session session, Seat first, Seat second) = Seats();
-        Order order = Order.Create(Guid.NewGuid(), session, [first, second], new()
+        (Order order, List<Ticket> tickets) = OrderTicketFixture.Create(Guid.NewGuid(), session, [first, second], new()
         {
             [first.Id] = 20m,
             [second.Id] = 30m
@@ -129,7 +131,7 @@ public class OrderTicketDomainTests
 
         order.TotalAmount.Should().Be(40m);
         order.PaidAmount.Should().Be(40m);
-        order.Tickets.Should().OnlyContain(t => !t.IsGoldUpgraded);
+        tickets.Should().OnlyContain(t => !t.IsGoldUpgraded);
     }
 
     [Theory]

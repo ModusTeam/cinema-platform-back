@@ -44,8 +44,6 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
             .WithMany()
             .HasForeignKey(x => x.SessionId)
             .OnDelete(DeleteBehavior.Restrict);
-        builder.Metadata.FindNavigation(nameof(Order.Tickets))!
-            .SetPropertyAccessMode(PropertyAccessMode.Field);
         builder.HasIndex(o => new { o.Status, o.BookingDate });
         builder.HasIndex(o => o.UserId);
     }
