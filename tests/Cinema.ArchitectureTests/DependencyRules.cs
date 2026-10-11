@@ -2,6 +2,7 @@ using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
 using ArchUnitNET.Loader;
 using ArchUnitNET.xUnitV3;
+using System.Xml.Linq;
 using Xunit;
 using Assembly = System.Reflection.Assembly;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
@@ -22,14 +23,118 @@ public class DependencyRules
     private static readonly Assembly SchedulingInfrastructureAssembly = Assembly.Load("Cinema.Scheduling.Infrastructure");
     private static readonly Assembly BookingApplicationAssembly = Assembly.Load("Cinema.Booking.Application");
     private static readonly Assembly BookingInfrastructureAssembly = Assembly.Load("Cinema.Booking.Infrastructure");
+    private static readonly Assembly OrdersDomainAssembly = Assembly.Load("Cinema.Orders.Domain");
+    private static readonly Assembly TicketsDomainAssembly = Assembly.Load("Cinema.Tickets.Domain");
     private static readonly Assembly OrdersApplicationAssembly = Assembly.Load("Cinema.Orders.Application");
 
     private static readonly Architecture Architecture = new ArchLoader()
         .LoadAssemblies(DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly,
             CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
             SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
-            BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersApplicationAssembly)
+            BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly, TicketsDomainAssembly,
+            OrdersApplicationAssembly)
         .Build();
+
+    [Fact]
+    public void Orders_And_Tickets_Domains_Have_Exactly_One_Owner_For_Each_Extracted_Type()
+    {
+        Assembly[] projectAssemblies =
+        [
+            DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly,
+            CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
+            SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
+            BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly,
+            TicketsDomainAssembly, OrdersApplicationAssembly, Assembly.Load("Cinema.SharedKernel")
+        ];
+
+        (System.Type Type, Assembly Owner)[] extractedTypes =
+        [
+            (typeof(Cinema.Domain.Entities.Order), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Enums.OrderStatus), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Events.OrderPaidEvent), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Events.OrderFailedDomainEvent), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Events.OrderCancelledDomainEvent), OrdersDomainAssembly),
+            (typeof(Cinema.Domain.Entities.Ticket), TicketsDomainAssembly),
+            (typeof(Cinema.Domain.Enums.TicketStatus), TicketsDomainAssembly)
+        ];
+
+        foreach ((System.Type type, Assembly owner) in extractedTypes)
+        {
+            Assert.Equal(owner, type.Assembly);
+            Assert.Equal([owner], projectAssemblies.Where(assembly => assembly.GetType(type.FullName!) is not null));
+        }
+    }
+
+    [Fact]
+    public void Extracted_Domains_Have_Only_Allowed_Project_Dependencies()
+    {
+        string[] ordersDependencies = ["Cinema.Scheduling.Domain", "Cinema.SharedKernel"];
+        string[] ticketsDependencies = ["Cinema.Orders.Domain", "Cinema.Scheduling.Domain", "Cinema.SharedKernel"];
+
+        Assert.Equal(ordersDependencies, GetProjectReferences(OrdersDomainAssembly));
+        Assert.Equal(ticketsDependencies, GetProjectReferences(TicketsDomainAssembly));
+        Assert.Equal(ordersDependencies, GetCompiledProjectReferences(OrdersDomainAssembly));
+        Assert.Equal(ticketsDependencies, GetCompiledProjectReferences(TicketsDomainAssembly));
+    }
+
+    private static string[] GetCompiledProjectReferences(Assembly assembly) =>
+        assembly.GetReferencedAssemblies()
+            .Select(reference => reference.Name!)
+            .Where(name => name.StartsWith("Cinema.", StringComparison.Ordinal))
+            .OrderBy(name => name)
+            .ToArray();
+
+    private static string[] GetProjectReferences(Assembly assembly)
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Cinema.sln")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+
+        string project = Directory.GetFiles(Path.Combine(directory.FullName, "src"),
+                $"{assembly.GetName().Name}.csproj", SearchOption.AllDirectories).Single();
+        return XDocument.Load(project).Descendants("ProjectReference")
+            .Select(reference => Path.GetFileNameWithoutExtension(reference.Attribute("Include")!.Value.Replace('\\', '/')))
+            .OrderBy(name => name)
+            .ToArray();
+    }
+
+    [Fact]
+    public void Project_References_Should_Have_No_Cycles()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Cinema.sln")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+
+        string[] projects = Directory.GetFiles(directory.FullName, "*.csproj", SearchOption.AllDirectories);
+        Dictionary<string, string[]> references = projects.ToDictionary(
+            project => Path.GetFullPath(project),
+            project => XDocument.Load(project).Descendants("ProjectReference")
+                .Select(reference => Path.GetFullPath(Path.Combine(
+                    Path.GetDirectoryName(project)!,
+                    reference.Attribute("Include")!.Value.Replace('\\', Path.DirectorySeparatorChar))))
+                .ToArray(),
+            StringComparer.OrdinalIgnoreCase);
+        HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> visiting = new(StringComparer.OrdinalIgnoreCase);
+
+        void Visit(string project)
+        {
+            Assert.True(visiting.Add(project), $"Circular project reference involving {project}");
+            foreach (string dependency in references[project])
+            {
+                if (!visited.Contains(dependency)) Visit(dependency);
+            }
+            visiting.Remove(project);
+            visited.Add(project);
+        }
+
+        foreach (string project in references.Keys)
+        {
+            if (!visited.Contains(project)) Visit(project);
+        }
+    }
 
     [Fact]
     public void Domain_Should_Not_Depend_On_Higher_Layers()

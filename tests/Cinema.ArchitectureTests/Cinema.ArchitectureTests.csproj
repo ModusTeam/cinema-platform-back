@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Host\Cinema.Api\Cinema.Api.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Tickets\Cinema.Tickets.Domain\Cinema.Tickets.Domain.csproj" />
     <ProjectReference Include="..\..\src\Cinema.Application\Cinema.Application.csproj" />
     <ProjectReference Include="..\..\src\Cinema.Domain\Cinema.Domain.csproj" />
     <ProjectReference Include="..\..\src\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
@@ -28,6 +29,7 @@
     <ProjectReference Include="..\..\src\Modules\Booking\Cinema.Booking.Application\Cinema.Booking.Application.csproj" />
     <ProjectReference Include="..\..\src\Modules\Booking\Cinema.Booking.Infrastructure\Cinema.Booking.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Orders\Cinema.Orders.Application\Cinema.Orders.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Orders\Cinema.Orders.Domain\Cinema.Orders.Domain.csproj" />
   </ItemGroup>
 
 </Project>
