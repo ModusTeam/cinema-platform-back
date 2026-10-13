@@ -101,18 +101,26 @@ public class DependencyRules
     [Fact]
     public void Orders_And_Tickets_Configurations_Have_Only_Their_Module_Owners()
     {
+        Assembly[] infrastructureAssemblies =
+        [
+            InfrastructureAssembly, CatalogInfrastructureAssembly, SchedulingInfrastructureAssembly,
+            BookingInfrastructureAssembly, OrdersInfrastructureAssembly, TicketsInfrastructureAssembly
+        ];
+
         Assert.Equal(OrdersInfrastructureAssembly,
             typeof(Cinema.Orders.Infrastructure.Persistence.Configurations.OrderConfiguration).Assembly);
         Assert.Equal(TicketsInfrastructureAssembly,
             typeof(Cinema.Tickets.Infrastructure.Persistence.Configurations.TicketConfiguration).Assembly);
-        Assert.Null(InfrastructureAssembly.GetType("Cinema.Infrastructure.Persistence.Configurations.OrderConfiguration"));
-        Assert.Null(InfrastructureAssembly.GetType("Cinema.Infrastructure.Persistence.Configurations.TicketConfiguration"));
-        Assert.DoesNotContain(InfrastructureAssembly.GetTypes(), type =>
-            typeof(Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Cinema.Domain.Entities.Order>)
-                .IsAssignableFrom(type));
-        Assert.DoesNotContain(InfrastructureAssembly.GetTypes(), type =>
-            typeof(Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Cinema.Domain.Entities.Ticket>)
-                .IsAssignableFrom(type));
+        Assert.Equal([typeof(Cinema.Orders.Infrastructure.Persistence.Configurations.OrderConfiguration)],
+            infrastructureAssemblies.SelectMany(assembly => assembly.GetTypes()).Where(type =>
+                !type.IsAbstract &&
+                typeof(Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Cinema.Domain.Entities.Order>)
+                    .IsAssignableFrom(type)));
+        Assert.Equal([typeof(Cinema.Tickets.Infrastructure.Persistence.Configurations.TicketConfiguration)],
+            infrastructureAssemblies.SelectMany(assembly => assembly.GetTypes()).Where(type =>
+                !type.IsAbstract &&
+                typeof(Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Cinema.Domain.Entities.Ticket>)
+                    .IsAssignableFrom(type)));
     }
 
     [Fact]
