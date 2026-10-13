@@ -57,6 +57,24 @@ public class OrderTicketDomainTests
     }
 
     [Fact]
+    public void Shared_Model_Loads_Order_And_Ticket_Configurations_Once()
+    {
+        using ApplicationDbContext context = CreateContext();
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType orderType = context.Model.GetEntityTypes()
+            .Single(entity => entity.ClrType == typeof(Order));
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType ticketType = context.Model.GetEntityTypes()
+            .Single(entity => entity.ClrType == typeof(Ticket));
+
+        orderType.GetForeignKeys().Should().HaveCount(2);
+        ticketType.GetForeignKeys().Should().HaveCount(3);
+        ticketType.GetForeignKeys().Single(foreignKey => foreignKey.PrincipalEntityType == orderType)
+            .DeleteBehavior.Should().Be(DeleteBehavior.Cascade);
+        ticketType.GetQueryFilter().Should().NotBeNull();
+        ticketType.GetIndexes().Should().ContainSingle(index => index.IsUnique &&
+            index.GetFilter() == "ticket_status IN (0, 1)");
+    }
+
+    [Fact]
     public void Separate_Creation_Uses_Seat_Prices_For_Tickets_And_Order_Totals()
     {
         (Session session, Seat first, Seat second) = Seats();

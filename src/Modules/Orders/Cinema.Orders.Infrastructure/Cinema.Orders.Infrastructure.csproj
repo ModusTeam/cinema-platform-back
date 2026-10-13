@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cinema.Orders.Domain\Cinema.Orders.Domain.csproj" />
+    <ProjectReference Include="..\..\Identity\Cinema.Identity.Domain\Cinema.Identity.Domain.csproj" />
+    <ProjectReference Include="..\..\Scheduling\Cinema.Scheduling.Infrastructure\Cinema.Scheduling.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+</Project>
