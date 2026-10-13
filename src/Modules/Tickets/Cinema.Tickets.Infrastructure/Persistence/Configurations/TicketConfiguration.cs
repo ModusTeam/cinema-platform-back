@@ -4,7 +4,7 @@ using Cinema.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Cinema.Infrastructure.Persistence.Configurations;
+namespace Cinema.Tickets.Infrastructure.Persistence.Configurations;
 
 public class TicketConfiguration : IEntityTypeConfiguration<Ticket>
 {

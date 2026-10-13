@@ -25,14 +25,17 @@ public class DependencyRules
     private static readonly Assembly BookingInfrastructureAssembly = Assembly.Load("Cinema.Booking.Infrastructure");
     private static readonly Assembly OrdersDomainAssembly = Assembly.Load("Cinema.Orders.Domain");
     private static readonly Assembly TicketsDomainAssembly = Assembly.Load("Cinema.Tickets.Domain");
+    private static readonly Assembly IdentityDomainAssembly = Assembly.Load("Cinema.Identity.Domain");
     private static readonly Assembly OrdersApplicationAssembly = Assembly.Load("Cinema.Orders.Application");
+    private static readonly Assembly OrdersInfrastructureAssembly = Assembly.Load("Cinema.Orders.Infrastructure");
+    private static readonly Assembly TicketsInfrastructureAssembly = Assembly.Load("Cinema.Tickets.Infrastructure");
 
     private static readonly Architecture Architecture = new ArchLoader()
         .LoadAssemblies(DomainAssembly, ApplicationAssembly, InfrastructureAssembly, ApiAssembly,
             CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
             SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
             BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly, TicketsDomainAssembly,
-            OrdersApplicationAssembly)
+            OrdersApplicationAssembly, IdentityDomainAssembly, OrdersInfrastructureAssembly, TicketsInfrastructureAssembly)
         .Build();
 
     [Fact]
@@ -44,7 +47,8 @@ public class DependencyRules
             CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
             SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
             BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly,
-            TicketsDomainAssembly, OrdersApplicationAssembly, Assembly.Load("Cinema.SharedKernel")
+            TicketsDomainAssembly, OrdersApplicationAssembly, IdentityDomainAssembly,
+            OrdersInfrastructureAssembly, TicketsInfrastructureAssembly, Assembly.Load("Cinema.SharedKernel")
         ];
 
         (System.Type Type, Assembly Owner)[] extractedTypes =
@@ -55,7 +59,9 @@ public class DependencyRules
             (typeof(Cinema.Domain.Events.OrderFailedDomainEvent), OrdersDomainAssembly),
             (typeof(Cinema.Domain.Events.OrderCancelledDomainEvent), OrdersDomainAssembly),
             (typeof(Cinema.Domain.Entities.Ticket), TicketsDomainAssembly),
-            (typeof(Cinema.Domain.Enums.TicketStatus), TicketsDomainAssembly)
+            (typeof(Cinema.Domain.Enums.TicketStatus), TicketsDomainAssembly),
+            (typeof(Cinema.Domain.Entities.User), IdentityDomainAssembly),
+            (typeof(Cinema.Domain.Entities.RefreshToken), IdentityDomainAssembly)
         ];
 
         foreach ((System.Type type, Assembly owner) in extractedTypes)
@@ -75,6 +81,98 @@ public class DependencyRules
         Assert.Equal(ticketsDependencies, GetProjectReferences(TicketsDomainAssembly));
         Assert.Equal(ordersDependencies, GetCompiledProjectReferences(OrdersDomainAssembly));
         Assert.Equal(ticketsDependencies, GetCompiledProjectReferences(TicketsDomainAssembly));
+        Assert.Empty(GetProjectReferences(IdentityDomainAssembly));
+        Assert.Empty(GetCompiledProjectReferences(IdentityDomainAssembly));
+    }
+
+    [Fact]
+    public void Identity_Domain_Should_Not_Depend_On_Other_Project_Assemblies()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(IdentityDomainAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(DomainAssembly)
+                .Or().ResideInAssembly(OrdersDomainAssembly)
+                .Or().ResideInAssembly(TicketsDomainAssembly)
+                .Or().ResideInAssembly(ApplicationAssembly)
+                .Or().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
+    }
+
+    [Fact]
+    public void Orders_And_Tickets_Configurations_Have_Only_Their_Module_Owners()
+    {
+        Assembly[] infrastructureAssemblies =
+        [
+            InfrastructureAssembly, CatalogInfrastructureAssembly, SchedulingInfrastructureAssembly,
+            BookingInfrastructureAssembly, OrdersInfrastructureAssembly, TicketsInfrastructureAssembly
+        ];
+
+        Assert.Equal(OrdersInfrastructureAssembly,
+            typeof(Cinema.Orders.Infrastructure.Persistence.Configurations.OrderConfiguration).Assembly);
+        Assert.Equal(TicketsInfrastructureAssembly,
+            typeof(Cinema.Tickets.Infrastructure.Persistence.Configurations.TicketConfiguration).Assembly);
+        Assert.Equal([typeof(Cinema.Orders.Infrastructure.Persistence.Configurations.OrderConfiguration)],
+            infrastructureAssemblies.SelectMany(assembly => assembly.GetTypes()).Where(type =>
+                !type.IsAbstract &&
+                typeof(Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Cinema.Domain.Entities.Order>)
+                    .IsAssignableFrom(type)));
+        Assert.Equal([typeof(Cinema.Tickets.Infrastructure.Persistence.Configurations.TicketConfiguration)],
+            infrastructureAssemblies.SelectMany(assembly => assembly.GetTypes()).Where(type =>
+                !type.IsAbstract &&
+                typeof(Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Cinema.Domain.Entities.Ticket>)
+                    .IsAssignableFrom(type)));
+    }
+
+    [Fact]
+    public void Extracted_Infrastructure_Dependencies_Remain_Directed()
+    {
+        Assert.Equal(["Cinema.Identity.Domain", "Cinema.Orders.Domain", "Cinema.Scheduling.Infrastructure"],
+            GetProjectReferences(OrdersInfrastructureAssembly));
+        Assert.Equal(["Cinema.Orders.Domain", "Cinema.Scheduling.Domain", "Cinema.Tickets.Domain"],
+            GetProjectReferences(TicketsInfrastructureAssembly));
+
+        Assembly[] domains = [OrdersDomainAssembly, TicketsDomainAssembly, IdentityDomainAssembly];
+        foreach (Assembly domain in domains)
+        {
+            Assert.DoesNotContain(OrdersInfrastructureAssembly.GetName().Name, GetProjectReferences(domain));
+            Assert.DoesNotContain(TicketsInfrastructureAssembly.GetName().Name, GetProjectReferences(domain));
+        }
+    }
+
+    [Fact]
+    public void Domain_Projects_Do_Not_Reference_Infrastructure()
+    {
+        Assembly[] domains =
+        [
+            DomainAssembly, CatalogDomainAssembly, SchedulingDomainAssembly,
+            OrdersDomainAssembly, TicketsDomainAssembly, IdentityDomainAssembly,
+            Assembly.Load("Cinema.SharedKernel")
+        ];
+
+        foreach (Assembly domain in domains)
+        {
+            Assert.DoesNotContain(GetProjectReferences(domain),
+                reference => reference.EndsWith(".Infrastructure", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void Shared_Context_Remains_The_Only_Context_And_Migration_Owner()
+    {
+        Assembly[] infrastructureAssemblies =
+        [
+            InfrastructureAssembly, CatalogInfrastructureAssembly, SchedulingInfrastructureAssembly,
+            BookingInfrastructureAssembly, OrdersInfrastructureAssembly, TicketsInfrastructureAssembly
+        ];
+
+        Assert.Equal([typeof(Cinema.Infrastructure.Persistence.ApplicationDbContext)],
+            infrastructureAssemblies.SelectMany(assembly => assembly.GetTypes())
+                .Where(type => !type.IsAbstract && typeof(Microsoft.EntityFrameworkCore.DbContext).IsAssignableFrom(type)));
+
+        Assert.Equal([InfrastructureAssembly], infrastructureAssemblies
+            .Where(assembly => assembly.GetTypes().Any(type =>
+                typeof(Microsoft.EntityFrameworkCore.Migrations.Migration).IsAssignableFrom(type) ||
+                typeof(Microsoft.EntityFrameworkCore.Infrastructure.ModelSnapshot).IsAssignableFrom(type))));
     }
 
     private static string[] GetCompiledProjectReferences(Assembly assembly) =>

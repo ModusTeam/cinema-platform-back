@@ -4,7 +4,7 @@ using Cinema.Infrastructure.Persistence.Converters;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Cinema.Infrastructure.Persistence.Configurations;
+namespace Cinema.Orders.Infrastructure.Persistence.Configurations;
 
 public class OrderConfiguration : IEntityTypeConfiguration<Order>
 {

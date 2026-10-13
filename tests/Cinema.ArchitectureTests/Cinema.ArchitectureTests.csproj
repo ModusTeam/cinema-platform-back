@@ -30,6 +30,9 @@
     <ProjectReference Include="..\..\src\Modules\Booking\Cinema.Booking.Infrastructure\Cinema.Booking.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Orders\Cinema.Orders.Application\Cinema.Orders.Application.csproj" />
     <ProjectReference Include="..\..\src\Modules\Orders\Cinema.Orders.Domain\Cinema.Orders.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Orders\Cinema.Orders.Infrastructure\Cinema.Orders.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Tickets\Cinema.Tickets.Infrastructure\Cinema.Tickets.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\Cinema.Identity.Domain\Cinema.Identity.Domain.csproj" />
   </ItemGroup>
 
 </Project>

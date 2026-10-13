@@ -34,6 +34,47 @@ public class OrderTicketDomainTests
     }
 
     [Fact]
+    public void Identity_Entities_Keep_Their_Keys_And_User_Relationships()
+    {
+        using ApplicationDbContext context = CreateContext();
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType userType = context.Model.FindEntityType(typeof(User))!;
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType refreshTokenType = context.Model.FindEntityType(typeof(RefreshToken))!;
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType seatLockType = context.Model.FindEntityType(typeof(SeatLock))!;
+
+        userType.FindPrimaryKey()!.Properties.Should().ContainSingle(property => property.Name == nameof(User.Id));
+        userType.FindProperty(nameof(User.PasswordHash)).Should().NotBeNull();
+        userType.FindProperty(nameof(User.SecurityStamp)).Should().NotBeNull();
+        refreshTokenType.GetForeignKeys().Should().ContainSingle(foreignKey =>
+            foreignKey.PrincipalEntityType == userType &&
+            foreignKey.Properties.Single().Name == nameof(RefreshToken.UserId) &&
+            foreignKey.DependentToPrincipal != null &&
+            foreignKey.DependentToPrincipal.Name == nameof(RefreshToken.User));
+        seatLockType.GetForeignKeys().Should().ContainSingle(foreignKey =>
+            foreignKey.PrincipalEntityType == userType &&
+            foreignKey.Properties.Single().Name == nameof(SeatLock.UserId) &&
+            foreignKey.DependentToPrincipal != null &&
+            foreignKey.DependentToPrincipal.Name == nameof(SeatLock.User));
+    }
+
+    [Fact]
+    public void Shared_Model_Loads_Order_And_Ticket_Configurations_Once()
+    {
+        using ApplicationDbContext context = CreateContext();
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType orderType = context.Model.GetEntityTypes()
+            .Single(entity => entity.ClrType == typeof(Order));
+        Microsoft.EntityFrameworkCore.Metadata.IEntityType ticketType = context.Model.GetEntityTypes()
+            .Single(entity => entity.ClrType == typeof(Ticket));
+
+        orderType.GetForeignKeys().Should().HaveCount(2);
+        ticketType.GetForeignKeys().Should().HaveCount(3);
+        ticketType.GetForeignKeys().Single(foreignKey => foreignKey.PrincipalEntityType == orderType)
+            .DeleteBehavior.Should().Be(DeleteBehavior.Cascade);
+        ticketType.GetQueryFilter().Should().NotBeNull();
+        ticketType.GetIndexes().Should().ContainSingle(index => index.IsUnique &&
+            index.GetFilter() == "ticket_status IN (0, 1)");
+    }
+
+    [Fact]
     public void Separate_Creation_Uses_Seat_Prices_For_Tickets_And_Order_Totals()
     {
         (Session session, Seat first, Seat second) = Seats();

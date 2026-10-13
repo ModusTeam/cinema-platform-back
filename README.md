@@ -21,14 +21,14 @@ The project follows **Clean Architecture** combined with the **CQRS** (Command Q
 
 | Layer | Technologies |
 |---|---|
-| **API** | ASP.NET Core 8 Web API, Swagger/OpenAPI, SignalR |
+| **API** | ASP.NET Core 10 Web API, Swagger/OpenAPI, SignalR |
 | **Application** | MediatR (CQRS), FluentValidation, Mapster, Domain Events |
 | **Domain** | Entities, Value Objects, Enums, Domain Exceptions, Result<T> pattern |
 | **Infrastructure** | EF Core, PostgreSQL (Supabase), Redis, Refit (TMDB, Gemini), gRPC, Hangfire, Serilog |
 | **Messaging** | RabbitMQ, MassTransit (Event Bus) |
 | **Email** | SMTP (Gmail/custom), HTML templates, PDF attachments |
 | **Auth** | ASP.NET Core Identity, JWT (Access + Refresh Tokens) |
-| **Patterns** | Idempotency, Outbox, Repository, Unit of Work, Event-Driven |
+| **Patterns** | CQRS, Idempotency, Domain Events |
 | **DevOps** | Docker & Docker Compose |
 
 ---
@@ -47,27 +47,28 @@ src/BuildingBlocks/Cinema.SharedKernel/  # EntityId<T>, BaseEntity, Result, doma
 src/Modules/Catalog/                # Catalog Domain, Application, Infrastructure
 src/Modules/Scheduling/             # Scheduling Domain, Application, Infrastructure
 src/Modules/Booking/                # Redis seat locks: Application, Infrastructure
-src/Modules/Orders/                 # Order domain and application workflows
-src/Modules/Tickets/                # Ticket domain
-src/Cinema.Domain/                  # Transitional domain: User, RefreshToken, SeatLock, etc.
+src/Modules/Orders/                 # Order domain, application, and EF configuration
+src/Modules/Tickets/                # Ticket domain and EF configuration
+src/Modules/Identity/               # User and RefreshToken domain entities
+src/Cinema.Domain/                  # Transitional domain: SeatLock and remaining entities
 src/Cinema.Application/             # Transitional application features and shared interfaces
-src/Cinema.Infrastructure/ # Data, Caching, External APIs, Identity, Messaging
+src/Cinema.Infrastructure/ # Shared EF context, migrations, Identity, Messaging
 ├── Persistence/
-│   ├── Configurations/   # EF Core entity configurations
-│   ├── Migrations/       # Database migrations
+│   ├── Configurations/   # Remaining legacy EF entity configurations
 │   └── ApplicationDbContext.cs
+├── Migrations/           # Shared database migration history
 ├── Messaging/
 │   └── Consumers/        # TicketPurchased, TierUpgraded, PointsExpiring consumers
-└── Services/             # Identity, Token, Redis SeatLocking, TMDB, Gemini, gRPC (Loyalty/Achievements), Payment, Email, etc.
+└── Services/             # Identity, Token, gRPC (Loyalty/Achievements), Payment, Email, etc.
 ```
 
 ---
 
 ### Current module dependencies
 
-`Catalog.Domain → SharedKernel`; `Scheduling.Domain → Catalog.Domain, SharedKernel`; `Orders.Domain → Scheduling.Domain, SharedKernel`; `Tickets.Domain → Orders.Domain, Scheduling.Domain, SharedKernel`. Tickets uses `EntityId<Order>` for its order foreign key, so the dependency points only from Tickets to Orders. The extracted domain assemblies do not depend on legacy Cinema.Domain or higher layers.
+`Identity.Domain` has no project dependency; `Catalog.Domain → SharedKernel`; `Scheduling.Domain → Catalog.Domain, SharedKernel`; `Orders.Domain → Scheduling.Domain, SharedKernel`; `Tickets.Domain → Orders.Domain, Scheduling.Domain, SharedKernel`. Tickets uses `EntityId<Order>` for its order foreign key, so the dependency points only from Tickets to Orders. The extracted domain assemblies do not depend on legacy Cinema.Domain or higher layers.
 
-Order, Ticket, their statuses, and order events keep their existing CLR namespaces, but now live in the Orders and Tickets domain assemblies. The shared `ApplicationDbContext`, EF configurations, and migrations remain in Cinema.Infrastructure to preserve the existing model and schema. Legacy application interfaces and ticket features remain transitional; see the [Orders](src/Modules/Orders/README.md) and [Tickets](src/Modules/Tickets/README.md) module notes. Persisted assembly-qualified type names may need migration or compatibility handling in external serialized jobs or consumers.
+User, RefreshToken, Order, Ticket, their statuses, and order events keep their existing CLR namespaces in their extracted domain assemblies. Orders and Tickets own their EF configurations. `Cinema.Infrastructure` loads those configurations into the single shared `ApplicationDbContext` and remains the migration owner; the schema and migration history are unchanged. `IApplicationDbContext` intentionally remains shared for cross-module queries and transactions. Legacy application contracts, ticket features, and other persistence mappings remain transitional; see the [Orders](src/Modules/Orders/README.md) and [Tickets](src/Modules/Tickets/README.md) module notes. Persisted assembly-qualified type names may need migration or compatibility handling in external serialized jobs or consumers.
 
 ## 🚀 Getting Started
 
