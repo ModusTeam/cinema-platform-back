@@ -37,6 +37,9 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.12" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.12" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets" Version="9.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Abstractions" Version="9.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="9.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="8.0.23" />
