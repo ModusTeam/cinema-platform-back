@@ -65,10 +65,7 @@ public static class ConfigureInfrastructureServices
         });
 
         // PostgreSQL DataSource
-        var dataSourceBuilder = new NpgsqlDataSourceBuilder(dbConnectionString);
-        dataSourceBuilder.EnableDynamicJson();
-        dataSourceBuilder.UseVector();
-        var dataSource = dataSourceBuilder.Build();
+        var dataSource = DatabaseContextConfiguration.CreateDataSource(dbConnectionString!);
         services.AddSingleton(dataSource);
 
         // Interceptors & DB Context
@@ -79,13 +76,7 @@ public static class ConfigureInfrastructureServices
         {
             options.AddInterceptors(sp.GetRequiredService<Cinema.Infrastructure.Persistence.Interceptors.DispatchDomainEventsInterceptor>());
 
-            options.UseNpgsql(dataSource, builder =>
-                {
-                    builder.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName);
-                    builder.UseVector();
-                    builder.EnableRetryOnFailure(maxRetryCount: 3);
-                })
-                .UseSnakeCaseNamingConvention();
+            DatabaseContextConfiguration.Configure(options, dataSource);
         });
 
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
