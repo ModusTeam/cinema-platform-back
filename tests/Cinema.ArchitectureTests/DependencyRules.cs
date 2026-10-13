@@ -25,6 +25,7 @@ public class DependencyRules
     private static readonly Assembly BookingInfrastructureAssembly = Assembly.Load("Cinema.Booking.Infrastructure");
     private static readonly Assembly OrdersDomainAssembly = Assembly.Load("Cinema.Orders.Domain");
     private static readonly Assembly TicketsDomainAssembly = Assembly.Load("Cinema.Tickets.Domain");
+    private static readonly Assembly IdentityDomainAssembly = Assembly.Load("Cinema.Identity.Domain");
     private static readonly Assembly OrdersApplicationAssembly = Assembly.Load("Cinema.Orders.Application");
 
     private static readonly Architecture Architecture = new ArchLoader()
@@ -32,7 +33,7 @@ public class DependencyRules
             CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
             SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
             BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly, TicketsDomainAssembly,
-            OrdersApplicationAssembly)
+            OrdersApplicationAssembly, IdentityDomainAssembly)
         .Build();
 
     [Fact]
@@ -44,7 +45,7 @@ public class DependencyRules
             CatalogDomainAssembly, CatalogApplicationAssembly, CatalogInfrastructureAssembly,
             SchedulingDomainAssembly, SchedulingApplicationAssembly, SchedulingInfrastructureAssembly,
             BookingApplicationAssembly, BookingInfrastructureAssembly, OrdersDomainAssembly,
-            TicketsDomainAssembly, OrdersApplicationAssembly, Assembly.Load("Cinema.SharedKernel")
+            TicketsDomainAssembly, OrdersApplicationAssembly, IdentityDomainAssembly, Assembly.Load("Cinema.SharedKernel")
         ];
 
         (System.Type Type, Assembly Owner)[] extractedTypes =
@@ -55,7 +56,9 @@ public class DependencyRules
             (typeof(Cinema.Domain.Events.OrderFailedDomainEvent), OrdersDomainAssembly),
             (typeof(Cinema.Domain.Events.OrderCancelledDomainEvent), OrdersDomainAssembly),
             (typeof(Cinema.Domain.Entities.Ticket), TicketsDomainAssembly),
-            (typeof(Cinema.Domain.Enums.TicketStatus), TicketsDomainAssembly)
+            (typeof(Cinema.Domain.Enums.TicketStatus), TicketsDomainAssembly),
+            (typeof(Cinema.Domain.Entities.User), IdentityDomainAssembly),
+            (typeof(Cinema.Domain.Entities.RefreshToken), IdentityDomainAssembly)
         ];
 
         foreach ((System.Type type, Assembly owner) in extractedTypes)
@@ -75,6 +78,21 @@ public class DependencyRules
         Assert.Equal(ticketsDependencies, GetProjectReferences(TicketsDomainAssembly));
         Assert.Equal(ordersDependencies, GetCompiledProjectReferences(OrdersDomainAssembly));
         Assert.Equal(ticketsDependencies, GetCompiledProjectReferences(TicketsDomainAssembly));
+        Assert.Empty(GetProjectReferences(IdentityDomainAssembly));
+        Assert.Empty(GetCompiledProjectReferences(IdentityDomainAssembly));
+    }
+
+    [Fact]
+    public void Identity_Domain_Should_Not_Depend_On_Other_Project_Assemblies()
+    {
+        IArchRule rule = Types().That().ResideInAssembly(IdentityDomainAssembly).Should().NotDependOnAny(
+            Types().That().ResideInAssembly(DomainAssembly)
+                .Or().ResideInAssembly(OrdersDomainAssembly)
+                .Or().ResideInAssembly(TicketsDomainAssembly)
+                .Or().ResideInAssembly(ApplicationAssembly)
+                .Or().ResideInAssembly(InfrastructureAssembly)
+                .Or().ResideInAssembly(ApiAssembly));
+        rule.Check(Architecture);
     }
 
     private static string[] GetCompiledProjectReferences(Assembly assembly) =>

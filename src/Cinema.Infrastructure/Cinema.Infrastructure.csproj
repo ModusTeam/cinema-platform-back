@@ -23,6 +23,7 @@
     <PackageReference Include="MassTransit.Abstractions" />
     <PackageReference Include="MassTransit.RabbitMQ" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Common" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
