@@ -225,8 +225,13 @@ public class DbUpdaterCliTests
             startInfo.Environment["ConnectionStrings__DefaultConnection"] = connectionString;
         if (userSecretsRoot is not null)
         {
-            startInfo.Environment["APPDATA"] = userSecretsRoot;
-            startInfo.Environment["HOME"] = userSecretsRoot;
+            if (OperatingSystem.IsWindows())
+                startInfo.Environment["APPDATA"] = userSecretsRoot;
+            else
+            {
+                startInfo.Environment.Remove("APPDATA");
+                startInfo.Environment["HOME"] = userSecretsRoot;
+            }
         }
 
         using Process process = Process.Start(startInfo)!;
