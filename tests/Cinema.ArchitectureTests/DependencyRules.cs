@@ -131,6 +131,42 @@ public class DependencyRules
         }
     }
 
+    [Fact]
+    public void Domain_Projects_Do_Not_Reference_Infrastructure()
+    {
+        Assembly[] domains =
+        [
+            DomainAssembly, CatalogDomainAssembly, SchedulingDomainAssembly,
+            OrdersDomainAssembly, TicketsDomainAssembly, IdentityDomainAssembly,
+            Assembly.Load("Cinema.SharedKernel")
+        ];
+
+        foreach (Assembly domain in domains)
+        {
+            Assert.DoesNotContain(GetProjectReferences(domain),
+                reference => reference.EndsWith(".Infrastructure", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void Shared_Context_Remains_The_Only_Context_And_Migration_Owner()
+    {
+        Assembly[] infrastructureAssemblies =
+        [
+            InfrastructureAssembly, CatalogInfrastructureAssembly, SchedulingInfrastructureAssembly,
+            BookingInfrastructureAssembly, OrdersInfrastructureAssembly, TicketsInfrastructureAssembly
+        ];
+
+        Assert.Equal([typeof(Cinema.Infrastructure.Persistence.ApplicationDbContext)],
+            infrastructureAssemblies.SelectMany(assembly => assembly.GetTypes())
+                .Where(type => !type.IsAbstract && typeof(Microsoft.EntityFrameworkCore.DbContext).IsAssignableFrom(type)));
+
+        Assert.Equal([InfrastructureAssembly], infrastructureAssemblies
+            .Where(assembly => assembly.GetTypes().Any(type =>
+                typeof(Microsoft.EntityFrameworkCore.Migrations.Migration).IsAssignableFrom(type) ||
+                typeof(Microsoft.EntityFrameworkCore.Infrastructure.ModelSnapshot).IsAssignableFrom(type))));
+    }
+
     private static string[] GetCompiledProjectReferences(Assembly assembly) =>
         assembly.GetReferencedAssemblies()
             .Select(reference => reference.Name!)
