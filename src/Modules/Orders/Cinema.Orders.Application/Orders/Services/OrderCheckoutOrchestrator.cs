@@ -22,6 +22,8 @@ public class OrderCheckoutOrchestrator(
     IPublishEndpoint publishEndpoint,
     ILogger<OrderCheckoutOrchestrator> logger) : IOrderCheckoutOrchestrator
 {
+    private const string UnknownPaymentOutcomeCode = "payment_outcome_unknown";
+
     public async Task<Result<Guid>> ProcessCheckoutAsync(
         Guid userId,
         Guid sessionId,
@@ -132,6 +134,9 @@ public class OrderCheckoutOrchestrator(
         var paymentResult = await ProcessPaymentFlowAsync(userId, orderId, amountToPay, paymentToken, pointsToDeduct, applyGoldUpgrade, ct);
         if (!paymentResult.IsSuccess)
         {
+            if (paymentResult.FailureCode == UnknownPaymentOutcomeCode)
+                return Result.Failure<Guid>(new Error("Payment.OutcomeUnknown", "Payment outcome requires reconciliation."));
+
             return await FailOrderAsync(orderId, paymentResult.ErrorMessage!, trustedSessionId, trustedSeatIds, userId, ct);
         }
 
@@ -210,7 +215,7 @@ public class OrderCheckoutOrchestrator(
         catch (Exception ex)
         {
             logger.LogError(ex, "Payment system crash for Order {OrderId}", orderId);
-            paymentResult = PaymentResult.Failure("Payment system error");
+            paymentResult = PaymentResult.Failure("Payment outcome requires reconciliation", UnknownPaymentOutcomeCode);
         }
 
         if (!paymentResult.IsSuccess)
@@ -315,6 +320,12 @@ public class OrderCheckoutOrchestrator(
         var order = await context.Orders.FindAsync([new EntityId<Order>(orderId)], ct);
         if (order != null)
         {
+            List<Ticket> tickets = await context.Tickets.IgnoreQueryFilters()
+                .Where(ticket => ticket.OrderId == order.Id && ticket.TicketStatus == TicketStatus.Valid)
+                .ToListAsync(ct);
+            foreach (Ticket ticket in tickets)
+                ticket.MarkAsRefunded();
+
             order.MarkAsFailed();
             await context.SaveChangesAsync(ct);
         }

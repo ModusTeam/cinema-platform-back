@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Constants;
 using Cinema.Application.Common.Interfaces;
+using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -8,7 +9,6 @@ namespace Cinema.Application.Jobs;
 
 public class CancelExpiredOrdersJob(
     IApplicationDbContext context,
-    ISeatLockingService seatLockingService,
     ILogger<CancelExpiredOrdersJob> logger)
 {
     private const int BatchSize = 100;
@@ -36,8 +36,8 @@ public class CancelExpiredOrdersJob(
             }
 
             var orderIds = expiredOrdersBatch.Select(o => o.Id).ToList();
-            var ticketsByOrder = (await context.Tickets
-                    .Where(t => orderIds.Contains(t.OrderId))
+            var ticketsByOrder = (await context.Tickets.IgnoreQueryFilters()
+                    .Where(t => orderIds.Contains(t.OrderId) && t.TicketStatus == TicketStatus.Valid)
                     .ToListAsync(ct))
                 .GroupBy(t => t.OrderId)
                 .ToDictionary(group => group.Key, group => group.ToList());
@@ -48,14 +48,8 @@ public class CancelExpiredOrdersJob(
                 {
                     if (ticketsByOrder.TryGetValue(order.Id, out var tickets))
                     {
-                        foreach (var ticket in tickets)
-                        {
-                            await seatLockingService.UnlockSeatAsync(
-                                order.SessionId.Value, 
-                                ticket.SeatId.Value, 
-                                order.UserId, 
-                                ct);
-                        }
+                        foreach (Ticket ticket in tickets)
+                            ticket.MarkAsRefunded();
                     }
 
                     order.MarkAsCancelled();

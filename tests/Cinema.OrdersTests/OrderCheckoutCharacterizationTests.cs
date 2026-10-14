@@ -19,7 +19,7 @@ using Xunit;
 
 namespace Cinema.OrdersTests;
 
-// These tests describe the current checkout behavior, including lifecycle defects.
+// These tests describe the current checkout behavior and its payment boundaries.
 public class OrderCheckoutCharacterizationTests
 {
     [Fact]
@@ -104,7 +104,7 @@ public class OrderCheckoutCharacterizationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Decline_Or_Provider_Exception_Fails_Order_But_Leaves_Valid_Ticket(bool providerThrows)
+    public async Task Decline_Releases_Ticket_While_Provider_Exception_Leaves_Order_Pending(bool providerThrows)
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         if (providerThrows)
@@ -116,10 +116,9 @@ public class OrderCheckoutCharacterizationTests
 
         Result<Guid> result = await fixture.CheckoutAsync();
 
-        result.Error.Code.Should().Be("Payment.Failed");
-        result.Error.Description.Should().Be(providerThrows ? "Payment system error" : "declined");
-        fixture.Order.Status.Should().Be(OrderStatus.Failed);
-        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid); // Existing sold-seat state.
+        result.Error.Code.Should().Be(providerThrows ? "Payment.OutcomeUnknown" : "Payment.Failed");
+        fixture.Order.Status.Should().Be(providerThrows ? OrderStatus.Pending : OrderStatus.Failed);
+        fixture.Tickets.Single().TicketStatus.Should().Be(providerThrows ? TicketStatus.Valid : TicketStatus.Refunded);
         await fixture.Locks.DidNotReceiveWithAnyArgs().UnlockSeatsAsync(default, default!, default, TestContext.Current.CancellationToken);
         await fixture.Publisher.DidNotReceiveWithAnyArgs().Publish(Arg.Any<TicketPurchasedEvent>(), TestContext.Current.CancellationToken);
     }

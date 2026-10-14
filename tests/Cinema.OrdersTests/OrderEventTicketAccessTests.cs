@@ -121,19 +121,23 @@ public class OrderEventTicketAccessTests
         Hall hall = Hall.Create(EntityId<Hall>.New(), "Expiration hall");
         SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
         EntityId<Session> sessionId = EntityId<Session>.New();
-        Seat[] seats = Enumerable.Range(1, 103)
+        Seat[] seats = Enumerable.Range(1, 105)
             .Select(number => Seat.New(EntityId<Seat>.New(), "A", number, 1, number,
                 SeatStatus.Active, hall.Id, seatType.Id)).ToArray();
         hall.ApplyLayout(seats);
         List<Order> expired = new();
         List<Ticket> tickets = new();
-        for (int number = 1; number <= 103; number++)
+        for (int number = 1; number <= 105; number++)
         {
             Seat seat = seats[number - 1];
             Order order = Order.New(EntityId<Order>.New(), 20m, Guid.NewGuid(), sessionId);
             if (number == 102)
                 order.MarkAsPaid("paid");
-            if (number != 103)
+            if (number == 103)
+                order.MarkAsCancelled();
+            if (number == 104)
+                order.MarkAsFailed();
+            if (number != 105)
                 context.Entry(order).Property(o => o.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
             if (number <= 101)
                 expired.Add(order);
@@ -147,30 +151,26 @@ public class OrderEventTicketAccessTests
         context.SeatTypes.Add(seatType);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         context.ClearChangeTracker();
-        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
-
-        await new CancelExpiredOrdersJob(context, locks, NullLogger<CancelExpiredOrdersJob>.Instance)
+        await new CancelExpiredOrdersJob(context, NullLogger<CancelExpiredOrdersJob>.Instance)
             .Process(TestContext.Current.CancellationToken);
 
         context.ChangeTracker.Entries().Should().BeEmpty();
         (await context.Orders.CountAsync(o => o.Status == OrderStatus.Cancelled,
-            TestContext.Current.CancellationToken)).Should().Be(101);
+            TestContext.Current.CancellationToken)).Should().Be(102);
+        (await context.Orders.CountAsync(o => o.Status == OrderStatus.Failed,
+            TestContext.Current.CancellationToken)).Should().Be(1);
         (await context.Orders.CountAsync(o => o.Status == OrderStatus.Paid,
             TestContext.Current.CancellationToken)).Should().Be(1);
         (await context.Orders.CountAsync(o => o.Status == OrderStatus.Pending,
             TestContext.Current.CancellationToken)).Should().Be(1);
         (await context.Tickets.CountAsync(t => t.TicketStatus == TicketStatus.Valid,
-            TestContext.Current.CancellationToken)).Should().Be(103);
+            TestContext.Current.CancellationToken)).Should().Be(4);
         foreach (Order order in expired)
         {
             Ticket ticket = tickets.Single(t => t.OrderId == order.Id);
-            await locks.Received(1).UnlockSeatAsync(sessionId.Value, ticket.SeatId.Value, order.UserId,
-                TestContext.Current.CancellationToken);
+            (await context.Tickets.SingleAsync(t => t.Id == ticket.Id, TestContext.Current.CancellationToken))
+                .TicketStatus.Should().Be(TicketStatus.Refunded);
         }
-        await locks.DidNotReceive().UnlockSeatAsync(Arg.Any<Guid>(), tickets[101].SeatId.Value,
-            Arg.Any<Guid>(), Arg.Any<CancellationToken>());
-        await locks.DidNotReceive().UnlockSeatAsync(Arg.Any<Guid>(), tickets[102].SeatId.Value,
-            Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
     private static async Task<(Order Order, Ticket[] Tickets, Ticket Unrelated)> SeedAsync(ApplicationDbContext context)

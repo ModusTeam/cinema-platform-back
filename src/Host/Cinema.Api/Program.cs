@@ -1,5 +1,6 @@
 using Cinema.Api.Middleware;
 using Cinema.Api.Modules;
+using Cinema.Application.Jobs;
 using Hangfire;
 using Serilog;
 
@@ -18,6 +19,9 @@ if (app.Environment.IsDevelopment())
 }
 
 await app.SeedIdentityIfEnabledAsync();
+
+app.Services.GetRequiredService<IRecurringJobManager>().AddOrUpdate<CancelExpiredOrdersJob>(
+    "cancel-expired-orders", job => job.Process(CancellationToken.None), Cron.Minutely());
 
 app.UseExceptionHandler();
 app.UseSerilogRequestLogging();

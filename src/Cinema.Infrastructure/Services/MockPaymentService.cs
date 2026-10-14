@@ -8,13 +8,13 @@ public class MockPaymentService(ILogger<MockPaymentService> logger) : IPaymentSe
 {
     public async Task<PaymentResult> ProcessPaymentAsync(decimal amount, string currency, string paymentToken, CancellationToken ct = default)
     {
-        logger.LogInformation("Initiating mock payment. Amount: {Amount} {Currency}. Token: {Token}", amount, currency, paymentToken);
+        logger.LogInformation("Initiating mock payment. Amount: {Amount} {Currency}", amount, currency);
         
         await Task.Delay(Random.Shared.Next(500, 1500), ct);
         
         if (paymentToken == "test_fail_token")
         {
-            logger.LogWarning("Payment declined for token {Token}", paymentToken);
+            logger.LogWarning("Mock payment declined. Reason: {FailureCode}", "card_declined");
             return PaymentResult.Failure("Insufficient funds", "card_declined");
         }
 

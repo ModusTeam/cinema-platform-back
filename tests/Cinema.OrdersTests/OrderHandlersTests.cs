@@ -409,7 +409,7 @@ public class OrderHandlersTests
     }
 
     [Fact]
-    public async Task Expiration_Cancels_Order_But_Leaves_Ticket_Valid()
+    public async Task Expiration_Cancels_Order_And_Refunds_Ticket()
     {
         await using ApplicationDbContext context = CreateContext();
         Hall hall = Hall.Create(EntityId<Hall>.New(), "Expiration hall");
@@ -425,17 +425,13 @@ public class OrderHandlersTests
         context.Sessions.Add(session);
         context.Entry(order).Property(x => x.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
-        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
-
-        await new CancelExpiredOrdersJob(context, locks, NullLogger<CancelExpiredOrdersJob>.Instance)
+        await new CancelExpiredOrdersJob(context, NullLogger<CancelExpiredOrdersJob>.Instance)
             .Process(TestContext.Current.CancellationToken);
 
         Order persisted = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
         persisted.Status.Should().Be(OrderStatus.Cancelled);
         (await OrderTicketFixture.ForOrder(context, persisted).SingleAsync(TestContext.Current.CancellationToken))
-            .TicketStatus.Should().Be(TicketStatus.Valid);
-        await locks.Received(1).UnlockSeatAsync(session.Id.Value, seat.Id.Value, order.UserId,
-            Arg.Any<CancellationToken>());
+            .TicketStatus.Should().Be(TicketStatus.Refunded);
     }
 
     private static async Task<(Guid OrderId, Guid UserId, Guid SeatId)> SeedCancellationOrderAsync(
