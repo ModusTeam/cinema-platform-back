@@ -53,7 +53,7 @@ public class TicketDetailsTests
             .Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken);
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("Ticket.AccessDenied");
+        result.Error.Code.Should().Be("Ticket.NotFound");
         Action readValue = () => _ = result.Value;
         readValue.Should().Throw<InvalidOperationException>();
     }
@@ -74,7 +74,7 @@ public class TicketDetailsTests
     }
 
     [Fact]
-    public async Task Missing_Associated_Order_Returns_AccessDenied()
+    public async Task Missing_Associated_Order_Returns_NotFound()
     {
         (string databaseName, _, Guid ownerId, _) = await SeedAsync();
         Guid orphanId = Guid.NewGuid();
@@ -93,11 +93,11 @@ public class TicketDetailsTests
             .Handle(new GetTicketDetailsQuery(orphanId), TestContext.Current.CancellationToken);
 
         result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("Ticket.AccessDenied");
+        result.Error.Code.Should().Be("Ticket.NotFound");
     }
 
     [Fact]
-    public async Task Inactive_Hall_Ticket_Returns_NotFound()
+    public async Task Inactive_Hall_Ticket_Remains_Visible_To_Owner()
     {
         (string databaseName, Guid ticketId, Guid ownerId, _) = await SeedAsync();
         await using (ApplicationDbContext update = CreateContext(databaseName))
@@ -113,8 +113,8 @@ public class TicketDetailsTests
         Result<TicketDto> result = await new GetTicketDetailsQueryHandler(context, currentUser)
             .Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken);
 
-        result.IsFailure.Should().BeTrue();
-        result.Error.Code.Should().Be("Ticket.NotFound");
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Id.Should().Be(ticketId);
     }
 
     private static async Task<(string DatabaseName, Guid TicketId, Guid OwnerId, DateTime Start)> SeedAsync()

@@ -17,6 +17,7 @@ public class GetUserOrdersQueryHandler(IApplicationDbContext context)
     {
         var orders = await context.Orders
             .AsNoTracking()
+            .IgnoreQueryFilters()
             .Where(o => o.UserId == request.UserId)
             .OrderByDescending(o => o.BookingDate)
             .ProjectToType<OrderDto>() 

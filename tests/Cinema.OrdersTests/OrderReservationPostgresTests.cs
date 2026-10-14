@@ -78,18 +78,16 @@ public class OrderReservationPostgresTests
             TestContext.Current.CancellationToken);
         owner.IsSuccess.Should().BeTrue();
         owner.Value.Should().Be(baselineDto);
-        counter.Commands.Should().HaveCount(2);
-        counter.Commands[0].Should().Contain("tickets").And.Contain("is_active");
-        counter.Commands[1].Should().Contain("orders").And.Contain("user_id").And.Contain("id");
-        counter.Commands[1].Should().NotContain("tickets");
+        counter.Commands.Should().ContainSingle();
+        counter.Commands[0].Should().Contain("tickets").And.Contain("orders").And.Contain("user_id");
 
         counter.Commands.Clear();
         currentUser.UserId.Returns(Guid.NewGuid());
         Result<TicketDto> stranger = await handler.Handle(new GetTicketDetailsQuery(ticketId),
             TestContext.Current.CancellationToken);
         stranger.IsFailure.Should().BeTrue();
-        stranger.Error.Code.Should().Be("Ticket.AccessDenied");
-        counter.Commands.Should().HaveCount(2);
+        stranger.Error.Code.Should().Be("Ticket.NotFound");
+        counter.Commands.Should().ContainSingle();
 
         counter.Commands.Clear();
         currentUser.UserId.Returns(database.UserId);
@@ -104,7 +102,7 @@ public class OrderReservationPostgresTests
         counter.Commands.Clear();
         Result<TicketDto> hidden = await handler.Handle(new GetTicketDetailsQuery(ticketId),
             TestContext.Current.CancellationToken);
-        hidden.Error.Code.Should().Be("Ticket.NotFound");
+        hidden.IsSuccess.Should().BeTrue();
         counter.Commands.Should().ContainSingle();
     }
 
@@ -182,8 +180,9 @@ public class OrderReservationPostgresTests
                 .ProjectToType<TicketDto>(original).ToListAsync(TestContext.Current.CancellationToken);
         Result<List<OrderDto>> filteredHistory = await new GetUserOrdersQueryHandler(filtered)
             .Handle(new GetUserOrdersQuery(database.UserId), TestContext.Current.CancellationToken);
-        filteredHistory.Value.Should().BeEquivalentTo(filteredBaseline);
-        filteredHistory.Value.Should().OnlyContain(order => order.Tickets.Count == 0);
+        filteredHistory.Value.Should().HaveCount(2);
+        filteredHistory.Value.Single(order => order.Id == first.Id.Value).Tickets.Should().HaveCount(2);
+        filteredHistory.Value.Single(order => order.Id == second.Id.Value).Tickets.Should().BeEmpty();
     }
 
     private sealed class HistoryCommandCounter : DbCommandInterceptor
@@ -281,7 +280,7 @@ public class OrderReservationPostgresTests
         currentUser.UserId.Returns(database.UserId);
         IPaymentService payment = Substitute.For<IPaymentService>();
 
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment)
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -305,7 +304,7 @@ public class OrderReservationPostgresTests
     }
 
     [Fact]
-    public async Task Cancellation_Respects_Ticket_Filter_In_Fresh_Context()
+    public async Task Cancellation_Refunds_Ticket_In_Inactive_Hall()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
         Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
@@ -317,15 +316,231 @@ public class OrderReservationPostgresTests
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.IsInRole("Admin").Returns(true);
 
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, Substitute.For<IPaymentService>())
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, Substitute.For<IPaymentService>(), Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
-        cancellation.ChangeTracker.Entries<Ticket>().Should().BeEmpty();
+        cancellation.ChangeTracker.Entries<Ticket>().Should().ContainSingle();
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
         (await verify.Tickets.IgnoreQueryFilters().SingleAsync(TestContext.Current.CancellationToken))
-            .TicketStatus.Should().Be(TicketStatus.Valid);
+            .TicketStatus.Should().Be(TicketStatus.Refunded);
+    }
+
+    [Fact]
+    public async Task Paid_Cancellation_Refunds_Payment_And_Points_Once_And_Persists_Tickets()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Seat second = await database.AddSeatAsync();
+        Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
+        await using (ApplicationDbContext paidContext = database.NewContext())
+        {
+            Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken);
+            order.ApplyLoyaltyDiscount(10);
+            order.MarkAsPaid("payment-1");
+            await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("refund-1"));
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        loyalty.RefundPointsAsync(database.UserId, 10, reserved.Value, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((true, string.Empty));
+        await using (ApplicationDbContext cancellation = database.NewContext())
+        {
+            Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, loyalty)
+                .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+            result.IsSuccess.Should().BeTrue();
+        }
+        await using (ApplicationDbContext repeated = database.NewContext())
+        {
+            Result result = await new CancelOrderCommandHandler(repeated, currentUser, payment, loyalty)
+                .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+            result.Error.Code.Should().Be("Order.AlreadyCancelled");
+        }
+
+        await payment.Received(1).RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>());
+        await loyalty.Received(1).RefundPointsAsync(database.UserId, 10, reserved.Value,
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Cancelled);
+        (await verify.Tickets.Where(ticket => ticket.OrderId == new EntityId<Order>(reserved.Value))
+            .ToListAsync(TestContext.Current.CancellationToken)).Should()
+            .OnlyContain(ticket => ticket.TicketStatus == TicketStatus.Refunded);
+    }
+
+    [Fact]
+    public async Task Cancellation_Without_Tickets_Does_Not_Refund_Or_Change_Order()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Order order = Order.New(EntityId<Order>.New(), 50m, database.UserId, database.Session.Id);
+        order.MarkAsPaid("payment-1");
+        database.Context.Orders.Add(order);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+
+        await using ApplicationDbContext cancellation = database.NewContext();
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment,
+            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(order.Id.Value),
+            TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Order.InvalidState");
+        await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, TestContext.Current.CancellationToken);
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == order.Id, TestContext.Current.CancellationToken))
+            .Status.Should().Be(OrderStatus.Paid);
+    }
+
+    [Fact]
+    public async Task Inactive_Hall_Purchased_Ticket_Remains_Visible_Only_To_Owner()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await using (ApplicationDbContext paidContext = database.NewContext())
+        {
+            Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken);
+            order.MarkAsPaid("payment-1");
+            await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        Guid ticketId = (await database.Context.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Id.Value;
+        Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
+        hall.Deactivate();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext read = database.NewContext();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        Result<TicketDto> owned = await new GetTicketDetailsQueryHandler(read, currentUser)
+            .Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken);
+        owned.IsSuccess.Should().BeTrue();
+        owned.Value.Id.Should().Be(ticketId);
+        Result<Cinema.Application.Orders.Queries.GetMyOrders.OrderHistoryVm> history = await new GetMyOrdersQueryHandler(read, currentUser)
+            .Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken);
+        history.IsSuccess.Should().BeTrue();
+        history.Value.ActiveOrders.Concat(history.Value.PastOrders).Single().Tickets.Should().ContainSingle();
+
+        currentUser.UserId.Returns(Guid.NewGuid());
+        Result<TicketDto> foreign = await new GetTicketDetailsQueryHandler(read, currentUser)
+            .Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken);
+        foreign.Error.Code.Should().Be("Ticket.NotFound");
+        (await read.Seats.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+        (await read.Sessions.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Paid_Cancellation_Rolls_Back_Consumed_Gold_Upgrade()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await using (ApplicationDbContext paidContext = database.NewContext())
+        {
+            Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken);
+            Ticket ticket = await paidContext.Tickets.SingleAsync(t => t.OrderId == order.Id,
+                TestContext.Current.CancellationToken);
+            order.ApplyGoldDiscount(20m);
+            ticket.ApplyGoldUpgrade(30m);
+            order.MarkAsPaid("payment-1");
+            await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("refund-1"));
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        loyalty.RollbackGoldUpgradeAsync(database.UserId, reserved.Value, Arg.Any<CancellationToken>())
+            .Returns((true, string.Empty));
+
+        await using ApplicationDbContext cancellation = database.NewContext();
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, loyalty)
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        await loyalty.Received(1).RollbackGoldUpgradeAsync(database.UserId, reserved.Value,
+            Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Refunded);
+    }
+
+    [Fact]
+    public async Task Cancellation_At_Ten_Minute_Cutoff_Leaves_Order_And_Ticket_Valid()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        DateTime cutoffStart = DateTime.UtcNow.AddMinutes(10);
+        await database.Context.Sessions.Where(session => session.Id == database.Session.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(session => session.StartTime, cutoffStart),
+                TestContext.Current.CancellationToken);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+
+        await using ApplicationDbContext cancellation = database.NewContext();
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser,
+            Substitute.For<IPaymentService>(), Substitute.For<ILoyaltyService>())
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Order.TooLate");
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Pending);
+        (await verify.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
+    [Fact]
+    public async Task Database_Save_Failure_After_Payment_Refund_Leaves_Paid_Order_For_Reconciliation()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await using (ApplicationDbContext paidContext = database.NewContext())
+        {
+            Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken);
+            order.MarkAsPaid("payment-1");
+            await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("refund-1"));
+        await using ApplicationDbContext cancellation = database.NewContext(interceptor: new FailOrderUpdateInterceptor());
+
+        Func<Task> cancel = async () => await new CancelOrderCommandHandler(cancellation, currentUser, payment,
+            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(reserved.Value),
+            TestContext.Current.CancellationToken);
+
+        DbUpdateException failure = (await cancel.Should().ThrowAsync<DbUpdateException>()).Which;
+        failure.InnerException.Should().BeOfType<InvalidOperationException>();
+        await payment.Received(1).RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+        (await verify.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
+    private sealed class FailOrderUpdateInterceptor : DbCommandInterceptor
+    {
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("UPDATE orders", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Simulated cancellation save failure.");
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     [Fact]
