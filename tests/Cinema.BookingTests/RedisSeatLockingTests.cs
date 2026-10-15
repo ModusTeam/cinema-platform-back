@@ -11,6 +11,90 @@ namespace Cinema.BookingTests;
 public class RedisSeatLockingTests
 {
     [Fact]
+    public async Task Concurrent_Lock_Attempts_Have_One_Owner()
+    {
+        string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_REDIS_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString))
+            Assert.Skip("Set CINEMA_TEST_REDIS_CONNECTION to run the isolated Redis integration test.");
+
+        using ConnectionMultiplexer connection = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        IDatabase database = connection.GetDatabase();
+        Guid sessionId = Guid.NewGuid();
+        Guid seatId = Guid.NewGuid();
+        Guid firstUser = Guid.NewGuid();
+        Guid secondUser = Guid.NewGuid();
+        RedisKey lockKey = $"lock:session:{{{sessionId}}}:{seatId}";
+        RedisKey setKey = $"locked_seats:session:{{{sessionId}}}";
+        RedisSeatLockingService service = new(connection,
+            Substitute.For<ITicketNotifier>(), NullLogger<RedisSeatLockingService>.Instance);
+        TaskCompletionSource start = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        try
+        {
+            Task<Cinema.Domain.Shared.Result> first = Task.Run(async () =>
+            {
+                await start.Task;
+                return await service.LockSeatAsync(sessionId, seatId, firstUser, ct);
+            }, ct);
+            Task<Cinema.Domain.Shared.Result> second = Task.Run(async () =>
+            {
+                await start.Task;
+                return await service.LockSeatAsync(sessionId, seatId, secondUser, ct);
+            }, ct);
+            start.SetResult();
+            Cinema.Domain.Shared.Result[] results = await Task.WhenAll(first, second);
+            results.Count(result => result.IsSuccess).Should().Be(1);
+            (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().BeEquivalentTo([seatId]);
+            RedisValue owner = await database.StringGetAsync(lockKey);
+            owner.ToString().Should().BeOneOf(firstUser.ToString(), secondUser.ToString());
+        }
+        finally
+        {
+            await database.KeyDeleteAsync([lockKey, setKey]);
+        }
+    }
+
+    [Fact]
+    public async Task Batch_Unlock_Only_Removes_And_Notifies_Owned_Seats()
+    {
+        string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_REDIS_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString))
+            Assert.Skip("Set CINEMA_TEST_REDIS_CONNECTION to run the isolated Redis integration test.");
+
+        using ConnectionMultiplexer connection = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        IDatabase database = connection.GetDatabase();
+        Guid sessionId = Guid.NewGuid();
+        Guid ownedSeat = Guid.NewGuid();
+        Guid foreignSeat = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        Guid other = Guid.NewGuid();
+        RedisKey ownedKey = $"lock:session:{{{sessionId}}}:{ownedSeat}";
+        RedisKey foreignKey = $"lock:session:{{{sessionId}}}:{foreignSeat}";
+        RedisKey setKey = $"locked_seats:session:{{{sessionId}}}";
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        RedisSeatLockingService service = new(connection, notifier, NullLogger<RedisSeatLockingService>.Instance);
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        try
+        {
+            (await service.LockSeatAsync(sessionId, ownedSeat, owner, ct)).IsSuccess.Should().BeTrue();
+            (await service.LockSeatAsync(sessionId, foreignSeat, other, ct)).IsSuccess.Should().BeTrue();
+            (await service.UnlockSeatsAsync(sessionId, [ownedSeat, foreignSeat], owner, ct)).IsSuccess.Should().BeTrue();
+
+            (await database.KeyExistsAsync(ownedKey)).Should().BeFalse();
+            (await database.KeyExistsAsync(foreignKey)).Should().BeTrue();
+            (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().BeEquivalentTo([foreignSeat]);
+            await notifier.Received(1).NotifySeatUnlockedAsync(sessionId, ownedSeat, Arg.Any<CancellationToken>());
+            await notifier.DidNotReceive().NotifySeatUnlockedAsync(sessionId, foreignSeat, Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            await database.KeyDeleteAsync([ownedKey, foreignKey, setKey]);
+        }
+    }
+
+    [Fact]
     public async Task Locking_Respects_Ownership_Extension_And_Expiry()
     {
         string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_REDIS_CONNECTION");
@@ -31,6 +115,9 @@ public class RedisSeatLockingTests
 
         try
         {
+            (await service.LockSeatAsync(sessionId, seatId, ownerId, ct)).IsSuccess.Should().BeTrue();
+            (await database.KeyTimeToLiveAsync(lockKey)).Should().BeCloseTo(TimeSpan.FromMinutes(10), TimeSpan.FromSeconds(5));
+
             (await service.LockSeatAsync(sessionId, seatId, ownerId, ct)).IsSuccess.Should().BeTrue();
             (await database.KeyTimeToLiveAsync(lockKey)).Should().BeCloseTo(TimeSpan.FromMinutes(10), TimeSpan.FromSeconds(5));
 
