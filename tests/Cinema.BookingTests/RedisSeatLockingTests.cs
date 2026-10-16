@@ -170,6 +170,7 @@ public class RedisSeatLockingTests
             await database.KeyExpireAsync(lockKey, TimeSpan.Zero);
             (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().BeEmpty();
             (await service.LockSeatAsync(sessionId, seatId, otherId, ct)).IsSuccess.Should().BeTrue();
+            (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().BeEquivalentTo([seatId]);
         }
         finally
         {

@@ -56,6 +56,13 @@ public class RedisSeatLockingService : ISeatLockingService
         end
         return removed";
 
+    private const string CleanExpiredIndexScript = @"
+        for i = 2, #KEYS do
+            if not redis.call('exists', KEYS[i]) then
+                redis.call('srem', KEYS[1], ARGV[i - 1])
+            end
+        end";
+
     private string GetKey(Guid sessionId, Guid seatId) => $"{KeyPrefix}:{{{sessionId}}}:{seatId}";
     private string GetSetKey(Guid sessionId) => $"{SetPrefix}:{{{sessionId}}}";
 
@@ -107,7 +114,11 @@ public class RedisSeatLockingService : ISeatLockingService
                else expiredSeats.Add(seatIdsInSet[i]);
            }
            
-           if(expiredSeats.Count > 0) await _db.SetRemoveAsync(setKey, expiredSeats.ToArray());
+           if (expiredSeats.Count > 0)
+           {
+               RedisKey[] cleanupKeys = [new RedisKey(setKey), .. expiredSeats.Select(id => new RedisKey(GetKey(sessionId, Guid.Parse(id.ToString()))))];
+               await _db.ScriptEvaluateAsync(CleanExpiredIndexScript, cleanupKeys, expiredSeats.ToArray());
+           }
            return activeSeats;
            
        }

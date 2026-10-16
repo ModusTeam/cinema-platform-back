@@ -79,6 +79,34 @@ public class OrderHandlersTests
     }
 
     [Fact]
+    public async Task Failed_Loyalty_Refund_After_Payment_Refund_Leaves_Paid_Order()
+    {
+        string databaseName = Guid.NewGuid().ToString();
+        (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, 20, paid: true);
+        await using ApplicationDbContext context = CreateContext(databaseName);
+        Order order = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        order.ApplyLoyaltyDiscount(5);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(userId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("transaction-1", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("refund-1"));
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        loyalty.RefundPointsAsync(userId, 5, orderId, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((false, "unavailable"));
+
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment, loyalty)
+            .Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Loyalty.RefundFailed");
+        await payment.Received(1).RefundPaymentAsync("transaction-1", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = CreateContext(databaseName);
+        (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
+    [Fact]
     public async Task Cancel_Used_Ticket_Returns_InvalidState()
     {
         string databaseName = Guid.NewGuid().ToString();

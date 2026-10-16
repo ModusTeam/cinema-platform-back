@@ -63,6 +63,19 @@ public class OrderCheckoutCharacterizationTests
     }
 
     [Fact]
+    public async Task Cancelled_Order_Cannot_Be_Charged()
+    {
+        await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
+        fixture.Order.MarkAsCancelled();
+        await fixture.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Result<Guid> result = await fixture.CheckoutAsync();
+
+        result.Error.Code.Should().Be("Order.InvalidState");
+        await fixture.Payment.DidNotReceiveWithAnyArgs().ProcessPaymentAsync(default, default!, default!, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task Successful_Payment_Uses_Order_Amount_And_Publishes_Existing_Event()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
@@ -82,7 +95,7 @@ public class OrderCheckoutCharacterizationTests
     }
 
     [Fact]
-    public async Task Publish_Exception_After_Charge_Attempts_Refund_And_Leaves_Persisted_Order_Pending()
+    public async Task Publish_Exception_After_Save_Keeps_Paid_Order_And_Does_Not_Refund()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         fixture.Payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>())
@@ -92,13 +105,13 @@ public class OrderCheckoutCharacterizationTests
 
         Result<Guid> result = await fixture.CheckoutAsync();
 
-        result.Error.Code.Should().Be("Order.ConfirmationFailed");
-        await fixture.Payment.Received(1).RefundPaymentAsync("charged-transaction", Arg.Any<CancellationToken>());
+        result.IsSuccess.Should().BeTrue();
+        await fixture.Payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, TestContext.Current.CancellationToken);
         fixture.Context.ChangeTracker.Clear();
         Order persisted = await fixture.Context.Orders.SingleAsync(o => o.Id == fixture.Order.Id,
             TestContext.Current.CancellationToken);
-        persisted.Status.Should().Be(OrderStatus.Pending);
-        persisted.PaymentTransactionId.Should().BeNull();
+        persisted.Status.Should().Be(OrderStatus.Paid);
+        persisted.PaymentTransactionId.Should().Be("charged-transaction");
     }
 
     [Theory]
@@ -281,7 +294,7 @@ public class OrderCheckoutCharacterizationTests
     }
 
     [Fact]
-    public async Task Gold_Upgrade_Uses_First_Equal_Priced_Ticket_And_Can_Upgrade_Another_Later()
+    public async Task Retried_Gold_Checkout_Does_Not_Consume_Another_Upgrade()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync(loyaltyAllowed: false, ticketPrices: [50m, 50m]);
         Ticket firstTicket = fixture.Tickets.First();
@@ -297,18 +310,14 @@ public class OrderCheckoutCharacterizationTests
         otherTicket.IsGoldUpgraded.Should().BeFalse();
         fixture.Order.TotalAmount.Should().Be(80m);
 
-        Result<Guid> second = await fixture.CheckoutAsync(gold: true, usePoints: true);
-        second.Error.Code.Should().Be("Order.LoyaltyNotAllowed");
-        otherTicket.IsGoldUpgraded.Should().BeTrue();
-        otherTicket.PriceSnapshot.Should().Be(30m);
-        fixture.Order.TotalAmount.Should().Be(60m);
-        fixture.Order.PaidAmount.Should().Be(60m);
-        await fixture.Loyalty.Received(2).UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());
-
-        Func<Task> third = async () => await fixture.CheckoutAsync(gold: true, usePoints: true);
-        await third.Should().ThrowAsync<DomainException>().WithMessage("No tickets found to upgrade.");
-        fixture.Order.TotalAmount.Should().Be(60m);
-        await fixture.Payment.DidNotReceiveWithAnyArgs().ProcessPaymentAsync(default, default!, default!, TestContext.Current.CancellationToken);
+        fixture.Payment.ProcessPaymentAsync(80m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("gold-retry"));
+        Result<Guid> second = await fixture.CheckoutAsync(gold: true);
+        second.IsSuccess.Should().BeTrue();
+        otherTicket.IsGoldUpgraded.Should().BeFalse();
+        fixture.Order.TotalAmount.Should().Be(80m);
+        await fixture.Loyalty.Received(1).UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());
+        await fixture.Payment.Received(1).ProcessPaymentAsync(80m, "UAH", "token", Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -407,6 +416,29 @@ public class OrderCheckoutCharacterizationTests
         fixture.Order.Status.Should().Be(OrderStatus.Pending);
         fixture.Order.TotalAmount.Should().Be(50m);
         await fixture.Payment.DidNotReceiveWithAnyArgs().ProcessPaymentAsync(default, default!, default!, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Unknown_Payment_Outcome_Keeps_Gold_Upgrade_For_Reconciliation()
+    {
+        await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
+        fixture.Gold.CalculateAsync(Arg.Any<Session>(), Arg.Any<IReadOnlyCollection<GoldUpgradeTicketPrice>>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new GoldUpgradePricingQuote(true, 30m, 20m, fixture.Seat.Id.Value, 50m, 30m, null)));
+        fixture.Loyalty.UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>()).Returns((true, ""));
+        fixture.Loyalty.CalculateDiscountAsync(fixture.UserId, 30m, Arg.Any<CancellationToken>())
+            .Returns((true, 10, 20m));
+        fixture.Loyalty.DeductPointsAsync(fixture.UserId, 10, fixture.Order.Id.Value, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((true, 90, ""));
+        fixture.Payment.ProcessPaymentAsync(20m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns<Task<PaymentResult>>(_ => throw new InvalidOperationException("unknown provider outcome"));
+
+        Result<Guid> result = await fixture.CheckoutAsync(gold: true, usePoints: true);
+
+        result.Error.Code.Should().Be("Payment.OutcomeUnknown");
+        fixture.Order.Status.Should().Be(OrderStatus.Pending);
+        fixture.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
+        await fixture.Loyalty.DidNotReceiveWithAnyArgs().RollbackGoldUpgradeAsync(default, default, TestContext.Current.CancellationToken);
+        await fixture.Loyalty.DidNotReceiveWithAnyArgs().RefundPointsAsync(default, default, default, default!, TestContext.Current.CancellationToken);
     }
 
     [Fact]

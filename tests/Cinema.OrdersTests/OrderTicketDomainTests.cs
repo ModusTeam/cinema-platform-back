@@ -274,6 +274,26 @@ public class OrderTicketDomainTests
         await publisher.Received(1).Publish(Arg.Any<OrderPaidEvent>(), cancellation.Token);
     }
 
+    [Fact]
+    public async Task Failed_Pre_Save_Publish_Clears_Event_And_Retry_Does_Not_Redispatch()
+    {
+        IPublisher publisher = Substitute.For<IPublisher>();
+        await using ApplicationDbContext context = CreateContext();
+        Order order = Order.New(EntityId<Order>.New(), 20m, Guid.NewGuid(), EntityId<Session>.New());
+        context.Orders.Add(order);
+        order.MarkAsPaid("transaction");
+        publisher.Publish(Arg.Any<OrderPaidEvent>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("publisher failed"));
+        DispatchDomainEventsInterceptor interceptor = new(publisher);
+
+        Func<Task> first = () => interceptor.DispatchDomainEvents(context, TestContext.Current.CancellationToken);
+        await first.Should().ThrowAsync<InvalidOperationException>();
+        order.DomainEvents.Should().BeEmpty();
+
+        await interceptor.DispatchDomainEvents(context, TestContext.Current.CancellationToken);
+        await publisher.Received(1).Publish(Arg.Any<OrderPaidEvent>(), Arg.Any<CancellationToken>());
+    }
+
     private static (Session Session, Seat First, Seat Second) Seats()
     {
         EntityId<Hall> hallId = EntityId<Hall>.New();
