@@ -25,7 +25,7 @@ public class OrderCancelledEventHandler(
         {
             var seatIds = tickets.Select(t => t.SeatId.Value).ToList();
             
-            await seatLockingService.UnlockSeatsAsync(order.SessionId.Value, seatIds, order.UserId, ct);
+            await seatLockingService.UnlockSeatsAsync(order.SessionId.Value, seatIds, order.UserId, ct, notifyClients: false);
 
             foreach (var ticket in tickets)
             {

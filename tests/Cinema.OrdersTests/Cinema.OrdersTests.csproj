@@ -18,5 +18,6 @@
     <ProjectReference Include="..\..\src\Modules\Tickets\Cinema.Tickets.Domain\Cinema.Tickets.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Orders\Cinema.Orders.Application\Cinema.Orders.Application.csproj" />
     <ProjectReference Include="..\..\src\Modules\Booking\Cinema.Booking.Application\Cinema.Booking.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Booking\Cinema.Booking.Infrastructure\Cinema.Booking.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

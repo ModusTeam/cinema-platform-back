@@ -2,6 +2,7 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.DomainEventNotification;
 using Cinema.Application.Orders.EventHandlers;
 using Cinema.Application.Jobs;
+using Cinema.Booking.Infrastructure.Services;
 using Cinema.Catalog.Domain.Entities;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
@@ -13,6 +14,8 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using ConnectionMultiplexer = StackExchange.Redis.ConnectionMultiplexer;
+using RedisKey = StackExchange.Redis.RedisKey;
 using Xunit;
 
 // Completion notifications use the existing notifier contract without a cancellation token.
@@ -74,10 +77,44 @@ public class OrderEventTicketAccessTests
 
         await locks.Received(1).UnlockSeatsAsync(order.SessionId.Value,
             Arg.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(tickets.Select(t => t.SeatId.Value))),
-            order.UserId, CancellationToken.None);
+            order.UserId, CancellationToken.None, false);
         foreach (Ticket ticket in tickets)
             await notifier.Received(1).NotifySeatUnlockedAsync(ticket.SessionId.Value, ticket.SeatId.Value, CancellationToken.None);
         await notifier.DidNotReceive().NotifySeatUnlockedAsync(Arg.Any<Guid>(), unrelated.SeatId.Value, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Cancelled_With_Owned_Redis_Lock_Notifies_Seat_Once()
+    {
+        string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_REDIS_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString))
+            Assert.Skip("Set CINEMA_TEST_REDIS_CONNECTION to run the isolated Redis integration test.");
+
+        await using ApplicationDbContext context = CreateContext();
+        (Order order, Ticket[] tickets, _) = await SeedAsync(context);
+        using ConnectionMultiplexer connection = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        RedisSeatLockingService locks = new(connection, notifier, NullLogger<RedisSeatLockingService>.Instance);
+        Guid seatId = tickets[0].SeatId.Value;
+        Guid sessionId = order.SessionId.Value;
+        RedisKey lockKey = $"lock:session:{{{sessionId}}}:{seatId}";
+        RedisKey setKey = $"locked_seats:session:{{{sessionId}}}";
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        try
+        {
+            (await locks.LockSeatAsync(sessionId, seatId, order.UserId, ct)).IsSuccess.Should().BeTrue();
+            await new OrderCancelledEventHandler(context, locks, notifier, NullLogger<OrderCancelledEventHandler>.Instance)
+                .Handle(new DomainEventNotification<OrderCancelledDomainEvent>(new OrderCancelledDomainEvent(order)), ct);
+
+            (await connection.GetDatabase().KeyExistsAsync(lockKey)).Should().BeFalse();
+            await notifier.Received(1).NotifySeatUnlockedAsync(sessionId, seatId, ct);
+            await notifier.Received(1).NotifySeatUnlockedAsync(sessionId, tickets[1].SeatId.Value, ct);
+        }
+        finally
+        {
+            await connection.GetDatabase().KeyDeleteAsync([lockKey, setKey]);
+        }
     }
 
     [Fact]

@@ -436,7 +436,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         refundedTickets.Should().OnlyContain(t => t.OrderId == trackedOrder.Id && t.TicketStatus == TicketStatus.Refunded);
         await locks.Received(1).UnlockSeatsAsync(database.Session.Id.Value,
             Arg.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(new[] { database.Seat.Id.Value, second.Id.Value })),
-            database.UserId, Arg.Any<CancellationToken>());
+            database.UserId, Arg.Any<CancellationToken>(), false);
         await notifier.Received(1).NotifySeatUnlockedAsync(database.Session.Id.Value, database.Seat.Id.Value,
             Arg.Any<CancellationToken>());
         await notifier.Received(1).NotifySeatUnlockedAsync(database.Session.Id.Value, second.Id.Value,

@@ -1,5 +1,5 @@
 using Cinema.Application.Common.Interfaces;
-using Cinema.Application.Sessions.Queries.GetSessionSeats; // Перевір namespace DTO
+using Cinema.Application.Sessions.Queries.GetSessionSeats;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;

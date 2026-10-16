@@ -1,4 +1,3 @@
-// UpdateAchievementCommandHandler.cs
 using Cinema.Application.Achievements.Commands;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Achievements.Dtos;

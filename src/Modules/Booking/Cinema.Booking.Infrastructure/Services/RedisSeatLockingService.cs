@@ -224,7 +224,8 @@ public class RedisSeatLockingService : ISeatLockingService
         }
     }
 
-    public async Task<Result> UnlockSeatsAsync(Guid sessionId, IEnumerable<Guid> seatIds, Guid userId, CancellationToken ct = default)
+    public async Task<Result> UnlockSeatsAsync(Guid sessionId, IEnumerable<Guid> seatIds, Guid userId, CancellationToken ct = default,
+        bool notifyClients = true)
     {
         var seatIdsList = seatIds.ToList();
         if (seatIdsList.Count == 0) return Result.Success();
@@ -246,14 +247,17 @@ public class RedisSeatLockingService : ISeatLockingService
                 
                 _logger.LogInformation("{Count} seats unlocked by user {UserId}", removedSeatIds.Length, userId);
 
-                try
+                if (notifyClients)
                 {
-                    var tasks = removedSeatIds.Select(seatId => _notifier.NotifySeatUnlockedAsync(sessionId, seatId, ct));
-                    await Task.WhenAll(tasks);
-                }
-                catch (Exception e)
-                {
-                    _logger.LogWarning(e, "Notification failed on batch unlock");
+                    try
+                    {
+                        var tasks = removedSeatIds.Select(seatId => _notifier.NotifySeatUnlockedAsync(sessionId, seatId, ct));
+                        await Task.WhenAll(tasks);
+                    }
+                    catch (Exception e)
+                    {
+                        _logger.LogWarning(e, "Notification failed on batch unlock");
+                    }
                 }
             }
             
@@ -266,22 +270,6 @@ public class RedisSeatLockingService : ISeatLockingService
         }
     }
 
-    /*public async Task<bool> ValidateLockAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default)
-    {
-        var key = GetKey(sessionId, seatId);
-
-        try
-        {
-            var lockValue = await _db.StringGetAsync(key);
-            return lockValue.HasValue && lockValue == userId.ToString();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Redis error while validating lock for seat {SeatId}", seatId);
-            return false;
-        }
-    }*/
-    
     public async Task<IEnumerable<Guid>> GetLockedSeatsAsync(Guid sessionId, IEnumerable<Guid> seatIds, CancellationToken ct = default)
     {
         var seatIdArray = seatIds.ToArray();
