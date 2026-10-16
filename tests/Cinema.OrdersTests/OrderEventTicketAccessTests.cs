@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
 
-// Paid notifications intentionally call the existing overload without a cancellation token.
+// Completion notifications use the existing notifier contract without a cancellation token.
 #pragma warning disable xUnit1051
 
 namespace Cinema.OrdersTests;
@@ -110,7 +110,8 @@ public class OrderEventTicketAccessTests
         await new OrderPaidEventHandler(context, notifier, locks, NullLogger<OrderPaidEventHandler>.Instance)
             .Handle(new DomainEventNotification<OrderPaidEvent>(new OrderPaidEvent(order)), TestContext.Current.CancellationToken);
 
-        await locks.Received(1).UnlockSeatAsync(order.SessionId.Value, ticket.SeatId.Value, order.UserId);
+        await locks.Received(1).UnlockSeatAsync(order.SessionId.Value, ticket.SeatId.Value, order.UserId,
+            TestContext.Current.CancellationToken);
         await notifier.Received(1).NotifyOrderCompleted(order.UserId, order.Id.Value);
     }
 

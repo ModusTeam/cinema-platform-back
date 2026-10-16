@@ -37,10 +37,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         return base.SaveChangesAsync(cancellationToken);
     }
     
-    public async Task<IDbContextTransaction> BeginTransactionAsync(System.Data.IsolationLevel serializable,
+    public async Task<IDbContextTransaction> BeginTransactionAsync(System.Data.IsolationLevel isolationLevel,
         CancellationToken cancellationToken)
     {
-        return await Database.BeginTransactionAsync(cancellationToken);
+        return await Database.BeginTransactionAsync(isolationLevel, cancellationToken);
     }
     
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)

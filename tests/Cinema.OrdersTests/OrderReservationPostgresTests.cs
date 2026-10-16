@@ -304,6 +304,29 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         filteredHistory.Value.Single(order => order.Id == second.Id.Value).Tickets.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Required_Session_Filter_Drops_Include_But_History_Preserves_Order()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Order order = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session,
+            [database.Seat], new() { [database.Seat.Id] = 50m });
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
+        hall.Deactivate();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext read = database.NewContext();
+        (await read.Orders.AsNoTracking().CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        (await read.Orders.AsNoTracking().Include(item => item.Session)
+            .ToListAsync(TestContext.Current.CancellationToken)).Should().BeEmpty();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        Result<OrderHistoryVm> history = await new GetMyOrdersQueryHandler(read, currentUser)
+            .Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken);
+        history.Value.ActiveOrders.Concat(history.Value.PastOrders)
+            .Select(item => item.Id).Should().Contain(order.Id.Value);
+    }
+
     private sealed class HistoryCommandCounter : DbCommandInterceptor
     {
         public List<string> Commands { get; } = new();
@@ -341,8 +364,10 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         order.MarkAsPaid("paid-test");
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value, database.UserId);
-        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, second.Id.Value, database.UserId);
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value,
+            database.UserId, TestContext.Current.CancellationToken);
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, second.Id.Value,
+            database.UserId, TestContext.Current.CancellationToken);
         await notifier.Received(1).NotifyOrderCompleted(database.UserId, reserved.Value);
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Orders.SingleAsync(o => o.Id == order.Id, TestContext.Current.CancellationToken))
@@ -369,7 +394,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
 
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value, database.UserId);
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value,
+            database.UserId, TestContext.Current.CancellationToken);
         await notifier.Received(1).NotifyOrderCompleted(database.UserId, order.Id.Value);
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Tickets.SingleAsync(t => t.OrderId == order.Id, TestContext.Current.CancellationToken))

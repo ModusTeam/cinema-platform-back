@@ -114,7 +114,7 @@ public class RedisSeatLockingService : ISeatLockingService
        catch (Exception e)
        {
            _logger.LogError(e, "Redis error while getting locked seats for session {SessionId}", sessionId);
-           return [];
+           throw;
        }
     }
     
@@ -293,7 +293,7 @@ public class RedisSeatLockingService : ISeatLockingService
         catch (Exception e)
         {
             _logger.LogError(e, "Redis error while getting locked seats for session {SessionId}", sessionId);
-            return [];
+            throw;
         }
     }
 }

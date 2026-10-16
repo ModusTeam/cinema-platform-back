@@ -11,6 +11,38 @@ namespace Cinema.BookingTests;
 public class RedisSeatLockingTests
 {
     [Fact]
+    public async Task Failed_Lock_Read_Does_Not_Report_Seats_As_Unlocked()
+    {
+        IConnectionMultiplexer connection = Substitute.For<IConnectionMultiplexer>();
+        IDatabase database = Substitute.For<IDatabase>();
+        connection.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(database);
+        database.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromException<RedisValue[]>(new InvalidOperationException("Redis unavailable")));
+        RedisSeatLockingService service = new(connection,
+            Substitute.For<ITicketNotifier>(), NullLogger<RedisSeatLockingService>.Instance);
+
+        Func<Task> read = async () => await service.GetLockedSeatsAsync(Guid.NewGuid(), [Guid.NewGuid()]);
+
+        await read.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Failed_Session_Index_Read_Does_Not_Report_Empty_Occupancy()
+    {
+        IConnectionMultiplexer connection = Substitute.For<IConnectionMultiplexer>();
+        IDatabase database = Substitute.For<IDatabase>();
+        connection.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(database);
+        database.SetMembersAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(_ => Task.FromException<RedisValue[]>(new InvalidOperationException("Redis unavailable")));
+        RedisSeatLockingService service = new(connection,
+            Substitute.For<ITicketNotifier>(), NullLogger<RedisSeatLockingService>.Instance);
+
+        Func<Task> read = async () => await service.GetLockedSeatsBySessionAsync(Guid.NewGuid());
+
+        await read.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task Concurrent_Lock_Attempts_Have_One_Owner()
     {
         string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_REDIS_CONNECTION");

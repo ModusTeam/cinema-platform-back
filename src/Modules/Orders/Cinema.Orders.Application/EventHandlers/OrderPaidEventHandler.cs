@@ -32,7 +32,12 @@ public class OrderPaidEventHandler(
                 await seatLockingService.UnlockSeatAsync(
                     sessionId,
                     ticket.SeatId.Value,
-                    order.UserId);
+                    order.UserId,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -43,6 +48,10 @@ public class OrderPaidEventHandler(
         try
         {
             await ticketNotifier.NotifyOrderCompleted(order.UserId, order.Id.Value);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
