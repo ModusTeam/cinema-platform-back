@@ -48,11 +48,11 @@ public class SmtpEmailService(IOptions<SmtpSettings> options, ILogger<SmtpEmailS
             }
 
             await client.SendMailAsync(mailMessage);
-            logger.LogInformation("Email sent to {Email}, attachment: {HasAttachment}", to, attachment != null);
+            logger.LogInformation("Email sent, attachment: {HasAttachment}", attachment != null);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to send email to {Email}", to);
+            logger.LogError(ex, "Failed to send email");
         }
     }
 }

@@ -19,7 +19,7 @@ using Xunit;
 namespace Cinema.OrdersTests;
 
 // Uses the same disposable cinema_orders_test_* convention as OrderReservationPostgresTests.
-public class RecommendationTicketAccessPostgresTests
+public class RecommendationTicketAccessPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
     [Fact]
     public void Ticket_Correlation_Translates_To_Filtered_Exists_Sql()
@@ -72,7 +72,7 @@ public class RecommendationTicketAccessPostgresTests
     [Fact]
     public async Task No_Paid_Visible_Embedded_Tickets_Returns_Empty_After_One_Query()
     {
-        await using RecommendationDatabase database = await RecommendationDatabase.CreateAsync();
+        await using RecommendationDatabase database = await RecommendationDatabase.CreateAsync(template);
         await database.AddTicketsAsync(database.UserId, database.AddMovie("Pending", [1f, 0f]), OrderStatus.Pending, 1);
         await database.AddTicketsAsync(database.UserId, database.AddMovie("Null", null), OrderStatus.Paid, 1);
         CommandCounter counter = new();
@@ -88,7 +88,7 @@ public class RecommendationTicketAccessPostgresTests
     [Fact]
     public async Task Ticket_Queries_Match_Order_Joins_And_Preserve_Recommendations()
     {
-        await using RecommendationDatabase database = await RecommendationDatabase.CreateAsync();
+        await using RecommendationDatabase database = await RecommendationDatabase.CreateAsync(template);
         Movie paidA = database.AddMovie("Paid A", [1f, 0f]);
         Movie paidB = database.AddMovie("Paid B", [0f, 1f]);
         Movie pending = database.AddMovie("Pending", [1f, 0f]);
@@ -204,28 +204,13 @@ public class RecommendationTicketAccessPostgresTests
             Context = NewContext();
         }
 
-        public static async Task<RecommendationDatabase> CreateAsync()
+        public static async Task<RecommendationDatabase> CreateAsync(PostgresSchemaTemplate template)
         {
-            string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_POSTGRES_CONNECTION");
-            if (string.IsNullOrWhiteSpace(connectionString))
-                Assert.Skip("Set CINEMA_TEST_POSTGRES_CONNECTION to an isolated disposable pgvector database named cinema_orders_test_*.");
-            NpgsqlConnectionStringBuilder builder = new(connectionString);
-            if (builder.Database is null || !builder.Database.StartsWith("cinema_orders_test_", StringComparison.Ordinal))
-                throw new InvalidOperationException("Recommendation tests require a disposable cinema_orders_test_* database.");
-            string databaseName = $"cinema_orders_test_{Guid.NewGuid():N}";
-            builder.Database = "postgres";
-            string adminConnectionString = builder.ConnectionString;
-            await using (NpgsqlConnection admin = new(adminConnectionString))
-            {
-                await admin.OpenAsync(TestContext.Current.CancellationToken);
-                await using NpgsqlCommand create = new($"CREATE DATABASE {databaseName}", admin);
-                await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-            }
-            builder.Database = databaseName;
-            RecommendationDatabase database = new(builder.ConnectionString, adminConnectionString, databaseName);
+            (string connectionString, string adminConnectionString, string databaseName) =
+                await template.CreateDatabaseAsync();
+            RecommendationDatabase database = new(connectionString, adminConnectionString, databaseName);
             try
             {
-                await database.Context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
                 database.Context.Users.AddRange(
                     new User { Id = database.UserId, UserName = $"recommendation-{Guid.NewGuid():N}" },
                     new User { Id = database.OtherUserId, UserName = $"recommendation-{Guid.NewGuid():N}" });

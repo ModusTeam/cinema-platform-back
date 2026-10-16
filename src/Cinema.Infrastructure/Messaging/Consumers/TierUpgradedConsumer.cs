@@ -55,7 +55,7 @@ public class TierUpgradedConsumer(
             </div>
         ";
 
-        logger.LogInformation("Sending tier upgrade email to {Email}...", user.Email);
+        logger.LogInformation("Sending tier upgrade email for user {UserId}", payload.UserId);
 
         await emailService.SendEmailAsync(
             user.Email,

@@ -1,4 +1,7 @@
 using Cinema.Application.Common.Interfaces;
+using Cinema.Domain.Common;
+using Cinema.Domain.Entities;
+using Cinema.Domain.Enums;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,13 +18,20 @@ public class LockSeatCommandValidator : AbstractValidator<LockSeatCommand>
                     .AsNoTracking()
                     .FirstOrDefaultAsync(s => s.Id == command.SessionId, ct);
                     
-                if (session == null) return false;
+                if (session == null || session.StartTime <= DateTime.UtcNow ||
+                    session.Status is SessionStatus.Cancelled or SessionStatus.Ended or SessionStatus.SoldOut)
+                    return false;
                 
                 var seatExists = await dbContext.Seats
                     .AsNoTracking()
-                    .AnyAsync(s => s.Id == command.SeatId && s.HallId == session.HallId, ct);
+                    .AnyAsync(s => s.Id == command.SeatId && s.HallId == session.HallId &&
+                                   s.Status == SeatStatus.Active, ct);
                     
-                return seatExists;
+                if (!seatExists) return false;
+
+                return !await dbContext.Tickets.AsNoTracking()
+                    .AnyAsync(t => t.SessionId == session.Id && t.SeatId == new EntityId<Seat>(command.SeatId) &&
+                                   (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
             })
             .WithMessage("Invalid Session or Seat.");
     }

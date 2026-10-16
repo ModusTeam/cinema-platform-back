@@ -24,7 +24,7 @@ public class SeatLockConfiguration : IEntityTypeConfiguration<SeatLock>
         builder.HasOne(x => x.Session)
             .WithMany()
             .HasForeignKey(x => x.SessionId)
-            .OnDelete(DeleteBehavior.Cascade); // Можна видалити лок, якщо сеанс видалено
+            .OnDelete(DeleteBehavior.Cascade);
 
         builder.Property(x => x.SeatId)
             .HasConversion(x => x.Value, x => new EntityId<Seat>(x));

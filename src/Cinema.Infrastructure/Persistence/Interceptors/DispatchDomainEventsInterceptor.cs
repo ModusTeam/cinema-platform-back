@@ -16,11 +16,11 @@ public class DispatchDomainEventsInterceptor(IPublisher publisher) : SaveChanges
 
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
     {
-        await DispatchDomainEvents(eventData.Context);
+        await DispatchDomainEvents(eventData.Context, cancellationToken);
         return await base.SavingChangesAsync(eventData, result, cancellationToken);
     }
 
-    public async Task DispatchDomainEvents(DbContext? context)
+    public async Task DispatchDomainEvents(DbContext? context, CancellationToken cancellationToken = default)
     {
         if (context == null) return;
 
@@ -38,11 +38,11 @@ public class DispatchDomainEventsInterceptor(IPublisher publisher) : SaveChanges
 
         foreach (var domainEvent in domainEvents)
         {
-            await publisher.Publish(domainEvent);
+            await publisher.Publish(domainEvent, cancellationToken);
 
             var notificationType = typeof(DomainEventNotification<>).MakeGenericType(domainEvent.GetType());
             var notification = (INotification)Activator.CreateInstance(notificationType, domainEvent)!;
-            await publisher.Publish(notification);
+            await publisher.Publish(notification, cancellationToken);
         }
     }
 }

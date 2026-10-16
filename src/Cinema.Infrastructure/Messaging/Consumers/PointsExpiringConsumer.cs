@@ -19,14 +19,14 @@ public class PointsExpiringConsumer(
             return;
 
         var payload = message.Data;
-        logger.LogInformation("Отримано запит на сповіщення про згорання {Points} балів для User {UserId}", payload.Points, payload.UserId);
+        logger.LogInformation("Received expiry notification request for {Points} points for user {UserId}", payload.Points, payload.UserId);
         var user = await context.Users
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == payload.UserId, contextMsg.CancellationToken);
 
         if (user == null || string.IsNullOrEmpty(user.Email))
         {
-            logger.LogWarning("Користувача {UserId} не знайдено або відсутній Email.", payload.UserId);
+            logger.LogWarning("User {UserId} was not found or has no email address", payload.UserId);
             return;
         }
 
@@ -42,6 +42,6 @@ public class PointsExpiringConsumer(
             """;
             
         await emailService.SendEmailAsync(user.Email, subject, body);
-        logger.LogInformation("Сповіщення успішно відправлено на {Email}", user.Email);
+        logger.LogInformation("Points expiry notification sent for user {UserId}", payload.UserId);
     }
 }

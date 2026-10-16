@@ -14,7 +14,7 @@ public class TicketPurchasedConsumer(
     public async Task Consume(ConsumeContext<TicketPurchasedMessage> context)
     {
         var msg = context.Message;
-        logger.LogInformation("🎫 Generating ticket PDF for Order {OrderId}...", msg.OrderId);
+        logger.LogInformation("Generating ticket PDF for order {OrderId}", msg.OrderId);
 
         var pdfBytes = ticketGenerator.GenerateTicketPdf(msg);
         var fileName = $"ticket_{msg.OrderId}.pdf";
@@ -30,7 +30,7 @@ public class TicketPurchasedConsumer(
             </div>
         ";
         
-        logger.LogInformation("📨 Sending email with PDF attachment to {Email}...", msg.UserEmail);
+        logger.LogInformation("Sending ticket PDF for order {OrderId}", msg.OrderId);
         
         await emailService.SendEmailAsync(
             msg.UserEmail, 

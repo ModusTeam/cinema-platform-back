@@ -28,7 +28,7 @@ public class OrderHandlersTests
     [InlineData(false, 20, true, null)]
     [InlineData(false, 5, false, "Order.TooLate")]
     [InlineData(true, 5, true, null)]
-    public async Task Cancel_Uses_Ticket_Session_Cutoff_In_Fresh_Context(
+    public async Task Cancel_Uses_Order_Session_Cutoff_In_Fresh_Context(
         bool isAdmin, int minutesUntilStart, bool succeeds, string? errorCode)
     {
         string databaseName = Guid.NewGuid().ToString();
@@ -39,7 +39,7 @@ public class OrderHandlersTests
         currentUser.IsInRole("Admin").Returns(isAdmin);
 
         Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser,
-            Substitute.For<IPaymentService>()).Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
+            Substitute.For<IPaymentService>(), Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().Be(succeeds);
         if (!succeeds)
@@ -68,7 +68,7 @@ public class OrderHandlersTests
                 return PaymentResult.Success("refund-1");
             });
 
-        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment)
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment, Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -79,7 +79,35 @@ public class OrderHandlersTests
     }
 
     [Fact]
-    public async Task Cancel_Used_Ticket_Preserves_Domain_Exception()
+    public async Task Failed_Loyalty_Refund_After_Payment_Refund_Leaves_Paid_Order()
+    {
+        string databaseName = Guid.NewGuid().ToString();
+        (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, 20, paid: true);
+        await using ApplicationDbContext context = CreateContext(databaseName);
+        Order order = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        order.ApplyLoyaltyDiscount(5);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(userId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("transaction-1", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("refund-1"));
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        loyalty.RefundPointsAsync(userId, 5, orderId, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((false, "unavailable"));
+
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment, loyalty)
+            .Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Loyalty.RefundFailed");
+        await payment.Received(1).RefundPaymentAsync("transaction-1", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = CreateContext(databaseName);
+        (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
+    [Fact]
+    public async Task Cancel_Used_Ticket_Returns_InvalidState()
     {
         string databaseName = Guid.NewGuid().ToString();
         (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, 20, used: true);
@@ -87,10 +115,9 @@ public class OrderHandlersTests
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(userId);
 
-        Func<Task> cancel = async () => await new CancelOrderCommandHandler(context, currentUser,
-            Substitute.For<IPaymentService>()).Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
-
-        await cancel.Should().ThrowAsync<DomainException>();
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser,
+            Substitute.For<IPaymentService>(), Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
+        result.Error.Code.Should().Be("Order.InvalidState");
         await using ApplicationDbContext verify = CreateContext(databaseName);
         (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Pending);
         (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Used);
@@ -101,8 +128,9 @@ public class OrderHandlersTests
     {
         await using ApplicationDbContext context = CreateContext();
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(Guid.NewGuid());
         IPaymentService payment = Substitute.For<IPaymentService>();
-        CancelOrderCommandHandler handler = new(context, currentUser, payment);
+        CancelOrderCommandHandler handler = new(context, currentUser, payment, Substitute.For<ILoyaltyService>());
 
         Cinema.Domain.Shared.Result result = await handler.Handle(new CancelOrderCommand(Guid.NewGuid()), CancellationToken.None);
 
@@ -123,10 +151,10 @@ public class OrderHandlersTests
         currentUser.IsInRole("Admin").Returns(false);
         IPaymentService payment = Substitute.For<IPaymentService>();
 
-        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment)
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment, Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(order.Id.Value), CancellationToken.None);
 
-        result.Error.Code.Should().Be("Order.AccessDenied");
+        result.Error.Code.Should().Be("Order.NotFound");
         order.Status.Should().Be(OrderStatus.Pending);
     }
 
@@ -146,14 +174,14 @@ public class OrderHandlersTests
         currentUser.UserId.Returns(userId);
         IPaymentService payment = Substitute.For<IPaymentService>();
 
-        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment)
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment, Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(order.Id.Value), CancellationToken.None);
 
         result.Error.Code.Should().Be("Order.AlreadyCancelled");
     }
 
     [Fact]
-    public async Task Cancel_Does_Not_Change_Paid_Order_When_Refund_Fails()
+    public async Task Cancel_Does_Not_Refund_Paid_Order_Without_Tickets()
     {
         await using ApplicationDbContext context = CreateContext();
         Order order = Order.New(EntityId<Order>.New(), 25m, Guid.NewGuid(), EntityId<Session>.New());
@@ -166,10 +194,11 @@ public class OrderHandlersTests
         payment.RefundPaymentAsync("transaction-1", Arg.Any<CancellationToken>())
             .Returns(PaymentResult.Failure("declined"));
 
-        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment)
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment, Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(order.Id.Value), CancellationToken.None);
 
-        result.Error.Code.Should().Be("Payment.RefundFailed");
+        result.Error.Code.Should().Be("Order.InvalidState");
+        await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, CancellationToken.None);
         order.Status.Should().Be(OrderStatus.Paid);
     }
 
@@ -195,7 +224,7 @@ public class OrderHandlersTests
         currentUser.IsInRole("Admin").Returns(true);
         IPaymentService payment = Substitute.For<IPaymentService>();
 
-        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment)
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment, Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(order.Id.Value), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
@@ -396,7 +425,7 @@ public class OrderHandlersTests
 
         currentUser.UserId.Returns(Guid.NewGuid());
         (await handler.Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken))
-            .Error.Code.Should().Be("Ticket.AccessDenied");
+            .Error.Code.Should().Be("Ticket.NotFound");
         currentUser.UserId.Returns(ownerId);
         Cinema.Domain.Shared.Result<Cinema.Application.Orders.Dtos.TicketDto> detail =
             await handler.Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken);
@@ -409,7 +438,7 @@ public class OrderHandlersTests
     }
 
     [Fact]
-    public async Task Expiration_Cancels_Order_But_Leaves_Ticket_Valid()
+    public async Task Expiration_Cancels_Order_And_Refunds_Ticket()
     {
         await using ApplicationDbContext context = CreateContext();
         Hall hall = Hall.Create(EntityId<Hall>.New(), "Expiration hall");
@@ -425,17 +454,13 @@ public class OrderHandlersTests
         context.Sessions.Add(session);
         context.Entry(order).Property(x => x.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
-        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
-
-        await new CancelExpiredOrdersJob(context, locks, NullLogger<CancelExpiredOrdersJob>.Instance)
+        await new CancelExpiredOrdersJob(context, NullLogger<CancelExpiredOrdersJob>.Instance)
             .Process(TestContext.Current.CancellationToken);
 
         Order persisted = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
         persisted.Status.Should().Be(OrderStatus.Cancelled);
         (await OrderTicketFixture.ForOrder(context, persisted).SingleAsync(TestContext.Current.CancellationToken))
-            .TicketStatus.Should().Be(TicketStatus.Valid);
-        await locks.Received(1).UnlockSeatAsync(session.Id.Value, seat.Id.Value, order.UserId,
-            Arg.Any<CancellationToken>());
+            .TicketStatus.Should().Be(TicketStatus.Refunded);
     }
 
     private static async Task<(Guid OrderId, Guid UserId, Guid SeatId)> SeedCancellationOrderAsync(

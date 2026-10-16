@@ -238,13 +238,60 @@ public class OrderTicketDomainTests
         order.MarkAsPaid("transaction");
         order.MarkAsPaid("duplicate");
 
-        await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context);
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context, cancellationToken);
 
         order.DomainEvents.Should().BeEmpty();
-        await publisher.Received(1).Publish(Arg.Is<OrderPaidEvent>(e => e.Order == order), Arg.Any<CancellationToken>());
-        await publisher.Received(1).Publish(Arg.Is<DomainEventNotification<OrderPaidEvent>>(n => n.DomainEvent.Order == order), Arg.Any<CancellationToken>());
-        await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context);
+        await publisher.Received(1).Publish(Arg.Is<OrderPaidEvent>(e => e.Order == order), cancellationToken);
+        await publisher.Received(1).Publish(Arg.Is<DomainEventNotification<OrderPaidEvent>>(n => n.DomainEvent.Order == order), cancellationToken);
+        await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context, cancellationToken);
         publisher.ReceivedCalls().Count().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Domain_Event_Dispatch_Propagates_Cancellation_To_Blocked_Publisher()
+    {
+        IPublisher publisher = Substitute.For<IPublisher>();
+        await using ApplicationDbContext context = CreateContext();
+        Order order = Order.New(EntityId<Order>.New(), 20m, Guid.NewGuid(), EntityId<Session>.New());
+        context.Orders.Add(order);
+        order.MarkAsPaid("transaction");
+        TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        publisher.Publish(Arg.Any<OrderPaidEvent>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                started.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, call.ArgAt<CancellationToken>(1));
+            });
+        using CancellationTokenSource cancellation = new();
+
+        Task dispatch = new DispatchDomainEventsInterceptor(publisher)
+            .DispatchDomainEvents(context, cancellation.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await cancellation.CancelAsync();
+
+        await FluentActions.Awaiting(() => dispatch).Should().ThrowAsync<OperationCanceledException>();
+        await publisher.Received(1).Publish(Arg.Any<OrderPaidEvent>(), cancellation.Token);
+    }
+
+    [Fact]
+    public async Task Failed_Pre_Save_Publish_Clears_Event_And_Retry_Does_Not_Redispatch()
+    {
+        IPublisher publisher = Substitute.For<IPublisher>();
+        await using ApplicationDbContext context = CreateContext();
+        Order order = Order.New(EntityId<Order>.New(), 20m, Guid.NewGuid(), EntityId<Session>.New());
+        context.Orders.Add(order);
+        order.MarkAsPaid("transaction");
+        publisher.Publish(Arg.Any<OrderPaidEvent>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("publisher failed"));
+        DispatchDomainEventsInterceptor interceptor = new(publisher);
+
+        Func<Task> first = () => interceptor.DispatchDomainEvents(context, TestContext.Current.CancellationToken);
+        await first.Should().ThrowAsync<InvalidOperationException>();
+        order.DomainEvents.Should().BeEmpty();
+
+        await interceptor.DispatchDomainEvents(context, TestContext.Current.CancellationToken);
+        await publisher.Received(1).Publish(Arg.Any<OrderPaidEvent>(), Arg.Any<CancellationToken>());
     }
 
     private static (Session Session, Seat First, Seat Second) Seats()

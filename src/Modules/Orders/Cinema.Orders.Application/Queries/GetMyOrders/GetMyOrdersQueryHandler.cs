@@ -23,6 +23,7 @@ public class GetMyOrdersQueryHandler(
         
         var activeOrders = await context.Orders
             .AsNoTracking()
+            .IgnoreQueryFilters()
             .Where(o => o.UserId == userId)
             .Where(o => o.Session!.StartTime > now)
             .Where(o => o.Status != OrderStatus.Cancelled && o.Status != OrderStatus.Failed)
@@ -32,6 +33,7 @@ public class GetMyOrdersQueryHandler(
         
         var pastOrders = await context.Orders
             .AsNoTracking()
+            .IgnoreQueryFilters()
             .Where(o => o.UserId == userId)
             .Where(o => o.Session!.StartTime <= now || o.Status == OrderStatus.Cancelled || o.Status == OrderStatus.Failed)
             .OrderByDescending(o => o.Session!.StartTime)

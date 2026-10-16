@@ -3,6 +3,7 @@ using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
+using Cinema.Application.Common.Utils;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,13 +14,17 @@ public record CancelOrderCommand(Guid OrderId) : IRequest<Result>;
 public class CancelOrderCommandHandler(
     IApplicationDbContext context,
     ICurrentUserService currentUser,
-    IPaymentService paymentService) 
+    IPaymentService paymentService,
+    ILoyaltyService loyaltyService)
     : IRequestHandler<CancelOrderCommand, Result>
 {
     public async Task<Result> Handle(CancelOrderCommand request, CancellationToken ct)
     {
         var orderId = new EntityId<Order>(request.OrderId);
-        var currentUserId = currentUser.UserId;
+        Guid? currentUserId = currentUser.UserId;
+        bool isAdmin = currentUser.IsInRole("Admin");
+        if (currentUserId is null && !isAdmin)
+            return Result.Failure(new Error("Auth.Required", "User not authenticated"));
 
         var order = await context.Orders
             .FirstOrDefaultAsync(o => o.Id == orderId, ct);
@@ -27,24 +32,35 @@ public class CancelOrderCommandHandler(
         if (order == null)
             return Result.Failure(new Error("Order.NotFound", "Order not found."));
 
-        bool isAdmin = currentUser.IsInRole("Admin");
-        
         if (order.UserId != currentUserId && !isAdmin)
-        {
-            return Result.Failure(new Error("Order.AccessDenied", "You can only cancel your own orders."));
-        }
+            return Result.Failure(new Error("Order.NotFound", "Order not found."));
 
         if (order.Status == OrderStatus.Cancelled || order.Status == OrderStatus.Failed)
             return Result.Failure(new Error("Order.AlreadyCancelled", "Order is already cancelled."));
 
         List<Ticket> tickets = await context.Tickets
-            .Include(t => t.Session)
+            .IgnoreQueryFilters()
             .Where(t => t.OrderId == order.Id)
             .ToListAsync(ct);
 
+        if (tickets.Count == 0)
+            return Result.Failure(new Error("Order.InvalidState", "Order has no tickets to cancel."));
+
+        if (tickets.Any(ticket => ticket.TicketStatus != TicketStatus.Valid || ticket.SessionId != order.SessionId))
+            return Result.Failure(new Error("Order.InvalidState", "Order contains a ticket that cannot be refunded."));
+
+        if (order.Status == OrderStatus.Paid && order.PaidAmount > 0 &&
+            string.IsNullOrEmpty(order.PaymentTransactionId))
+            return Result.Failure(new Error("Order.InvalidState", "Paid order has no payment transaction to refund."));
+
         if (!isAdmin)
         {
-            var sessionStart = tickets.First().Session!.StartTime;
+            DateTime? sessionStart = await context.Sessions.IgnoreQueryFilters()
+                .Where(session => session.Id == order.SessionId)
+                .Select(session => (DateTime?)session.StartTime)
+                .SingleOrDefaultAsync(ct);
+            if (sessionStart is null)
+                return Result.Failure(new Error("Order.InvalidState", "Order session is unavailable."));
             if (sessionStart <= DateTime.UtcNow.AddMinutes(10))
             {
                 return Result.Failure(new Error("Order.TooLate", "Cancellation is only allowed up to 10 minutes before the session starts."));
@@ -58,6 +74,22 @@ public class CancelOrderCommandHandler(
             {
                 return Result.Failure(new Error("Payment.RefundFailed", "Payment provider rejected refund."));
             }
+        }
+
+        if (order.Status == OrderStatus.Paid && order.PointsUsed > 0)
+        {
+            string refundKey = DeterministicGuid.Create($"refund-{order.Id.Value}").ToString();
+            var refundResult = await loyaltyService.RefundPointsAsync(order.UserId, order.PointsUsed,
+                order.Id.Value, refundKey, ct);
+            if (!refundResult.Success)
+                return Result.Failure(new Error("Loyalty.RefundFailed", "Loyalty service rejected points refund."));
+        }
+
+        if (order.Status == OrderStatus.Paid && tickets.Any(ticket => ticket.IsGoldUpgraded))
+        {
+            var rollbackResult = await loyaltyService.RollbackGoldUpgradeAsync(order.UserId, order.Id.Value, ct);
+            if (!rollbackResult.Success)
+                return Result.Failure(new Error("Loyalty.GoldRollbackFailed", "Loyalty service rejected GOLD upgrade rollback."));
         }
 
         order.MarkAsCancelled();

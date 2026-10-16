@@ -11,11 +11,12 @@ internal static class OrderEventTickets
         IApplicationDbContext context, EntityId<Order> orderId, CancellationToken ct)
     {
         List<Ticket> tickets = await context.Tickets
+            .IgnoreQueryFilters()
             .Where(t => t.OrderId == orderId)
             .ToListAsync(ct);
 
         // SavingChanges dispatches events before inserts. Include only tickets awaiting
-        // insert; persisted tickets must continue to obey the global query filter.
+        // insert; historical tickets may belong to inactive halls.
         HashSet<EntityId<Ticket>> loadedIds = tickets.Select(t => t.Id).ToHashSet();
         foreach (var entry in context.ChangeTracker.Entries<Ticket>())
         {

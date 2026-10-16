@@ -7,7 +7,6 @@ namespace Cinema.Api.Controllers;
 
 public class TechnologiesController : ApiController
 {
-    // GET: api/Technologies
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -15,7 +14,6 @@ public class TechnologiesController : ApiController
         return HandleResult(result);
     }
 
-    // POST: api/Technologies
     [Authorize(Roles = "Admin")]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateTechnologyCommand command)

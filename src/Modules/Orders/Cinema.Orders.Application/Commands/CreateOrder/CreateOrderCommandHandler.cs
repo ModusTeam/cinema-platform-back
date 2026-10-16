@@ -22,10 +22,22 @@ public class CreateOrderCommandHandler(
         foreach (var seatId in request.SeatIds)
         {
             if (!await seatLockingService.ValidateAndExtendLockAsync(request.SessionId, seatId, userId.Value, ct))
+            {
+                await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);
                 return Result.Failure<Guid>(new Error("Order.LockExpired", $"Lock expired for seat {seatId}."));
+            }
         }
 
-        var reservationResult = await reservationService.ReserveOrderAsync(userId.Value, request.SessionId, request.SeatIds, ct);
+        Result<Guid> reservationResult;
+        try
+        {
+            reservationResult = await reservationService.ReserveOrderAsync(userId.Value, request.SessionId, request.SeatIds, ct);
+        }
+        catch
+        {
+            await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);
+            throw;
+        }
         if (reservationResult.IsFailure)
         {
             await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);

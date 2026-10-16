@@ -45,7 +45,6 @@ public static class ConfigureInfrastructureServices
         var dbConnectionString = configuration.GetConnectionString("DefaultConnection");
         var redisConnectionString = configuration.GetConnectionString("RedisConnection");
 
-        // Redis
         services.AddSingleton<IConnectionMultiplexer>(sp =>
         {
             var options = ConfigurationOptions.Parse(redisConnectionString!);
@@ -64,11 +63,9 @@ public static class ConfigureInfrastructureServices
             options.InstanceName = "Cinema_";
         });
 
-        // PostgreSQL DataSource
         var dataSource = DatabaseContextConfiguration.CreateDataSource(dbConnectionString!);
         services.AddSingleton(dataSource);
 
-        // Interceptors & DB Context
         services.AddScoped<Cinema.Infrastructure.Persistence.Interceptors.DispatchDomainEventsInterceptor>();
         services.AddScoped<ApplicationDbContextInitializer>();
 
@@ -91,7 +88,6 @@ public static class ConfigureInfrastructureServices
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // Identity Core
         services.AddIdentityCore<User>(options =>
             {
                 options.Password.RequireDigit = true;
@@ -104,7 +100,6 @@ public static class ConfigureInfrastructureServices
             .AddEntityFrameworkStores<ApplicationDbContext>()
             .AddDefaultTokenProviders();
 
-        // JWT Auth
         services.AddAuthentication(options =>
             {
                 options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -141,16 +136,13 @@ public static class ConfigureInfrastructureServices
 
     private static IServiceCollection AddMessaging(this IServiceCollection services, IConfiguration configuration)
     {
-        // 1. Email Service
         services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
         services.AddTransient<IEmailService, SmtpEmailService>();
 
-        // 2. Frontend Settings
         services.AddOptions<FrontendSettings>()
             .Bind(configuration.GetSection(FrontendSettings.SectionName))
             .ValidateDataAnnotations();
 
-        // 3. MassTransit (RabbitMQ)
         services.AddMassTransit(x =>
         {
             x.AddConsumer<TicketPurchasedConsumer>();
@@ -173,10 +165,6 @@ public static class ConfigureInfrastructureServices
                     h.Username(rabbitUser ?? string.Empty);
                     h.Password(rabbitPass ?? string.Empty);
 
-                    // h.UseSsl(s =>
-                    // {
-                    //     s.Protocol = System.Security.Authentication.SslProtocols.Tls12;
-                    // });
                 });
 
                 cfg.ReceiveEndpoint("loyalty.events", e =>
@@ -218,7 +206,6 @@ public static class ConfigureInfrastructureServices
 
     private static IServiceCollection AddExternalServices(this IServiceCollection services, IConfiguration configuration)
     {
-        // gRPC Loyalty Service
         services.AddGrpcClient<LoyaltyService.LoyaltyServiceClient>(o =>
         {
             var url = configuration["Grpc:LoyaltyServiceUrl"];

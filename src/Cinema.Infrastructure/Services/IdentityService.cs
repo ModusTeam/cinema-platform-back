@@ -68,6 +68,7 @@ public class IdentityService(
     public async Task<Result<(string AccessToken, string RefreshToken)>> RefreshTokenAsync(string requestRefreshToken)
     {
         var storedToken = await context.RefreshTokens
+            .AsNoTracking()
             .Include(x => x.User)
             .FirstOrDefaultAsync(x => x.Token == requestRefreshToken);
 
@@ -83,8 +84,6 @@ public class IdentityService(
         var newAccessToken = tokenService.GenerateAccessToken(user, roles);
         var newRefreshToken = tokenService.GenerateRefreshToken();
 
-        storedToken.IsRevoked = true;
-
         var newTokenEntity = new RefreshToken
         {
             Id = Guid.NewGuid(),
@@ -93,8 +92,17 @@ public class IdentityService(
             ExpiryDate = DateTime.UtcNow.AddDays(7)
         };
 
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        int claimed = await context.RefreshTokens
+            .Where(x => x.Id == storedToken.Id && !x.IsRevoked && x.ExpiryDate > DateTime.UtcNow)
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.IsRevoked, true));
+
+        if (claimed == 0)
+            return Result.Failure<(string, string)>(new Error("Token.Invalid", "Invalid or revoked token."));
+
         await context.RefreshTokens.AddAsync(newTokenEntity);
         await context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return Result.Success((newAccessToken, newRefreshToken));
     }

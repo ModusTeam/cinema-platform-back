@@ -1,5 +1,6 @@
 using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Jobs;
 using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Orders.Commands.CreateOrder;
 using Cinema.Application.Orders.Commands.CancelOrder;
@@ -12,6 +13,7 @@ using Cinema.Application.Common.Models.DomainEventNotification;
 using Cinema.Application.Orders.IntegrationEvents;
 using Cinema.Application.Orders.Services;
 using Cinema.Application.Services;
+using Cinema.Application.Seats.Commands.LockSeat;
 using Cinema.Application.Tickets.Queries.GetTicketDetails;
 using Cinema.Catalog.Domain.Entities;
 using Cinema.Catalog.Domain.Enums;
@@ -41,12 +43,130 @@ using Xunit;
 namespace Cinema.OrdersTests;
 
 // Only run with a disposable pgvector PostgreSQL database named cinema_orders_test_*.
-public class OrderReservationPostgresTests
+public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
+    [Fact]
+    public async Task Missing_Lock_Releases_Other_Owned_Seats_Before_Reservation()
+    {
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        Guid userId = Guid.NewGuid();
+        Guid sessionId = Guid.NewGuid();
+        Guid firstSeat = Guid.NewGuid();
+        Guid missingSeat = Guid.NewGuid();
+        currentUser.UserId.Returns(userId);
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+        locks.ValidateAndExtendLockAsync(sessionId, firstSeat, userId, Arg.Any<CancellationToken>()).Returns(true);
+        locks.ValidateAndExtendLockAsync(sessionId, missingSeat, userId, Arg.Any<CancellationToken>()).Returns(false);
+        IOrderReservationService reservation = Substitute.For<IOrderReservationService>();
+        IOrderCheckoutOrchestrator checkout = Substitute.For<IOrderCheckoutOrchestrator>();
+        CreateOrderCommandHandler handler = new(reservation, currentUser, locks, checkout,
+            NullLogger<CreateOrderCommandHandler>.Instance);
+
+        Result<Guid> result = await handler.Handle(new CreateOrderCommand
+        {
+            SessionId = sessionId, SeatIds = [firstSeat, missingSeat], PaymentToken = "token"
+        }, TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Order.LockExpired");
+        await locks.Received(1).UnlockSeatsAsync(sessionId, Arg.Is<IEnumerable<Guid>>(ids =>
+            ids.Contains(firstSeat) && ids.Contains(missingSeat)), userId, Arg.Any<CancellationToken>());
+        await reservation.DidNotReceiveWithAnyArgs().ReserveOrderAsync(default, default, default!, default);
+    }
+
+    [Fact]
+    public async Task Reservation_Exception_Releases_Owned_Lock_And_Propagates_Error()
+    {
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        Guid userId = Guid.NewGuid();
+        Guid sessionId = Guid.NewGuid();
+        Guid seatId = Guid.NewGuid();
+        currentUser.UserId.Returns(userId);
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+        locks.ValidateAndExtendLockAsync(sessionId, seatId, userId, Arg.Any<CancellationToken>()).Returns(true);
+        IOrderReservationService reservation = Substitute.For<IOrderReservationService>();
+        reservation.ReserveOrderAsync(userId, sessionId, Arg.Any<List<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<Result<Guid>>(new InvalidOperationException("database unavailable")));
+        CreateOrderCommandHandler handler = new(reservation, currentUser, locks,
+            Substitute.For<IOrderCheckoutOrchestrator>(), NullLogger<CreateOrderCommandHandler>.Instance);
+
+        Func<Task> reserve = () => handler.Handle(new CreateOrderCommand
+        {
+            SessionId = sessionId, SeatIds = [seatId], PaymentToken = "token"
+        }, TestContext.Current.CancellationToken);
+
+        await reserve.Should().ThrowAsync<InvalidOperationException>();
+        await locks.Received(1).UnlockSeatsAsync(sessionId, Arg.Is<IEnumerable<Guid>>(ids =>
+            ids.Single() == seatId), userId, Arg.Any<CancellationToken>());
+    }
+
+
+    [Fact]
+    public async Task Lock_Validator_Rejects_Inactive_And_Sold_Seats()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        LockSeatCommandValidator validator = new(database.Context);
+        LockSeatCommand request = new(database.Session.Id.Value, database.Seat.Id.Value);
+        (await validator.ValidateAsync(request, TestContext.Current.CancellationToken)).IsValid.Should().BeTrue();
+
+        database.Seat.SetStatus(SeatStatus.Maintenance);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        (await validator.ValidateAsync(request, TestContext.Current.CancellationToken)).IsValid.Should().BeFalse();
+
+        database.Seat.SetStatus(SeatStatus.Active);
+        OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
+            new() { [database.Seat.Id] = 50m });
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        (await validator.ValidateAsync(request, TestContext.Current.CancellationToken)).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Reservation_Rejects_Duplicate_And_Foreign_Hall_Seats()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> duplicate = await database.ReserveAsync([database.Seat.Id.Value, database.Seat.Id.Value]);
+        duplicate.IsFailure.Should().BeTrue();
+
+        Hall otherHall = Hall.Create(EntityId<Hall>.New(), $"Other hall {Guid.NewGuid():N}");
+        Seat foreignSeat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active,
+            otherHall.Id, database.Seat.SeatTypeId);
+        otherHall.ApplyLayout([foreignSeat]);
+        database.Context.Halls.Add(otherHall);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Result<Guid> foreign = await database.ReserveAsync(foreignSeat.Id.Value);
+        foreign.IsFailure.Should().BeTrue();
+        (await database.Context.Orders.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Cancelled_Session_Cannot_Be_Locked_Or_Reserved()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        database.Session.Cancel(DateTime.UtcNow);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        LockSeatCommandValidator validator = new(database.Context);
+        (await validator.ValidateAsync(new LockSeatCommand(database.Session.Id.Value, database.Seat.Id.Value),
+            TestContext.Current.CancellationToken)).IsValid.Should().BeFalse();
+        (await database.ReserveAsync(database.Seat.Id.Value)).Error.Code.Should().Be("Session.NotAvailable");
+    }
+
+    [Fact]
+    public async Task Competing_Reservations_Create_Only_One_Active_Ticket()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid>[] results = await Task.WhenAll(
+            database.ReserveAsync(database.Seat.Id.Value),
+            database.ReserveAsync(database.Seat.Id.Value));
+
+        results.Count(result => result.IsSuccess).Should().Be(1);
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Tickets.CountAsync(ticket => ticket.TicketStatus == TicketStatus.Valid,
+            TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
     [Fact]
     public async Task Ticket_Details_Use_Persisted_Order_Ownership_And_Preserve_Original_Dto()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Order order = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -77,18 +197,16 @@ public class OrderReservationPostgresTests
             TestContext.Current.CancellationToken);
         owner.IsSuccess.Should().BeTrue();
         owner.Value.Should().Be(baselineDto);
-        counter.Commands.Should().HaveCount(2);
-        counter.Commands[0].Should().Contain("tickets").And.Contain("is_active");
-        counter.Commands[1].Should().Contain("orders").And.Contain("user_id").And.Contain("id");
-        counter.Commands[1].Should().NotContain("tickets");
+        counter.Commands.Should().ContainSingle();
+        counter.Commands[0].Should().Contain("tickets").And.Contain("orders").And.Contain("user_id");
 
         counter.Commands.Clear();
         currentUser.UserId.Returns(Guid.NewGuid());
         Result<TicketDto> stranger = await handler.Handle(new GetTicketDetailsQuery(ticketId),
             TestContext.Current.CancellationToken);
         stranger.IsFailure.Should().BeTrue();
-        stranger.Error.Code.Should().Be("Ticket.AccessDenied");
-        counter.Commands.Should().HaveCount(2);
+        stranger.Error.Code.Should().Be("Ticket.NotFound");
+        counter.Commands.Should().ContainSingle();
 
         counter.Commands.Clear();
         currentUser.UserId.Returns(database.UserId);
@@ -103,14 +221,14 @@ public class OrderReservationPostgresTests
         counter.Commands.Clear();
         Result<TicketDto> hidden = await handler.Handle(new GetTicketDetailsQuery(ticketId),
             TestContext.Current.CancellationToken);
-        hidden.Error.Code.Should().Be("Ticket.NotFound");
+        hidden.IsSuccess.Should().BeTrue();
         counter.Commands.Should().ContainSingle();
     }
 
     [Fact]
     public async Task History_Batches_Tickets_And_Matches_Original_Projection()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Seat secondSeat = await database.AddSeatAsync();
         Order first = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat, secondSeat],
             new() { [database.Seat.Id] = 50m, [secondSeat.Id] = 60m });
@@ -181,8 +299,32 @@ public class OrderReservationPostgresTests
                 .ProjectToType<TicketDto>(original).ToListAsync(TestContext.Current.CancellationToken);
         Result<List<OrderDto>> filteredHistory = await new GetUserOrdersQueryHandler(filtered)
             .Handle(new GetUserOrdersQuery(database.UserId), TestContext.Current.CancellationToken);
-        filteredHistory.Value.Should().BeEquivalentTo(filteredBaseline);
-        filteredHistory.Value.Should().OnlyContain(order => order.Tickets.Count == 0);
+        filteredHistory.Value.Should().HaveCount(2);
+        filteredHistory.Value.Single(order => order.Id == first.Id.Value).Tickets.Should().HaveCount(2);
+        filteredHistory.Value.Single(order => order.Id == second.Id.Value).Tickets.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Required_Session_Filter_Drops_Include_But_History_Preserves_Order()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Order order = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session,
+            [database.Seat], new() { [database.Seat.Id] = 50m });
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
+        hall.Deactivate();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext read = database.NewContext();
+        (await read.Orders.AsNoTracking().CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        (await read.Orders.AsNoTracking().Include(item => item.Session)
+            .ToListAsync(TestContext.Current.CancellationToken)).Should().BeEmpty();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        Result<OrderHistoryVm> history = await new GetMyOrdersQueryHandler(read, currentUser)
+            .Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken);
+        history.Value.ActiveOrders.Concat(history.Value.PastOrders)
+            .Select(item => item.Id).Should().Contain(order.Id.Value);
     }
 
     private sealed class HistoryCommandCounter : DbCommandInterceptor
@@ -201,7 +343,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Paid_Event_Queries_Persisted_Tickets_During_SaveChanges()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Seat second = await database.AddSeatAsync();
         Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
         reserved.IsSuccess.Should().BeTrue();
@@ -222,8 +364,10 @@ public class OrderReservationPostgresTests
         order.MarkAsPaid("paid-test");
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value, database.UserId);
-        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, second.Id.Value, database.UserId);
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value,
+            database.UserId, TestContext.Current.CancellationToken);
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, second.Id.Value,
+            database.UserId, TestContext.Current.CancellationToken);
         await notifier.Received(1).NotifyOrderCompleted(database.UserId, reserved.Value);
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Orders.SingleAsync(o => o.Id == order.Id, TestContext.Current.CancellationToken))
@@ -233,7 +377,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Paid_Event_Includes_Added_Ticket_Before_Insert()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         ISeatLockingService locks = Substitute.For<ISeatLockingService>();
         ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
         IPublisher publisher = Substitute.For<IPublisher>();
@@ -250,7 +394,8 @@ public class OrderReservationPostgresTests
 
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value, database.UserId);
+        await locks.Received(1).UnlockSeatAsync(database.Session.Id.Value, database.Seat.Id.Value,
+            database.UserId, TestContext.Current.CancellationToken);
         await notifier.Received(1).NotifyOrderCompleted(database.UserId, order.Id.Value);
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Tickets.SingleAsync(t => t.OrderId == order.Id, TestContext.Current.CancellationToken))
@@ -260,7 +405,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Cancellation_Loads_Tracked_Tickets_And_Dispatches_Seat_Side_Effects()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Seat second = await database.AddSeatAsync();
         Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
         reserved.IsSuccess.Should().BeTrue();
@@ -280,7 +425,7 @@ public class OrderReservationPostgresTests
         currentUser.UserId.Returns(database.UserId);
         IPaymentService payment = Substitute.For<IPaymentService>();
 
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment)
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -291,7 +436,7 @@ public class OrderReservationPostgresTests
         refundedTickets.Should().OnlyContain(t => t.OrderId == trackedOrder.Id && t.TicketStatus == TicketStatus.Refunded);
         await locks.Received(1).UnlockSeatsAsync(database.Session.Id.Value,
             Arg.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(new[] { database.Seat.Id.Value, second.Id.Value })),
-            database.UserId, Arg.Any<CancellationToken>());
+            database.UserId, Arg.Any<CancellationToken>(), false);
         await notifier.Received(1).NotifySeatUnlockedAsync(database.Session.Id.Value, database.Seat.Id.Value,
             Arg.Any<CancellationToken>());
         await notifier.Received(1).NotifySeatUnlockedAsync(database.Session.Id.Value, second.Id.Value,
@@ -304,9 +449,9 @@ public class OrderReservationPostgresTests
     }
 
     [Fact]
-    public async Task Cancellation_Respects_Ticket_Filter_In_Fresh_Context()
+    public async Task Cancellation_Refunds_Ticket_In_Inactive_Hall()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
         reserved.IsSuccess.Should().BeTrue();
         Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
@@ -316,21 +461,237 @@ public class OrderReservationPostgresTests
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.IsInRole("Admin").Returns(true);
 
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, Substitute.For<IPaymentService>())
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, Substitute.For<IPaymentService>(), Substitute.For<ILoyaltyService>())
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
-        cancellation.ChangeTracker.Entries<Ticket>().Should().BeEmpty();
+        cancellation.ChangeTracker.Entries<Ticket>().Should().ContainSingle();
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Tickets.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
         (await verify.Tickets.IgnoreQueryFilters().SingleAsync(TestContext.Current.CancellationToken))
-            .TicketStatus.Should().Be(TicketStatus.Valid);
+            .TicketStatus.Should().Be(TicketStatus.Refunded);
+    }
+
+    [Fact]
+    public async Task Paid_Cancellation_Refunds_Payment_And_Points_Once_And_Persists_Tickets()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Seat second = await database.AddSeatAsync();
+        Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
+        await using (ApplicationDbContext paidContext = database.NewContext())
+        {
+            Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken);
+            order.ApplyLoyaltyDiscount(10);
+            order.MarkAsPaid("payment-1");
+            await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("refund-1"));
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        loyalty.RefundPointsAsync(database.UserId, 10, reserved.Value, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((true, string.Empty));
+        await using (ApplicationDbContext cancellation = database.NewContext())
+        {
+            Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, loyalty)
+                .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+            result.IsSuccess.Should().BeTrue();
+        }
+        await using (ApplicationDbContext repeated = database.NewContext())
+        {
+            Result result = await new CancelOrderCommandHandler(repeated, currentUser, payment, loyalty)
+                .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+            result.Error.Code.Should().Be("Order.AlreadyCancelled");
+        }
+
+        await payment.Received(1).RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>());
+        await loyalty.Received(1).RefundPointsAsync(database.UserId, 10, reserved.Value,
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Cancelled);
+        (await verify.Tickets.Where(ticket => ticket.OrderId == new EntityId<Order>(reserved.Value))
+            .ToListAsync(TestContext.Current.CancellationToken)).Should()
+            .OnlyContain(ticket => ticket.TicketStatus == TicketStatus.Refunded);
+    }
+
+    [Fact]
+    public async Task Cancellation_Without_Tickets_Does_Not_Refund_Or_Change_Order()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Order order = Order.New(EntityId<Order>.New(), 50m, database.UserId, database.Session.Id);
+        order.MarkAsPaid("payment-1");
+        database.Context.Orders.Add(order);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+
+        await using ApplicationDbContext cancellation = database.NewContext();
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment,
+            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(order.Id.Value),
+            TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Order.InvalidState");
+        await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, TestContext.Current.CancellationToken);
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == order.Id, TestContext.Current.CancellationToken))
+            .Status.Should().Be(OrderStatus.Paid);
+    }
+
+    [Fact]
+    public async Task Inactive_Hall_Purchased_Ticket_Remains_Visible_Only_To_Owner()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await using (ApplicationDbContext paidContext = database.NewContext())
+        {
+            Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken);
+            order.MarkAsPaid("payment-1");
+            await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        Guid ticketId = (await database.Context.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Id.Value;
+        Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
+        hall.Deactivate();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext read = database.NewContext();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        Result<TicketDto> owned = await new GetTicketDetailsQueryHandler(read, currentUser)
+            .Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken);
+        owned.IsSuccess.Should().BeTrue();
+        owned.Value.Id.Should().Be(ticketId);
+        Result<Cinema.Application.Orders.Queries.GetMyOrders.OrderHistoryVm> history = await new GetMyOrdersQueryHandler(read, currentUser)
+            .Handle(new GetMyOrdersQuery(), TestContext.Current.CancellationToken);
+        history.IsSuccess.Should().BeTrue();
+        history.Value.ActiveOrders.Concat(history.Value.PastOrders).Single().Tickets.Should().ContainSingle();
+
+        currentUser.UserId.Returns(Guid.NewGuid());
+        Result<TicketDto> foreign = await new GetTicketDetailsQueryHandler(read, currentUser)
+            .Handle(new GetTicketDetailsQuery(ticketId), TestContext.Current.CancellationToken);
+        foreign.Error.Code.Should().Be("Ticket.NotFound");
+        (await read.Seats.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+        (await read.Sessions.CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Paid_Cancellation_Rolls_Back_Consumed_Gold_Upgrade()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await using (ApplicationDbContext paidContext = database.NewContext())
+        {
+            Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken);
+            Ticket ticket = await paidContext.Tickets.SingleAsync(t => t.OrderId == order.Id,
+                TestContext.Current.CancellationToken);
+            order.ApplyGoldDiscount(20m);
+            ticket.ApplyGoldUpgrade(30m);
+            order.MarkAsPaid("payment-1");
+            await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("refund-1"));
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        loyalty.RollbackGoldUpgradeAsync(database.UserId, reserved.Value, Arg.Any<CancellationToken>())
+            .Returns((true, string.Empty));
+
+        await using ApplicationDbContext cancellation = database.NewContext();
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, loyalty)
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        await loyalty.Received(1).RollbackGoldUpgradeAsync(database.UserId, reserved.Value,
+            Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Refunded);
+    }
+
+    [Fact]
+    public async Task Cancellation_At_Ten_Minute_Cutoff_Leaves_Order_And_Ticket_Valid()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        DateTime cutoffStart = DateTime.UtcNow.AddMinutes(10);
+        await database.Context.Sessions.Where(session => session.Id == database.Session.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(session => session.StartTime, cutoffStart),
+                TestContext.Current.CancellationToken);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+
+        await using ApplicationDbContext cancellation = database.NewContext();
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser,
+            Substitute.For<IPaymentService>(), Substitute.For<ILoyaltyService>())
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Order.TooLate");
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Pending);
+        (await verify.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
+    [Fact]
+    public async Task Database_Save_Failure_After_Payment_Refund_Leaves_Paid_Order_For_Reconciliation()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await using (ApplicationDbContext paidContext = database.NewContext())
+        {
+            Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken);
+            order.MarkAsPaid("payment-1");
+            await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("refund-1"));
+        await using ApplicationDbContext cancellation = database.NewContext(interceptor: new FailOrderUpdateInterceptor());
+
+        Func<Task> cancel = async () => await new CancelOrderCommandHandler(cancellation, currentUser, payment,
+            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(reserved.Value),
+            TestContext.Current.CancellationToken);
+
+        DbUpdateException failure = (await cancel.Should().ThrowAsync<DbUpdateException>()).Which;
+        failure.InnerException.Should().BeOfType<InvalidOperationException>();
+        await payment.Received(1).RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+        (await verify.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
+    private sealed class FailOrderUpdateInterceptor : DbCommandInterceptor
+    {
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("UPDATE orders", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Simulated cancellation save failure.");
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     [Fact]
     public async Task Reservation_Persists_Multiple_Tickets_With_One_Tracked_Order()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Seat second = await database.AddSeatAsync();
 
         Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
@@ -354,7 +715,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Gold_Checkout_Persists_Ticket_And_Order_Discount_Together()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
         reserved.IsSuccess.Should().BeTrue();
         await using ApplicationDbContext checkoutContext = database.NewContext();
@@ -396,7 +757,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Checkout_Publishes_Persisted_Ticket_Count_For_Multiple_Seats()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Seat second = await database.AddSeatAsync();
         Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
         reserved.IsSuccess.Should().BeTrue();
@@ -422,7 +783,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Gold_Checkout_With_Equal_Prices_Upgrades_One_Tracked_Ticket()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Seat second = await database.AddSeatAsync();
         Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
         reserved.IsSuccess.Should().BeTrue();
@@ -460,7 +821,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Checkout_Confirmation_Count_Respects_Ticket_Query_Filter()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
         reserved.IsSuccess.Should().BeTrue();
         Hall hall = await database.Context.Halls.SingleAsync(TestContext.Current.CancellationToken);
@@ -489,7 +850,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Reservation_Creates_Pending_Order_With_Valid_Ticket_And_Rejects_Resale()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
 
         reserved.IsSuccess.Should().BeTrue();
@@ -504,9 +865,83 @@ public class OrderReservationPostgresTests
     }
 
     [Fact]
+    public async Task Declined_Payment_Releases_Tickets_And_Allows_Resale()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        reserved.IsSuccess.Should().BeTrue();
+        await using ApplicationDbContext checkoutContext = database.NewContext();
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.ProcessPaymentAsync(50m, "UAH", "test_fail_token", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Failure("declined"));
+        OrderCheckoutOrchestrator checkout = new(checkoutContext, Substitute.For<ILoyaltyService>(), payment,
+            Substitute.For<ISeatLockingService>(), Substitute.For<IGoldUpgradePricingService>(),
+            Substitute.For<IPublishEndpoint>(), NullLogger<OrderCheckoutOrchestrator>.Instance);
+
+        Result<Guid> result = await checkout.ProcessCheckoutAsync(database.UserId, database.Session.Id.Value,
+            [database.Seat.Id.Value], reserved.Value, false, false, "test_fail_token",
+            TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Payment.Failed");
+        checkoutContext.ChangeTracker.Entries<Ticket>().Should().ContainSingle()
+            .Which.State.Should().Be(EntityState.Unchanged);
+        await using ApplicationDbContext verify = database.NewContext();
+        Order failed = await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken);
+        failed.Status.Should().Be(OrderStatus.Failed);
+        (await OrderTicketFixture.ForOrder(verify, failed).SingleAsync(TestContext.Current.CancellationToken))
+            .TicketStatus.Should().Be(TicketStatus.Refunded);
+        (await database.ReserveAsync(database.Seat.Id.Value)).IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Expiration_Releases_All_Unpaid_Tickets_Once_And_Preserves_Paid_Orders()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Seat second = await database.AddSeatAsync();
+        Result<Guid> expiredId = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
+        expiredId.IsSuccess.Should().BeTrue();
+        Seat paidSeat = Seat.New(EntityId<Seat>.New(), "A", 3, 1, 3, SeatStatus.Active,
+            database.Seat.HallId, database.Seat.SeatTypeId);
+        database.Context.Seats.Add(paidSeat);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Result<Guid> paidId = await database.ReserveAsync(paidSeat.Id.Value);
+        paidId.IsSuccess.Should().BeTrue();
+        await using (ApplicationDbContext seed = database.NewContext())
+        {
+            Order expired = await seed.Orders.SingleAsync(o => o.Id == new EntityId<Order>(expiredId.Value),
+                TestContext.Current.CancellationToken);
+            seed.Entry(expired).Property(o => o.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
+            Order paid = await seed.Orders.SingleAsync(o => o.Id == new EntityId<Order>(paidId.Value),
+                TestContext.Current.CancellationToken);
+            paid.MarkAsPaid("already-paid");
+            seed.Entry(paid).Property(o => o.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
+            await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        await using ApplicationDbContext jobContext = database.NewContext();
+        CancelExpiredOrdersJob job = new(jobContext, NullLogger<CancelExpiredOrdersJob>.Instance);
+
+        await job.Process(TestContext.Current.CancellationToken);
+        await job.Process(TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext verify = database.NewContext();
+        Order cancelled = await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(expiredId.Value),
+            TestContext.Current.CancellationToken);
+        cancelled.Status.Should().Be(OrderStatus.Cancelled);
+        (await OrderTicketFixture.ForOrder(verify, cancelled).ToListAsync(TestContext.Current.CancellationToken))
+            .Should().HaveCount(2).And.OnlyContain(t => t.TicketStatus == TicketStatus.Refunded);
+        Order persistedPaid = await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(paidId.Value),
+            TestContext.Current.CancellationToken);
+        persistedPaid.Status.Should().Be(OrderStatus.Paid);
+        (await OrderTicketFixture.ForOrder(verify, persistedPaid).SingleAsync(TestContext.Current.CancellationToken))
+            .TicketStatus.Should().Be(TicketStatus.Valid);
+        (await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value])).IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Missing_And_Inactive_Seats_And_Missing_Session_Do_Not_Create_Orders()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         (await database.ReserveAsync(Guid.NewGuid())).Error.Code.Should().Be("Order.SeatsNotFound");
         database.Seat.SetStatus(SeatStatus.Maintenance);
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -520,7 +955,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Pricing_Failure_Rolls_Back_Reservation_And_Allows_Retry()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         IPriceCalculator failingCalculator = Substitute.For<IPriceCalculator>();
         failingCalculator.CalculatePrice(Arg.Any<Pricing>(), Arg.Any<EntityId<SeatType>>(), Arg.Any<DateTime>())
             .Returns(_ => throw new InvalidOperationException("pricing unavailable"));
@@ -536,7 +971,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Persistence_Failure_Rolls_Back_Order_And_Tickets_And_Allows_Retry()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         IPriceCalculator overflowingCalculator = Substitute.For<IPriceCalculator>();
         overflowingCalculator.CalculatePrice(Arg.Any<Pricing>(), Arg.Any<EntityId<SeatType>>(), Arg.Any<DateTime>())
             .Returns(999999999999999999m);
@@ -552,7 +987,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Independent_Row_Lock_Causes_Nowait_Conflict()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         await using NpgsqlConnection connection = new(database.ConnectionString);
         await connection.OpenAsync(TestContext.Current.CancellationToken);
         await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(TestContext.Current.CancellationToken);
@@ -562,10 +997,8 @@ public class OrderReservationPostgresTests
             await command.ExecuteScalarAsync(TestContext.Current.CancellationToken); // Lock acquired before reservation starts.
         }
 
-        Func<Task> reserve = async () => await database.ReserveAsync(database.Seat.Id.Value);
-        InvalidOperationException failure = (await reserve.Should().ThrowAsync<InvalidOperationException>()).Which;
-        failure.InnerException.Should().BeOfType<PostgresException>()
-            .Which.SqlState.Should().Be(PostgresErrorCodes.LockNotAvailable);
+        Result<Guid> conflict = await database.ReserveAsync(database.Seat.Id.Value);
+        conflict.Error.Code.Should().Be("Order.SeatsUnavailable");
         await transaction.RollbackAsync(TestContext.Current.CancellationToken);
         (await database.ReserveAsync(database.Seat.Id.Value)).IsSuccess.Should().BeTrue();
     }
@@ -573,7 +1006,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Checkout_Failure_After_Reservation_Leaves_Committed_Pending_Order()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(database.UserId);
         ISeatLockingService locks = Substitute.For<ISeatLockingService>();
@@ -613,7 +1046,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Saving_Order_Tracks_Tickets_And_Database_Cascades_Their_Deletion()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Order order = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -655,7 +1088,7 @@ public class OrderReservationPostgresTests
     [InlineData(TicketStatus.Used)]
     public async Task Partial_Index_Rejects_Valid_Or_Used_Duplicate_But_Allows_Refunded_Tickets(TicketStatus existingStatus)
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Order first = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -694,7 +1127,7 @@ public class OrderReservationPostgresTests
     [Fact]
     public async Task Ticket_Query_Filter_Hides_Tickets_In_Inactive_Halls()
     {
-        await using ReservationDatabase database = await ReservationDatabase.CreateAsync();
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Order order = OrderTicketFixture.CreateAndTrack(database.Context, database.UserId, database.Session, [database.Seat],
             new() { [database.Seat.Id] = 50m });
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -727,29 +1160,13 @@ public class OrderReservationPostgresTests
             Context = NewContext();
         }
 
-        public static async Task<ReservationDatabase> CreateAsync()
+        public static async Task<ReservationDatabase> CreateAsync(PostgresSchemaTemplate template)
         {
-            string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_POSTGRES_CONNECTION");
-            if (string.IsNullOrWhiteSpace(connectionString))
-                Assert.Skip("Set CINEMA_TEST_POSTGRES_CONNECTION to an isolated disposable pgvector database named cinema_orders_test_*.");
-            NpgsqlConnectionStringBuilder builder = new(connectionString);
-            if (builder.Database is null || !builder.Database.StartsWith("cinema_orders_test_", StringComparison.Ordinal))
-                throw new InvalidOperationException("Reservation tests require a disposable cinema_orders_test_* database.");
-
-            string databaseName = $"cinema_orders_test_{Guid.NewGuid():N}";
-            builder.Database = "postgres";
-            string adminConnectionString = builder.ConnectionString;
-            await using (NpgsqlConnection admin = new(adminConnectionString))
-            {
-                await admin.OpenAsync(TestContext.Current.CancellationToken);
-                await using NpgsqlCommand create = new($"CREATE DATABASE {databaseName}", admin);
-                await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-            }
-            builder.Database = databaseName;
-            ReservationDatabase database = new(builder.ConnectionString, adminConnectionString, databaseName);
+            (string connectionString, string adminConnectionString, string databaseName) =
+                await template.CreateDatabaseAsync();
+            ReservationDatabase database = new(connectionString, adminConnectionString, databaseName);
             try
             {
-                await database.Context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
                 User user = new() { Id = database._userId, UserName = $"order-test-{Guid.NewGuid():N}" };
                 string suffix = Guid.NewGuid().ToString("N");
                 Movie movie = Movie.CreateManual($"Reservation test {suffix}", "test", 90, DateTime.UtcNow.Year, MovieStatus.ComingSoon);

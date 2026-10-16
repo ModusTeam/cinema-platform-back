@@ -5,6 +5,7 @@ using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Cinema.Application.Services;
 
@@ -14,6 +15,9 @@ public class OrderReservationService(
 {
     public async Task<Result<Guid>> ReserveOrderAsync(Guid userId, Guid sessionId, List<Guid> seatIds, CancellationToken ct)
     {
+        if (seatIds.Count == 0 || seatIds.Count != seatIds.Distinct().Count())
+            return Result.Failure<Guid>(new Error("Order.SeatsNotFound", "Mismatch in seat availability."));
+
         var strategy = context.Database.CreateExecutionStrategy();
 
         return await strategy.ExecuteAsync(async () =>
@@ -43,6 +47,11 @@ public class OrderReservationService(
                  
                 var session = await context.Sessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == new EntityId<Session>(sessionId), ct);
                 if (session == null) return Result.Failure<Guid>(new Error("Session.NotFound", "Session not found"));
+                if (session.StartTime <= DateTime.UtcNow ||
+                    session.Status is SessionStatus.Cancelled or SessionStatus.Ended or SessionStatus.SoldOut)
+                    return Result.Failure<Guid>(new Error("Session.NotAvailable", "Session is not available for booking."));
+                if (seats.Any(seat => seat.HallId != session.HallId))
+                    return Result.Failure<Guid>(new Error("Order.SeatsNotFound", "Mismatch in seat availability."));
 
                 var pricing = await context.Pricings.Include(p => p.PricingItems).AsNoTracking().FirstOrDefaultAsync(p => p.Id == session.PricingId, ct);
                 if (pricing == null) return Result.Failure<Guid>(new Error("Pricing.NotFound", "Pricing not found"));
@@ -64,6 +73,19 @@ public class OrderReservationService(
                 await transaction.CommitAsync(ct);
                 
                 return Result.Success(order.Id.Value);
+            }
+            catch (DbUpdateException exception) when (exception.InnerException is PostgresException postgres &&
+                postgres.SqlState == PostgresErrorCodes.UniqueViolation &&
+                postgres.ConstraintName == "ix_tickets_session_id_seat_id")
+            {
+                await transaction.RollbackAsync(ct);
+                return Result.Failure<Guid>(new Error("Order.SeatsSold", "Seats already sold."));
+            }
+            catch (InvalidOperationException exception) when (exception.InnerException is PostgresException postgres &&
+                postgres.SqlState == PostgresErrorCodes.LockNotAvailable)
+            {
+                await transaction.RollbackAsync(ct);
+                return Result.Failure<Guid>(new Error("Order.SeatsUnavailable", "Seats are being reserved."));
             }
             catch (Exception)
             {

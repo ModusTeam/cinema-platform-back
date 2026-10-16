@@ -17,6 +17,7 @@ internal static class OrderHistoryTickets
         EntityId<Order>[] orderIds = orders.Select(order => new EntityId<Order>(order.Id)).ToArray();
         var tickets = await context.Tickets
             .AsNoTracking()
+            .IgnoreQueryFilters()
             .Where(ticket => orderIds.Contains(ticket.OrderId))
             .Include(ticket => ticket.Session)!.ThenInclude(session => session!.Movie)
             .Include(ticket => ticket.Session)!.ThenInclude(session => session!.Hall)
