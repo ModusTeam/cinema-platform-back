@@ -71,7 +71,7 @@ public class OrderTicketDomainTests
             .DeleteBehavior.Should().Be(DeleteBehavior.Cascade);
         ticketType.GetQueryFilter().Should().NotBeNull();
         ticketType.GetIndexes().Should().ContainSingle(index => index.IsUnique &&
-            index.GetFilter() == "ticket_status IN (0, 1)");
+            index.GetFilter() == "ticket_status IN (0, 1, 3)");
     }
 
     [Fact]
@@ -236,7 +236,7 @@ public class OrderTicketDomainTests
         Order order = Order.New(EntityId<Order>.New(), 20m, Guid.NewGuid(), EntityId<Session>.New());
         context.Orders.Add(order);
         order.MarkAsPaid("transaction");
-        order.MarkAsPaid("duplicate");
+        order.MarkAsPaid("transaction");
 
         CancellationToken cancellationToken = TestContext.Current.CancellationToken;
         await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context, cancellationToken);

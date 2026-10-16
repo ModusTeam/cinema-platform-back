@@ -1125,6 +1125,47 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
     }
 
     [Fact]
+    public async Task Reserved_Seat_Blocks_Another_Order_Until_Released_And_Keeps_History()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Order first = Order.New(EntityId<Order>.New(), 50m, database.UserId, database.Session.Id);
+        Ticket reservation = Ticket.Reserve(EntityId<Ticket>.New(), 50m, first.Id, database.Session.Id, database.Seat.Id);
+        database.Context.Orders.Add(first);
+        database.Context.Tickets.Add(reservation);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using (ApplicationDbContext duplicateContext = database.NewContext())
+        {
+            Order duplicate = Order.New(EntityId<Order>.New(), 50m, database.UserId, database.Session.Id);
+            duplicateContext.Orders.Add(duplicate);
+            duplicateContext.Tickets.Add(Ticket.Reserve(EntityId<Ticket>.New(), 50m,
+                duplicate.Id, database.Session.Id, database.Seat.Id));
+            Func<Task> save = () => duplicateContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+            DbUpdateException failure = (await save.Should().ThrowAsync<DbUpdateException>()).Which;
+            failure.InnerException.Should().BeOfType<PostgresException>()
+                .Which.SqlState.Should().Be(PostgresErrorCodes.UniqueViolation);
+        }
+
+        first.MarkAsExpired();
+        reservation.ReleaseReservation(first);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext replacementContext = database.NewContext();
+        Order replacement = Order.New(EntityId<Order>.New(), 50m, database.UserId, database.Session.Id);
+        replacementContext.Orders.Add(replacement);
+        replacementContext.Tickets.Add(Ticket.Reserve(EntityId<Ticket>.New(), 50m,
+            replacement.Id, database.Session.Id, database.Seat.Id));
+        await replacementContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Tickets.IgnoreQueryFilters().CountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+        (await verify.Tickets.IgnoreQueryFilters().CountAsync(t => t.TicketStatus == TicketStatus.Released,
+            TestContext.Current.CancellationToken)).Should().Be(1);
+        (await verify.Orders.CountAsync(o => o.Status == OrderStatus.Expired,
+            TestContext.Current.CancellationToken)).Should().Be(1);
+    }
+
+    [Fact]
     public async Task Ticket_Query_Filter_Hides_Tickets_In_Inactive_Halls()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
