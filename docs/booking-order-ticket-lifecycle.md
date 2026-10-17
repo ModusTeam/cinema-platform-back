@@ -1,4 +1,4 @@
-# Booking, order, and ticket lifecycle (Phase 2)
+# Booking, order, and ticket lifecycle (Phase 3)
 
 ## Current path and compatibility boundary
 
@@ -16,6 +16,17 @@ Availability, booking validation, session occupancy, and session or seat changes
 
 Redis locks are short lived admission hints. A `Ticket` in `Reserved` status is the durable reservation owned by `OrderId`; it is not a purchased ticket. `Valid` means confirmed purchase, `Used` means admission, `Refunded` means a purchase was refunded, and `Released` means an unpaid reservation ended. Historical rows remain. `PaymentProcessing` and `PaymentOutcomeUnknown` retain the reservation until a definitive outcome is established. No separate reservation aggregate is needed because a ticket already carries order, session, and seat identity and has its own historical row.
 
+| Order | Ticket | Meaning |
+| --- | --- | --- |
+| Pending | Reserved | New, unpaid reservation. |
+| PaymentProcessing | Reserved | Checkout claimed; provider outcome pending. |
+| PaymentOutcomeUnknown | Reserved | Provider outcome needs reconciliation. |
+| Paid | Valid or Used | Confirmed purchase; Used has passed admission. |
+| Failed or Expired | Released | Unpaid reservation ended. |
+| Cancelled | Released | Pending reservation cancelled. |
+| Pending | Valid | Legacy ambiguity; seat remains blocked until payment reconciliation. |
+| Failed or Cancelled | Refunded | Historical refunds remain visible but do not block resale. |
+
 | Order from | Allowed next state | Condition |
 | --- | --- | --- |
 | Pending (0) | PaymentProcessing (4), Failed (2), Expired (6), Cancelled (3) | Reserve before charging; expire only before a payment attempt starts. |
@@ -32,7 +43,7 @@ Redis locks are short lived admission hints. A `Ticket` in `Reserved` status is 
 | Valid (0) | Used (1), Refunded (2) | Purchased ticket. |
 | Used (1), Refunded (2), Released (4) | None | Historical rows remain. |
 
-Repeated confirmation, release, and refund calls are harmless when already in their destination state. The current `Ticket.New(..., Valid, ...)` factory remains for legacy callers and is the outstanding bypass of the purchase guard.
+Repeated confirmation, release, and refund calls are harmless when already in their destination state. The current `Ticket.New(..., Valid, ...)` factory remains for legacy callers and is the outstanding bypass of the purchase guard. Admission additionally requires the owning order to be `Paid`, so a legacy `Pending`/`Valid` ticket cannot be used before reconciliation.
 
 ## Persistence and rollout
 
@@ -40,6 +51,18 @@ The unique `(session_id, seat_id)` partial index covers statuses `Reserved (3)`,
 
 Deploy the index migration before the Phase 2 application writes `Reserved`. The migration does not rewrite existing rows. New statuses are appended, preserving numeric values 0–3 for orders and 0–2 for tickets. The REST DTO shapes and existing RabbitMQ and SignalR payloads are unchanged, although order history can now contain the new status names. Consumers of enum names should account for them.
 
-## Phase 2 and #54 boundary
+The DbUpdater migration test applies the previous schema, inserts a legacy `Pending`/`Valid` pair, runs the updater, and verifies IDs, numeric statuses, the new index, and a conflicting reservation rejection. The migration's `Down` method restores the old partial index over `Valid` and `Used` only. A rollback after new `Reserved` rows exist therefore removes their database uniqueness protection; roll back application writes or reconcile reservations before using the old schema. No migration converts or removes historical rows. `Pending`/`Valid` remains seat-blocking and visible in history and details, but cannot be checked out, cancelled as an unpaid reservation, expired, or admitted. Its payment outcome must be established from authoritative provider records before any status change.
 
-The existing `IPaymentService` has no durable attempt identity, idempotent charge key, or outcome lookup. A crash between the external charge and final save, or a failed final save, requires manual reconciliation. Checkout marks an unsuccessful confirmation `PaymentOutcomeUnknown` when it can, preserving reserved seats; if even that save fails, the database may remain `PaymentProcessing`. Neither status is automatically retried or expired. GOLD and points calls also lack a shared transaction with PostgreSQL, so their outcomes may need reconciliation. Existing pre-save domain-event dispatch can publish external effects before a database rollback; Phase 2 does not claim exactly-once messaging. #54 / Cinema.Payments must define attempt identity, provider idempotency, reconciliation, refund coordination, and durable publication.
+## Application boundary and concurrency
+
+`POST /api/orders` currently creates the reservation and immediately attempts checkout in one request. There is no separate public checkout route. `GET /api/orders` and `GET /api/tickets/{id}` expose status names as strings in their DTOs. Owner checks protect details and cancellation; ticket admission is admin-only. New status names extend the values clients may see, while the route and payload shapes remain unchanged.
+
+The repository has handler, service, PostgreSQL, and Redis integration coverage for these paths, but no test host for the complete ASP.NET Core pipeline. Route, serialization, and authorization statements above are based on controller and DTO inspection; they are not claims of HTTP-level integration coverage.
+
+PostgreSQL conditional updates serialize claims on the same `Pending` order: checkout, expiration, and pending cancellation cannot all win. Expiration and pending cancellation commit the order status and ticket releases in one transaction. Checkout commits `PaymentProcessing` before external calls, then saves `Paid`/`Valid` or `Failed`/`Released` together. The partial unique index remains the final seat ownership guard, including legacy `Valid` and `Used` rows. EF change tracking is cleared after checkout's conditional update; expiration reloads after its claim. These guarantees cover local PostgreSQL state, not external effects.
+
+## Payment interruption and #54 handoff
+
+The existing `IPaymentService` has no durable attempt identity, idempotent charge key, or outcome lookup. A crash after persisting `PaymentProcessing` but before the provider call leaves a held reservation with an unstarted payment indistinguishable from an interrupted call. A crash after the provider receives the request but before its response leaves the charge outcome unknown. A crash after provider success but before final database persistence can leave a real charge without `Paid`/`Valid`. Checkout marks a failed confirmation `PaymentOutcomeUnknown` when it can; if that save also fails, the database may remain `PaymentProcessing`. Neither state is automatically retried or expired.
+
+GOLD and points calls lack a shared transaction with PostgreSQL. Their order-scoped keys and persisted ticket flags reduce normal retry duplication, but an interruption between an external call and persistence can still require reconciliation. Paid cancellation refunds before its database save, so a retry after interruption may repeat a provider refund request. Existing pre-save domain-event dispatch can publish external effects before a database rollback. No exactly-once guarantee is claimed. Issue #54 must provide durable payment attempt identity, provider idempotency and outcome lookup, reconciliation of processing and unknown orders and legacy `Pending`/`Valid` rows, refund coordination, and durable event publication.

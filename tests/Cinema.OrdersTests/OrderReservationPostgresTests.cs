@@ -961,6 +961,52 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
     }
 
     [Fact]
+    public async Task Claimed_Checkout_Prevents_Pending_Cancellation_From_Releasing_Ticket()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        TaskCompletionSource<bool> paymentStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<PaymentResult> finishPayment = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            paymentStarted.TrySetResult(true);
+            return finishPayment.Task;
+        });
+        await using ApplicationDbContext checkoutContext = database.NewContext();
+        Task<Result<Guid>> checkout = CreateCheckout(checkoutContext, payment).ProcessCheckoutAsync(
+            database.UserId, database.Session.Id.Value, [database.Seat.Id.Value], reserved.Value,
+            false, false, "token", TestContext.Current.CancellationToken);
+        await paymentStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        await using ApplicationDbContext cancellationContext = database.NewContext();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        currentUser.IsInRole("Admin").Returns(true);
+        Result cancellation = await new CancelOrderCommandHandler(cancellationContext, currentUser, payment,
+            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(reserved.Value),
+                TestContext.Current.CancellationToken);
+
+        cancellation.Error.Code.Should().Be("Order.InvalidState");
+        await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, default);
+        await using (ApplicationDbContext processing = database.NewContext())
+        {
+            (await processing.Orders.SingleAsync(item => item.Id == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.PaymentProcessing);
+            (await processing.Tickets.SingleAsync(item => item.OrderId == new EntityId<Order>(reserved.Value),
+                TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Reserved);
+        }
+
+        finishPayment.SetResult(PaymentResult.Success("single-charge"));
+        (await checkout).IsSuccess.Should().BeTrue();
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(item => item.Id == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+        (await verify.Tickets.SingleAsync(item => item.OrderId == new EntityId<Order>(reserved.Value),
+            TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+    }
+
+    [Fact]
     public async Task Expiration_Claimed_First_Prevents_Payment()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);

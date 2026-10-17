@@ -463,6 +463,42 @@ public class OrderHandlersTests
     }
 
     [Fact]
+    public async Task Admission_Rejects_Legacy_Pending_Valid_Ticket_Until_Order_Is_Paid()
+    {
+        await using ApplicationDbContext context = CreateContext();
+        Hall hall = Hall.Create(EntityId<Hall>.New(), "Admission hall");
+        SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
+        Seat seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
+        hall.ApplyLayout([seat]);
+        DateTime start = DateTime.UtcNow.AddMinutes(30);
+        Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
+            EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
+        Order order = OrderTicketFixture.CreateAndTrack(context, Guid.NewGuid(), session, [seat],
+            new() { [seat.Id] = 25m });
+        context.Halls.Add(hall);
+        context.SeatTypes.Add(seatType);
+        context.Sessions.Add(session);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Ticket ticket = (await OrderTicketFixture.ForOrder(context, order)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        ValidateTicketCommandHandler handler = new(context);
+
+        Cinema.Domain.Shared.Result<string> blocked = await handler.Handle(
+            new ValidateTicketCommand(ticket.Id.Value), TestContext.Current.CancellationToken);
+
+        blocked.Error.Code.Should().Be("Ticket.NotPurchased");
+        ticket.TicketStatus.Should().Be(TicketStatus.Valid);
+
+        order.MarkAsPaid("reconciled-transaction");
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Cinema.Domain.Shared.Result<string> admitted = await handler.Handle(
+            new ValidateTicketCommand(ticket.Id.Value), TestContext.Current.CancellationToken);
+
+        admitted.IsSuccess.Should().BeTrue();
+        ticket.TicketStatus.Should().Be(TicketStatus.Used);
+    }
+
+    [Fact]
     public async Task Expiration_Expires_Order_And_Releases_Ticket()
     {
         await using ApplicationDbContext context = CreateContext();
