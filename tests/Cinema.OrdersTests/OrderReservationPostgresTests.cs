@@ -1142,9 +1142,10 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Abandoned_Gold_Journal_Is_Recovered_From_A_Fresh_Context(bool useConfirmed)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Abandoned_Gold_Journal_Is_Recovered_From_A_Fresh_Context(bool useConfirmed, bool paymentStarted)
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
@@ -1159,6 +1160,11 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
                 order.ConfirmGoldUse();
                 order.ApplyGoldDiscount(20m);
                 ticket.ApplyGoldUpgrade(30m);
+                await interrupted.SaveChangesAsync(TestContext.Current.CancellationToken);
+            }
+            if (paymentStarted)
+            {
+                order.BeginGoldPayment();
                 await interrupted.SaveChangesAsync(TestContext.Current.CancellationToken);
             }
             // No request cleanup runs: only the committed journal survives.
@@ -1177,12 +1183,15 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         await using ApplicationDbContext verify = database.NewContext();
         Order persisted = await verify.Orders.SingleAsync(TestContext.Current.CancellationToken);
         persisted.GoldCheckoutState.Should().Be(GoldCheckoutState.Compensated);
-        persisted.Status.Should().Be(OrderStatus.Failed);
+        persisted.Status.Should().Be(paymentStarted ? OrderStatus.Pending : OrderStatus.Failed);
+        persisted.GoldPaymentOutcomeUnknown.Should().Be(paymentStarted);
         persisted.TotalAmount.Should().Be(50m);
         persisted.PaidAmount.Should().Be(50m);
         Ticket restored = await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken);
         restored.PriceSnapshot.Should().Be(50m);
         restored.IsGoldUpgraded.Should().BeFalse();
+        restored.TicketStatus.Should().Be(paymentStarted ? TicketStatus.Valid : TicketStatus.Refunded);
+        (await database.ReserveAsync(database.Seat.Id.Value)).IsSuccess.Should().Be(!paymentStarted);
         await loyalty.Received(useConfirmed ? 0 : 1).UseGoldUpgradeAsync(database.UserId, reserved.Value, Arg.Any<CancellationToken>());
         await loyalty.Received(1).RollbackGoldUpgradeAsync(database.UserId, reserved.Value, Arg.Any<CancellationToken>());
     }

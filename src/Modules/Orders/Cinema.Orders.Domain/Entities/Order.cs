@@ -25,6 +25,7 @@ public class Order : BaseEntity
     public decimal GoldOriginalTotal { get; private set; }
     public decimal GoldOriginalPaid { get; private set; }
     public bool GoldUseConfirmed { get; private set; }
+    public bool GoldPaymentOutcomeUnknown { get; private set; }
     public DateTime? GoldRecoveryAfter { get; private set; }
 
     public void BeginGoldCheckout(Guid ticketId, decimal ticketPrice)
@@ -57,11 +58,16 @@ public class Order : BaseEntity
         GoldRecoveryAfter = DateTime.UtcNow.AddMinutes(1);
     }
 
+    public void BeginGoldPayment() => GoldPaymentOutcomeUnknown = true;
+
+    public void ResolveGoldPayment() => GoldPaymentOutcomeUnknown = false;
+
     public void CompleteGoldCheckout()
     {
         if (GoldCheckoutState == GoldCheckoutState.Consumed)
         {
             GoldCheckoutState = GoldCheckoutState.Completed;
+            GoldPaymentOutcomeUnknown = false;
             GoldRecoveryAfter = null;
         }
     }
@@ -74,7 +80,8 @@ public class Order : BaseEntity
         PaymentTransactionId = null;
         GoldCheckoutState = GoldCheckoutState.Compensated;
         GoldRecoveryAfter = null;
-        MarkAsFailed();
+        if (!GoldPaymentOutcomeUnknown)
+            MarkAsFailed();
     }
 
     public Session? Session { get; private set; }

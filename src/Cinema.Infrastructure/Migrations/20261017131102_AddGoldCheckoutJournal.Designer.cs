@@ -13,7 +13,7 @@ using Pgvector;
 namespace Cinema.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20261017124400_AddGoldCheckoutJournal")]
+    [Migration("20261017131102_AddGoldCheckoutJournal")]
     partial class AddGoldCheckoutJournal
     {
         /// <inheritdoc />
@@ -233,6 +233,10 @@ namespace Cinema.Infrastructure.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)")
                         .HasColumnName("gold_original_total");
+
+                    b.Property<bool>("GoldPaymentOutcomeUnknown")
+                        .HasColumnType("boolean")
+                        .HasColumnName("gold_payment_outcome_unknown");
 
                     b.Property<DateTime?>("GoldRecoveryAfter")
                         .HasColumnType("timestamp with time zone")

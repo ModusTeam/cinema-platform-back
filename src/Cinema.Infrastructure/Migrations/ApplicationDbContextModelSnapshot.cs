@@ -231,6 +231,10 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("numeric(18,2)")
                         .HasColumnName("gold_original_total");
 
+                    b.Property<bool>("GoldPaymentOutcomeUnknown")
+                        .HasColumnType("boolean")
+                        .HasColumnName("gold_payment_outcome_unknown");
+
                     b.Property<DateTime?>("GoldRecoveryAfter")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("gold_recovery_after");

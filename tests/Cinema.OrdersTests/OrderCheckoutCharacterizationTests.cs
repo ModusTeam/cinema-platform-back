@@ -1,6 +1,8 @@
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Common.Utils;
+using Cinema.Application.Jobs;
+using Cinema.Application.Orders.Commands.CancelOrder;
 using Cinema.Application.Orders.IntegrationEvents;
 using Cinema.Application.Orders.Services;
 using Cinema.Catalog.Domain.Entities;
@@ -309,7 +311,7 @@ public class OrderCheckoutCharacterizationTests
         fixture.Context.ChangeTracker.Clear();
         Order persisted = await fixture.Context.Orders.SingleAsync(TestContext.Current.CancellationToken);
         persisted.TotalAmount.Should().Be(100m);
-        fixture.Tickets.Should().OnlyContain(ticket => !ticket.IsGoldUpgraded && ticket.PriceSnapshot == 50m);
+        fixture.Tickets.Should().OnlyContain(ticket => !ticket.IsGoldUpgraded && ticket.PriceSnapshot == 50m && ticket.TicketStatus == TicketStatus.Refunded);
         await fixture.Loyalty.Received(1).UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());
         await fixture.Payment.DidNotReceiveWithAnyArgs().ProcessPaymentAsync(default, default!, default!, TestContext.Current.CancellationToken);
     }
@@ -432,10 +434,22 @@ public class OrderCheckoutCharacterizationTests
         result.Error.Code.Should().Be("Payment.OutcomeUnknown");
         fixture.Context.ChangeTracker.Clear();
         Order persisted = await fixture.Context.Orders.SingleAsync(TestContext.Current.CancellationToken);
-        persisted.Status.Should().Be(OrderStatus.Failed);
+        persisted.Status.Should().Be(OrderStatus.Pending);
         persisted.GoldCheckoutState.Should().Be(GoldCheckoutState.Compensated);
         persisted.TotalAmount.Should().Be(50m);
         fixture.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
+        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
+        fixture.Context.Entry(persisted).Property(order => order.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
+        await fixture.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await new CancelExpiredOrdersJob(fixture.Context, NullLogger<CancelExpiredOrdersJob>.Instance)
+            .Process(TestContext.Current.CancellationToken);
+        fixture.Context.ChangeTracker.Clear();
+        (await fixture.Context.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Pending);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(fixture.UserId);
+        Result cancellation = await new CancelOrderCommandHandler(fixture.Context, currentUser, fixture.Payment, fixture.Loyalty)
+            .Handle(new CancelOrderCommand(fixture.Order.Id.Value), TestContext.Current.CancellationToken);
+        cancellation.Error.Code.Should().Be("Order.PaymentReconciliationRequired");
         await fixture.Loyalty.Received(1).RollbackGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());
         await fixture.Loyalty.DidNotReceiveWithAnyArgs().RefundPointsAsync(default, default, default, default!, TestContext.Current.CancellationToken);
     }
@@ -515,6 +529,7 @@ public class OrderCheckoutCharacterizationTests
         Ticket ticket = await fixture.Context.Tickets.SingleAsync(TestContext.Current.CancellationToken);
         ticket.PriceSnapshot.Should().Be(50m);
         ticket.IsGoldUpgraded.Should().BeFalse();
+        ticket.TicketStatus.Should().Be(TicketStatus.Refunded);
     }
 
     [Fact]

@@ -25,7 +25,7 @@ public class CancelExpiredOrdersJob(
         while (hasMore)
         {
             var expiredOrdersBatch = await context.Orders
-                .Where(o => o.Status == OrderStatus.Pending && o.BookingDate < timeoutThreshold)
+                .Where(o => o.Status == OrderStatus.Pending && !o.GoldPaymentOutcomeUnknown && o.BookingDate < timeoutThreshold)
                 .Take(BatchSize)
                 .ToListAsync(ct);
 

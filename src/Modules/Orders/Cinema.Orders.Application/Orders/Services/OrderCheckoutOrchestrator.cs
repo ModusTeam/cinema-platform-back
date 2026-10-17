@@ -192,7 +192,7 @@ public class OrderCheckoutOrchestrator(
 
         var (pointsToDeduct, amountToPay) = loyaltyDiscountResult.Value;
 
-        var paymentResult = await ProcessPaymentFlowAsync(userId, orderId, amountToPay, paymentToken, pointsToDeduct, checkoutLock, ct);
+        var paymentResult = await ProcessPaymentFlowAsync(order, amountToPay, paymentToken, pointsToDeduct, checkoutLock, ct);
         if (!paymentResult.IsSuccess)
         {
             if (paymentResult.FailureCode == UnknownPaymentOutcomeCode)
@@ -234,6 +234,15 @@ public class OrderCheckoutOrchestrator(
                 return Result.Failure<Guid>(new Error("Payment.OutcomeUnknown", "Payment outcome requires reconciliation."));
             }
             
+            if (applyGoldUpgrade)
+            {
+                // Discard uncommitted Paid mutations before recording a known refund.
+                context.ClearChangeTracker();
+                Order refunded = await context.Orders.SingleAsync(o => o.Id == new EntityId<Order>(orderId), refundTimeout.Token);
+                refunded.ResolveGoldPayment();
+                await context.SaveChangesAsync(refundTimeout.Token);
+            }
+
             if (pointsToDeduct > 0)
             {
                 await CompensateLoyaltyPointsAsync(userId, orderId, pointsToDeduct, refundTimeout.Token);
@@ -315,9 +324,15 @@ public class OrderCheckoutOrchestrator(
         }
 
         Guid ticketId = order.GoldTicketId ?? throw new InvalidOperationException("GOLD journal has no ticket identity.");
-        Ticket ticket = await context.Tickets.IgnoreQueryFilters()
-            .SingleAsync(t => t.Id == new EntityId<Ticket>(ticketId) && t.OrderId == order.Id, ct);
-        ticket.RestoreGoldUpgrade(order.GoldOriginalTicketPrice);
+        List<Ticket> tickets = await context.Tickets.IgnoreQueryFilters()
+            .Where(t => t.OrderId == order.Id).ToListAsync(ct);
+        Ticket upgraded = tickets.Single(t => t.Id == new EntityId<Ticket>(ticketId));
+        upgraded.RestoreGoldUpgrade(order.GoldOriginalTicketPrice);
+        if (!order.GoldPaymentOutcomeUnknown)
+        {
+            foreach (Ticket ticket in tickets.Where(t => t.TicketStatus == TicketStatus.Valid))
+                ticket.MarkAsRefunded();
+        }
         order.CompleteGoldCompensation();
         // Ticket, order prices and completion marker commit atomically.
         await context.SaveChangesAsync(ct);
@@ -360,8 +375,10 @@ public class OrderCheckoutOrchestrator(
     }
 
     private async Task<PaymentResult> ProcessPaymentFlowAsync(
-        Guid userId, Guid orderId, decimal amountToPay, string paymentToken, int pointsToDeduct, CheckoutOrderLock checkoutLock, CancellationToken ct)
+        Order order, decimal amountToPay, string paymentToken, int pointsToDeduct, CheckoutOrderLock checkoutLock, CancellationToken ct)
     {
+        Guid userId = order.UserId;
+        Guid orderId = order.Id.Value;
         if (pointsToDeduct > 0)
         {
             var deductResult = await DeductLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);
@@ -371,6 +388,12 @@ public class OrderCheckoutOrchestrator(
             }
         }
 
+        if (order.GoldCheckoutState == GoldCheckoutState.Consumed)
+        {
+            // A crash during charge must not free potentially paid seats.
+            order.BeginGoldPayment();
+            await context.SaveChangesAsync(ct);
+        }
         await checkoutLock.EnsureHeldAsync(ct);
         PaymentResult paymentResult;
         try
@@ -385,6 +408,11 @@ public class OrderCheckoutOrchestrator(
 
         if (!paymentResult.IsSuccess && paymentResult.FailureCode != UnknownPaymentOutcomeCode)
         {
+            if (order.GoldPaymentOutcomeUnknown)
+            {
+                order.ResolveGoldPayment();
+                await context.SaveChangesAsync(ct);
+            }
             if (pointsToDeduct > 0)
             {
                 await CompensateLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);

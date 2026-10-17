@@ -45,6 +45,13 @@ namespace Cinema.Infrastructure.Migrations
                 nullable: false,
                 defaultValue: 0m);
 
+            migrationBuilder.AddColumn<bool>(
+                name: "gold_payment_outcome_unknown",
+                table: "orders",
+                type: "boolean",
+                nullable: false,
+                defaultValue: false);
+
             migrationBuilder.AddColumn<DateTime>(
                 name: "gold_recovery_after",
                 table: "orders",
@@ -91,6 +98,10 @@ namespace Cinema.Infrastructure.Migrations
 
             migrationBuilder.DropColumn(
                 name: "gold_original_total",
+                table: "orders");
+
+            migrationBuilder.DropColumn(
+                name: "gold_payment_outcome_unknown",
                 table: "orders");
 
             migrationBuilder.DropColumn(
