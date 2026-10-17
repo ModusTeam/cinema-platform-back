@@ -47,7 +47,7 @@ function endpoint(service, port) {
   return address;
 }
 mkdirSync('.tools/e2e', { recursive: true });
-for (const name of ['transports-results.json', 'transports-logs.txt']) {
+for (const name of ['transports-results.json', 'transports-logs.txt', 'checkout-evidence.json']) {
   rmSync(resolve('.tools/e2e', name), { force: true });
 }
 for (const repo of [env.LOYALTY_REPO, env.MONOLITH_REPO]) {
