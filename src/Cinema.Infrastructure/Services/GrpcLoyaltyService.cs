@@ -145,22 +145,22 @@ public class GrpcLoyaltyService(
     public async Task<(bool Success, string Error)> UseGoldUpgradeAsync(
         Guid userId, Guid orderId, CancellationToken ct = default)
     {
-        try
+        for (int attempt = 0; ; attempt++)
         {
-            var response = await client.UseGoldUpgradeAsync(
-                new UseGoldUpgradeRequest
-                {
-                    UserId = userId.ToString(),
-                    OrderId = orderId.ToString()
-                },
-                headers: BuildMetadata(), cancellationToken: ct);
-
-            return (response.Success, response.ErrorMessage);
-        }
-        catch (RpcException ex)
-        {
-            logger.LogError(ex, "gRPC UseGoldUpgrade failed for user {UserId}.", userId);
-            return (false, $"Loyalty service error: {ex.Status.Detail}");
+            try
+            {
+                var response = await client.UseGoldUpgradeAsync(
+                    new UseGoldUpgradeRequest { UserId = userId.ToString(), OrderId = orderId.ToString() },
+                    headers: BuildMetadata(), deadline: DateTime.UtcNow.AddSeconds(5), cancellationToken: ct);
+                return (response.Success, response.ErrorMessage);
+            }
+            catch (RpcException ex) when (attempt == 0 && !ct.IsCancellationRequested &&
+                ex.StatusCode is StatusCode.DeadlineExceeded or StatusCode.Unavailable or StatusCode.Internal)
+            {
+                logger.LogWarning(ex, "Ambiguous GOLD Use response for Order {OrderId}; replaying the same identity", orderId);
+            }
+            // Unresolved transport errors propagate. They must not masquerade as a
+            // definitive business rejection and discard the durable recovery intent.
         }
     }
 
@@ -175,7 +175,7 @@ public class GrpcLoyaltyService(
                     UserId = userId.ToString(),
                     OrderId = orderId.ToString()
                 },
-                headers: BuildMetadata(), cancellationToken: ct);
+                headers: BuildMetadata(), deadline: DateTime.UtcNow.AddSeconds(5), cancellationToken: ct);
 
             return (response.Success, response.ErrorMessage);
         }

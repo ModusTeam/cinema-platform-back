@@ -28,6 +28,7 @@ public static class DependencyInjection
         services.AddSchedulingApplication();
         services.AddBookingApplication();
         services.AddOrdersApplication();
+        services.AddHostedService<GoldCheckoutRecoveryWorker>();
         services.AddInfrastructureServices(configuration);
         services.AddCatalogInfrastructure(configuration);
         services.AddSchedulingInfrastructure();

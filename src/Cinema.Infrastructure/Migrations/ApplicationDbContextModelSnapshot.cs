@@ -24,7 +24,7 @@ namespace Cinema.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Cinema.Domain.Entities.Genre", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Genre", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
@@ -55,58 +55,7 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("genres", (string)null);
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.Hall", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<bool>("IsActive")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(true)
-                        .HasColumnName("is_active");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("name");
-
-                    b.Property<int>("TotalCapacity")
-                        .HasColumnType("integer")
-                        .HasColumnName("total_capacity");
-
-                    b.HasKey("Id")
-                        .HasName("pk_halls");
-
-                    b.HasIndex("Name")
-                        .IsUnique()
-                        .HasDatabaseName("ix_halls_name");
-
-                    b.ToTable("halls", (string)null);
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.HallTechnology", b =>
-                {
-                    b.Property<Guid>("HallId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("hall_id");
-
-                    b.Property<Guid>("TechnologyId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("technology_id");
-
-                    b.HasKey("HallId", "TechnologyId")
-                        .HasName("pk_hall_technologies");
-
-                    b.HasIndex("TechnologyId")
-                        .HasDatabaseName("ix_hall_technologies_technology_id");
-
-                    b.ToTable("hall_technologies", (string)null);
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.Movie", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Movie", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
@@ -183,7 +132,7 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("movies", (string)null);
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.MovieGenre", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.MovieGenre", b =>
                 {
                     b.Property<Guid>("MovieId")
                         .HasColumnType("uuid")
@@ -202,6 +151,57 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("movie_genres", (string)null);
                 });
 
+            modelBuilder.Entity("Cinema.Domain.Entities.Hall", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("TotalCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("total_capacity");
+
+                    b.HasKey("Id")
+                        .HasName("pk_halls");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_halls_name");
+
+                    b.ToTable("halls", (string)null);
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.HallTechnology", b =>
+                {
+                    b.Property<Guid>("HallId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("hall_id");
+
+                    b.Property<Guid>("TechnologyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("technology_id");
+
+                    b.HasKey("HallId", "TechnologyId")
+                        .HasName("pk_hall_technologies");
+
+                    b.HasIndex("TechnologyId")
+                        .HasDatabaseName("ix_hall_technologies_technology_id");
+
+                    b.ToTable("hall_technologies", (string)null);
+                });
+
             modelBuilder.Entity("Cinema.Domain.Entities.Order", b =>
                 {
                     b.Property<Guid>("Id")
@@ -211,6 +211,37 @@ namespace Cinema.Infrastructure.Migrations
                     b.Property<DateTime>("BookingDate")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("booking_date");
+
+                    b.Property<int>("GoldCheckoutState")
+                        .HasColumnType("integer")
+                        .HasColumnName("gold_checkout_state");
+
+                    b.Property<decimal>("GoldOriginalPaid")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("gold_original_paid");
+
+                    b.Property<decimal>("GoldOriginalTicketPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("gold_original_ticket_price");
+
+                    b.Property<decimal>("GoldOriginalTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("gold_original_total");
+
+                    b.Property<DateTime?>("GoldRecoveryAfter")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("gold_recovery_after");
+
+                    b.Property<Guid?>("GoldTicketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("gold_ticket_id");
+
+                    b.Property<bool>("GoldUseConfirmed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("gold_use_confirmed");
 
                     b.Property<decimal>("PaidAmount")
                         .HasPrecision(18, 2)
@@ -251,6 +282,9 @@ namespace Cinema.Infrastructure.Migrations
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_orders_user_id");
+
+                    b.HasIndex("GoldCheckoutState", "GoldRecoveryAfter")
+                        .HasDatabaseName("ix_orders_gold_checkout_state_gold_recovery_after");
 
                     b.HasIndex("Status", "BookingDate")
                         .HasDatabaseName("ix_orders_status_booking_date");
@@ -847,30 +881,9 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.HallTechnology", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Movie", b =>
                 {
-                    b.HasOne("Cinema.Domain.Entities.Hall", "Hall")
-                        .WithMany("Technologies")
-                        .HasForeignKey("HallId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_hall_technologies_halls_hall_id");
-
-                    b.HasOne("Cinema.Domain.Entities.Technology", "Technology")
-                        .WithMany()
-                        .HasForeignKey("TechnologyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_hall_technologies_technologies_technology_id");
-
-                    b.Navigation("Hall");
-
-                    b.Navigation("Technology");
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.Movie", b =>
-                {
-                    b.OwnsMany("Cinema.Domain.Entities.MovieCastMember", "Cast", b1 =>
+                    b.OwnsMany("Cinema.Catalog.Domain.Entities.MovieCastMember", "Cast", b1 =>
                         {
                             b1.Property<Guid>("MovieId")
                                 .HasColumnType("uuid");
@@ -908,16 +921,16 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Cast");
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.MovieGenre", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.MovieGenre", b =>
                 {
-                    b.HasOne("Cinema.Domain.Entities.Genre", "Genre")
+                    b.HasOne("Cinema.Catalog.Domain.Entities.Genre", "Genre")
                         .WithMany("MovieGenres")
                         .HasForeignKey("GenreId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_movie_genres_genres_genre_id");
 
-                    b.HasOne("Cinema.Domain.Entities.Movie", "Movie")
+                    b.HasOne("Cinema.Catalog.Domain.Entities.Movie", "Movie")
                         .WithMany("MovieGenres")
                         .HasForeignKey("MovieId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -929,6 +942,27 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Movie");
                 });
 
+            modelBuilder.Entity("Cinema.Domain.Entities.HallTechnology", b =>
+                {
+                    b.HasOne("Cinema.Domain.Entities.Hall", "Hall")
+                        .WithMany("Technologies")
+                        .HasForeignKey("HallId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_hall_technologies_halls_hall_id");
+
+                    b.HasOne("Cinema.Domain.Entities.Technology", "Technology")
+                        .WithMany()
+                        .HasForeignKey("TechnologyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_hall_technologies_technologies_technology_id");
+
+                    b.Navigation("Hall");
+
+                    b.Navigation("Technology");
+                });
+
             modelBuilder.Entity("Cinema.Domain.Entities.Order", b =>
                 {
                     b.HasOne("Cinema.Domain.Entities.Session", "Session")
@@ -938,7 +972,7 @@ namespace Cinema.Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_orders_sessions_session_id");
 
-                    b.HasOne("Cinema.Domain.Entities.User", "User")
+                    b.HasOne("Cinema.Domain.Entities.User", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -946,8 +980,6 @@ namespace Cinema.Infrastructure.Migrations
                         .HasConstraintName("fk_orders_users_user_id");
 
                     b.Navigation("Session");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.PricingItem", b =>
@@ -1043,8 +1075,8 @@ namespace Cinema.Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_sessions_halls_hall_id");
 
-                    b.HasOne("Cinema.Domain.Entities.Movie", "Movie")
-                        .WithMany("Sessions")
+                    b.HasOne("Cinema.Catalog.Domain.Entities.Movie", "Movie")
+                        .WithMany()
                         .HasForeignKey("MovieId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
@@ -1066,8 +1098,8 @@ namespace Cinema.Infrastructure.Migrations
 
             modelBuilder.Entity("Cinema.Domain.Entities.Ticket", b =>
                 {
-                    b.HasOne("Cinema.Domain.Entities.Order", "Order")
-                        .WithMany("Tickets")
+                    b.HasOne("Cinema.Domain.Entities.Order", null)
+                        .WithMany()
                         .HasForeignKey("OrderId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
@@ -1081,13 +1113,11 @@ namespace Cinema.Infrastructure.Migrations
                         .HasConstraintName("fk_tickets_seats_seat_id");
 
                     b.HasOne("Cinema.Domain.Entities.Session", "Session")
-                        .WithMany("Tickets")
+                        .WithMany()
                         .HasForeignKey("SessionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_tickets_sessions_session_id");
-
-                    b.Navigation("Order");
 
                     b.Navigation("Seat");
 
@@ -1151,7 +1181,12 @@ namespace Cinema.Infrastructure.Migrations
                         .HasConstraintName("fk_asp_net_user_tokens_asp_net_users_user_id");
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.Genre", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Genre", b =>
+                {
+                    b.Navigation("MovieGenres");
+                });
+
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Movie", b =>
                 {
                     b.Navigation("MovieGenres");
                 });
@@ -1165,26 +1200,9 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Technologies");
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.Movie", b =>
-                {
-                    b.Navigation("MovieGenres");
-
-                    b.Navigation("Sessions");
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.Order", b =>
-                {
-                    b.Navigation("Tickets");
-                });
-
             modelBuilder.Entity("Cinema.Domain.Entities.Pricing", b =>
                 {
                     b.Navigation("PricingItems");
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.Session", b =>
-                {
-                    b.Navigation("Tickets");
                 });
 #pragma warning restore 612, 618
         }
