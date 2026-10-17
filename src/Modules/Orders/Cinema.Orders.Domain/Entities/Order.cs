@@ -99,7 +99,17 @@ public class Order : BaseEntity
     public void MarkAsPaid(string externalTransactionId)
     {
         if (Status == OrderStatus.Paid)
+        {
+            if (PaymentTransactionId != externalTransactionId)
+                throw new DomainException("Order was paid with a different transaction.");
             return;
+
+        }
+
+        if (Status is not (OrderStatus.Pending or OrderStatus.PaymentProcessing or OrderStatus.PaymentOutcomeUnknown))
+            throw new DomainException($"Cannot pay an order in {Status} status.");
+        if (string.IsNullOrWhiteSpace(externalTransactionId))
+            throw new DomainException("Payment confirmation requires a transaction ID.");
 
         PaymentTransactionId = externalTransactionId;
         Status = OrderStatus.Paid;
@@ -112,6 +122,9 @@ public class Order : BaseEntity
         if (Status == OrderStatus.Failed)
             return;
 
+        if (Status is not (OrderStatus.Pending or OrderStatus.PaymentProcessing or OrderStatus.PaymentOutcomeUnknown))
+            throw new DomainException($"Cannot fail an order in {Status} status.");
+
         Status = OrderStatus.Failed;
         AddDomainEvent(new OrderFailedDomainEvent(this));
     }
@@ -121,8 +134,45 @@ public class Order : BaseEntity
         if (Status == OrderStatus.Cancelled)
             return;
 
+        if (Status is not (OrderStatus.Pending or OrderStatus.Paid))
+            throw new DomainException($"Cannot cancel an order in {Status} status.");
+
         Status = OrderStatus.Cancelled;
         AddDomainEvent(new OrderCancelledDomainEvent(this));
+    }
+
+    public void StartPayment()
+    {
+        if (Status == OrderStatus.PaymentProcessing)
+            return;
+        if (Status != OrderStatus.Pending)
+            throw new DomainException($"Cannot start payment for an order in {Status} status.");
+        Status = OrderStatus.PaymentProcessing;
+    }
+
+    public void MarkPaymentOutcomeUnknown()
+    {
+        if (Status == OrderStatus.PaymentOutcomeUnknown)
+            return;
+        if (Status != OrderStatus.PaymentProcessing)
+            throw new DomainException($"Cannot mark payment outcome unknown for an order in {Status} status.");
+        Status = OrderStatus.PaymentOutcomeUnknown;
+    }
+
+    public void ResetPaymentBeforeCharge()
+    {
+        if (Status != OrderStatus.PaymentProcessing)
+            throw new DomainException($"Cannot reset payment for an order in {Status} status.");
+        Status = OrderStatus.Pending;
+    }
+
+    public void MarkAsExpired()
+    {
+        if (Status == OrderStatus.Expired)
+            return;
+        if (Status != OrderStatus.Pending)
+            throw new DomainException($"Cannot expire an order in {Status} status.");
+        Status = OrderStatus.Expired;
     }
 
     public void ApplyGoldDiscount(decimal priceDifference)

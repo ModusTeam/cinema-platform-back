@@ -39,7 +39,7 @@ public class GetSessionSeatsQueryHandler(
         var soldSeatIds = await context.Tickets
              .AsNoTracking()
              .Where(t => t.SessionId == sessionId && 
-                         (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used))
+                         (t.TicketStatus == TicketStatus.Reserved || t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used))
              .Select(t => t.SeatId)
              .ToListAsync(ct);
         var soldSeatIdsSet = soldSeatIds.ToHashSet();

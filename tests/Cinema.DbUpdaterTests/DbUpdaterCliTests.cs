@@ -1,6 +1,13 @@
 using System.Diagnostics;
 using Cinema.Infrastructure.Persistence;
+using Cinema.Catalog.Domain.Entities;
+using Cinema.Catalog.Domain.Enums;
+using Cinema.Domain.Common;
+using Cinema.Domain.Entities;
+using Cinema.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using Xunit;
 
@@ -8,6 +15,90 @@ namespace Cinema.DbUpdaterTests;
 
 public class DbUpdaterCliTests
 {
+    [Fact]
+    public async Task Seat_Index_Migration_Preserves_Legacy_Pending_Order_And_Valid_Ticket()
+    {
+        string? testConnectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_POSTGRES_CONNECTION");
+        if (string.IsNullOrWhiteSpace(testConnectionString))
+            Assert.Skip("Set CINEMA_TEST_POSTGRES_CONNECTION to an isolated pgvector database named cinema_orders_test_*.");
+
+        NpgsqlConnectionStringBuilder builder = new(testConnectionString);
+        if (builder.Database is null || !builder.Database.StartsWith("cinema_orders_test_", StringComparison.Ordinal))
+            throw new InvalidOperationException("Migration tests require an isolated cinema_orders_test_* base database.");
+
+        string databaseName = $"cinema_dbupdater_test_{Guid.NewGuid():N}";
+        builder.Database = "postgres";
+        string adminConnectionString = builder.ConnectionString;
+        await using (NpgsqlConnection admin = new(adminConnectionString))
+        {
+            await admin.OpenAsync(TestContext.Current.CancellationToken);
+            await using NpgsqlCommand create = new($"CREATE DATABASE {databaseName}", admin);
+            await create.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        builder.Database = databaseName;
+        string connectionString = builder.ConnectionString;
+        try
+        {
+            await using NpgsqlDataSource dataSource = DatabaseContextConfiguration.CreateDataSource(connectionString);
+            DbContextOptionsBuilder<ApplicationDbContext> options = new();
+            DatabaseContextConfiguration.Configure(options, dataSource);
+            await using ApplicationDbContext context = new(options.Options);
+            string previousMigration = context.Database.GetMigrations().SkipLast(1).Last();
+            await context.GetService<IMigrator>().MigrateAsync(previousMigration, TestContext.Current.CancellationToken);
+
+            Guid userId = Guid.NewGuid();
+            string suffix = Guid.NewGuid().ToString("N");
+            Movie movie = Movie.CreateManual($"Migration test {suffix}", "test", 90,
+                DateTime.UtcNow.Year, MovieStatus.ComingSoon);
+            Hall hall = Hall.Create(EntityId<Hall>.New(), $"Migration test hall {suffix}");
+            SeatType seatType = SeatType.New(EntityId<SeatType>.New(), $"Standard {suffix}", null);
+            Seat seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
+            hall.ApplyLayout([seat]);
+            Pricing pricing = Pricing.New(EntityId<Pricing>.New(), $"Migration test pricing {suffix}");
+            Session session = Session.Create(EntityId<Session>.New(), DateTime.UtcNow.AddDays(2),
+                DateTime.UtcNow.AddDays(2).AddHours(2), movie.Id, hall.Id, pricing.Id);
+            Order order = Order.New(EntityId<Order>.New(), 50m, userId, session.Id);
+            Ticket ticket = Ticket.New(EntityId<Ticket>.New(), 50m, TicketStatus.Valid,
+                order.Id, session.Id, seat.Id);
+            context.Users.Add(new User { Id = userId, UserName = $"migration-{suffix}" });
+            context.Movies.Add(movie);
+            context.Halls.Add(hall);
+            context.SeatTypes.Add(seatType);
+            context.Pricings.Add(pricing);
+            context.Sessions.Add(session);
+            context.Orders.Add(order);
+            context.Tickets.Add(ticket);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            ProcessResult update = await RunAsync([], connectionString);
+            Assert.Equal(0, update.ExitCode);
+            Assert.Equal((int)OrderStatus.Pending, await ScalarAsync<int>(connectionString,
+                "SELECT status FROM orders WHERE id = @id", order.Id.Value));
+            Assert.Equal((int)TicketStatus.Valid, await ScalarAsync<int>(connectionString,
+                "SELECT ticket_status FROM tickets WHERE id = @id", ticket.Id.Value));
+            string indexDefinition = await ScalarAsync<string>(connectionString,
+                "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_tickets_session_id_seat_id'");
+            Assert.Contains("ticket_status = ANY (ARRAY[0, 1, 3])", indexDefinition);
+
+            Order competing = Order.New(EntityId<Order>.New(), 50m, userId, session.Id);
+            context.Orders.Add(competing);
+            context.Tickets.Add(Ticket.Reserve(EntityId<Ticket>.New(), 50m,
+                competing.Id, session.Id, seat.Id));
+            DbUpdateException conflict = await Assert.ThrowsAsync<DbUpdateException>(() =>
+                context.SaveChangesAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(PostgresErrorCodes.UniqueViolation,
+                Assert.IsType<PostgresException>(conflict.InnerException).SqlState);
+        }
+        finally
+        {
+            await using NpgsqlConnection admin = new(adminConnectionString);
+            await admin.OpenAsync(TestContext.Current.CancellationToken);
+            await using NpgsqlCommand drop = new($"DROP DATABASE {databaseName} WITH (FORCE)", admin);
+            await drop.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
     [Fact]
     public async Task Help_Explains_Commands_Without_Connecting()
     {

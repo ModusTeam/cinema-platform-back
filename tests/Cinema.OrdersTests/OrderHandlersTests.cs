@@ -25,6 +25,31 @@ namespace Cinema.OrdersTests;
 public class OrderHandlersTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cancellation_Rejects_Payment_In_Progress_Or_Unknown(bool unknown)
+    {
+        string databaseName = Guid.NewGuid().ToString();
+        (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, 20);
+        await using ApplicationDbContext context = CreateContext(databaseName);
+        Order order = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        order.StartPayment();
+        if (unknown)
+            order.MarkPaymentOutcomeUnknown();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(userId);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+
+        Cinema.Domain.Shared.Result result = await new CancelOrderCommandHandler(context, currentUser, payment,
+            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(orderId), TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Order.InvalidState");
+        await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, default);
+        (await context.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Reserved);
+    }
+
+    [Theory]
     [InlineData(false, 20, true, null)]
     [InlineData(false, 5, false, "Order.TooLate")]
     [InlineData(true, 5, true, null)]
@@ -48,7 +73,7 @@ public class OrderHandlersTests
         (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(orderId), TestContext.Current.CancellationToken)).Status
             .Should().Be(succeeds ? OrderStatus.Cancelled : OrderStatus.Pending);
         (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus
-            .Should().Be(succeeds ? TicketStatus.Refunded : TicketStatus.Valid);
+            .Should().Be(succeeds ? TicketStatus.Released : TicketStatus.Reserved);
     }
 
     [Fact]
@@ -203,7 +228,7 @@ public class OrderHandlersTests
     }
 
     [Fact]
-    public async Task Admin_Cancel_Refunds_Tickets_On_Pending_Order()
+    public async Task Admin_Cancel_Releases_Tickets_On_Pending_Order()
     {
         await using ApplicationDbContext context = CreateContext();
         Hall hall = Hall.Create(EntityId<Hall>.New(), "Cancellation test hall");
@@ -215,7 +240,7 @@ public class OrderHandlersTests
         Order order = OrderTicketFixture.CreateAndTrack(context, Guid.NewGuid(), session, [seat], new Dictionary<EntityId<Seat>, decimal>
         {
             [seat.Id] = 25m
-        });
+        }, TicketStatus.Reserved);
         context.Halls.Add(hall);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
@@ -230,7 +255,7 @@ public class OrderHandlersTests
         result.IsSuccess.Should().BeTrue();
         order.Status.Should().Be(OrderStatus.Cancelled);
         (await OrderTicketFixture.ForOrder(context, order).SingleAsync(TestContext.Current.CancellationToken))
-            .TicketStatus.Should().Be(TicketStatus.Refunded);
+            .TicketStatus.Should().Be(TicketStatus.Released);
         await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, TestContext.Current.CancellationToken);
     }
 
@@ -438,7 +463,43 @@ public class OrderHandlersTests
     }
 
     [Fact]
-    public async Task Expiration_Cancels_Order_And_Refunds_Ticket()
+    public async Task Admission_Rejects_Legacy_Pending_Valid_Ticket_Until_Order_Is_Paid()
+    {
+        await using ApplicationDbContext context = CreateContext();
+        Hall hall = Hall.Create(EntityId<Hall>.New(), "Admission hall");
+        SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
+        Seat seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
+        hall.ApplyLayout([seat]);
+        DateTime start = DateTime.UtcNow.AddMinutes(30);
+        Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
+            EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
+        Order order = OrderTicketFixture.CreateAndTrack(context, Guid.NewGuid(), session, [seat],
+            new() { [seat.Id] = 25m });
+        context.Halls.Add(hall);
+        context.SeatTypes.Add(seatType);
+        context.Sessions.Add(session);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Ticket ticket = (await OrderTicketFixture.ForOrder(context, order)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        ValidateTicketCommandHandler handler = new(context);
+
+        Cinema.Domain.Shared.Result<string> blocked = await handler.Handle(
+            new ValidateTicketCommand(ticket.Id.Value), TestContext.Current.CancellationToken);
+
+        blocked.Error.Code.Should().Be("Ticket.NotPurchased");
+        ticket.TicketStatus.Should().Be(TicketStatus.Valid);
+
+        order.MarkAsPaid("reconciled-transaction");
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Cinema.Domain.Shared.Result<string> admitted = await handler.Handle(
+            new ValidateTicketCommand(ticket.Id.Value), TestContext.Current.CancellationToken);
+
+        admitted.IsSuccess.Should().BeTrue();
+        ticket.TicketStatus.Should().Be(TicketStatus.Used);
+    }
+
+    [Fact]
+    public async Task Expiration_Expires_Order_And_Releases_Ticket()
     {
         await using ApplicationDbContext context = CreateContext();
         Hall hall = Hall.Create(EntityId<Hall>.New(), "Expiration hall");
@@ -448,19 +509,19 @@ public class OrderHandlersTests
         DateTime start = DateTime.UtcNow.AddDays(2);
         Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
             EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
-        Order order = OrderTicketFixture.CreateAndTrack(context, Guid.NewGuid(), session, [seat], new() { [seat.Id] = 25m });
+        Order order = OrderTicketFixture.CreateAndTrack(context, Guid.NewGuid(), session, [seat], new() { [seat.Id] = 25m }, TicketStatus.Reserved);
         context.Halls.Add(hall);
         context.SeatTypes.Add(seatType);
         context.Sessions.Add(session);
         context.Entry(order).Property(x => x.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
-        await new CancelExpiredOrdersJob(context, NullLogger<CancelExpiredOrdersJob>.Instance)
+        await new CancelExpiredOrdersJob(context, Substitute.For<ISeatLockingService>(), Substitute.For<ITicketNotifier>(), NullLogger<CancelExpiredOrdersJob>.Instance)
             .Process(TestContext.Current.CancellationToken);
 
         Order persisted = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
-        persisted.Status.Should().Be(OrderStatus.Cancelled);
+        persisted.Status.Should().Be(OrderStatus.Expired);
         (await OrderTicketFixture.ForOrder(context, persisted).SingleAsync(TestContext.Current.CancellationToken))
-            .TicketStatus.Should().Be(TicketStatus.Refunded);
+            .TicketStatus.Should().Be(TicketStatus.Released);
     }
 
     private static async Task<(Guid OrderId, Guid UserId, Guid SeatId)> SeedCancellationOrderAsync(
@@ -475,7 +536,8 @@ public class OrderHandlersTests
         DateTime start = DateTime.UtcNow.AddMinutes(minutesUntilStart);
         Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
             EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
-        Order order = OrderTicketFixture.CreateAndTrack(context, userId, session, [seat], new() { [seat.Id] = 25m });
+        Order order = OrderTicketFixture.CreateAndTrack(context, userId, session, [seat], new() { [seat.Id] = 25m },
+            paid || used ? TicketStatus.Valid : TicketStatus.Reserved);
         if (paid) order.MarkAsPaid("transaction-1");
         if (used) OrderTicketFixture.TrackedForOrder(context, order).Single().MarkAsUsed();
         context.Halls.Add(hall);
