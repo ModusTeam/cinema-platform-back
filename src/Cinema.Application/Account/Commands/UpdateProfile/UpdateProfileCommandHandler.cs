@@ -78,8 +78,10 @@ public class UpdateProfileCommandHandler(
         catch (Exception ex)
         {
             logger.LogCritical(ex,
-                "Failed to stage profile integration messages for User {UserId}. DateOfBirth may be stale in Loyalty service.",
+                "Failed to stage profile integration messages for User {UserId}. Identity change was not saved.",
                 user.Id);
+            return Result.Failure(
+                new Error("User.MessageStagingFailed", "Could not save the profile change. Please try again."));
         }
 
         var result = await userManager.UpdateAsync(user);

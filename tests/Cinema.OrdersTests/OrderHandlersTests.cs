@@ -470,7 +470,7 @@ public class OrderHandlersTests
         SeatType seatType = SeatType.New(EntityId<SeatType>.New(), "Standard", null);
         Seat seat = Seat.New(EntityId<Seat>.New(), "A", 1, 1, 1, SeatStatus.Active, hall.Id, seatType.Id);
         hall.ApplyLayout([seat]);
-        DateTime start = DateTime.UtcNow.AddMinutes(30);
+        DateTime start = DateTime.UtcNow.Date.AddDays(1).AddTicks(-1);
         Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2),
             EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
         Order order = OrderTicketFixture.CreateAndTrack(context, Guid.NewGuid(), session, [seat],

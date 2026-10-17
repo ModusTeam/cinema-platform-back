@@ -53,8 +53,10 @@ public class SetMyDateOfBirthCommandHandler(
         catch (Exception ex)
         {
             logger.LogCritical(ex,
-                "Failed to stage {Event} for User {UserId}. Birthday bonus may be delayed in Loyalty service.",
+                "Failed to stage {Event} for User {UserId}. Identity change was not saved.",
                 nameof(NestJsUserDateOfBirthSetEvent), user.Id);
+            return Result.Failure<SetMyDateOfBirthResponse>(
+                new Error("User.MessageStagingFailed", "Could not save the date of birth change. Please try again."));
         }
 
         var updateResult = await userManager.UpdateAsync(user);
