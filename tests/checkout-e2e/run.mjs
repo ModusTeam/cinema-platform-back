@@ -1,15 +1,16 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 
 const project = `loyalty-e2e-${process.pid}`;
+const loyaltyRepo = resolve(process.env.LOYALTY_REPO ?? '../cinema-loyalty-service');
 const env = {
   ...process.env,
   GIT_CONFIG_COUNT: '2',
   GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: resolve('.'),
-  GIT_CONFIG_KEY_1: 'safe.directory', GIT_CONFIG_VALUE_1: resolve('../cinema-loyalty-service'),
+  GIT_CONFIG_KEY_1: 'safe.directory', GIT_CONFIG_VALUE_1: loyaltyRepo,
   E2E_PROJECT: project,
-  LOYALTY_REPO: resolve('../cinema-loyalty-service'),
+  LOYALTY_REPO: loyaltyRepo,
   MONOLITH_REPO: resolve('.'),
 };
 const compose = [
@@ -19,7 +20,7 @@ const compose = [
   '-f',
   resolve('docker-compose.yaml'),
   '-f',
-  resolve('../cinema-loyalty-service/test/e2e/compose.override.yml'),
+  resolve(loyaltyRepo, 'test/e2e/compose.override.yml'),
 ];
 function capture(command, args) {
   const result = spawnSync(command, args, { env, encoding: 'utf8' });
@@ -46,23 +47,12 @@ function endpoint(service, port) {
   return address;
 }
 mkdirSync('.tools/e2e', { recursive: true });
-const source = readFileSync(resolve(env.LOYALTY_REPO, 'test/e2e/checkout.transport-spec.ts'), 'utf8');
-const oldPrices = 'total_amount: 400,\n        price_snapshot: 400,\n        is_gold_upgraded: true,';
-if (!source.includes(oldPrices)) throw new Error('Neighbor checkout harness changed; review the GOLD expectation before running.');
-writeFileSync('.tools/e2e/checkout.transport-spec.ts', source.replace(oldPrices,
-  'total_amount: 600,\n        price_snapshot: 600,\n        is_gold_upgraded: false,').replace(
-  'releases the GOLD owner after declined payment; characterizes retained monolith prices',
-  'releases the GOLD owner after declined payment and restores monolith prices'));
-writeFileSync('.tools/e2e/jest.json', JSON.stringify({
-  rootDir: resolve('.'), roots: [resolve('.tools/e2e')], testEnvironment: 'node',
-  testRegex: 'checkout\\.transport-spec\\.ts$', testTimeout: 60000,
-  moduleDirectories: [resolve(env.LOYALTY_REPO, 'node_modules'), 'node_modules'],
-  transform: { '^.+\\.(t|j)s$': [resolve(env.LOYALTY_REPO, 'node_modules/ts-jest'), {
-    diagnostics: false, tsconfig: { target: 'ES2023', module: 'CommonJS', esModuleInterop: true }
-  }] }
-}));
 for (const name of ['transports-results.json', 'transports-logs.txt']) {
   rmSync(resolve('.tools/e2e', name), { force: true });
+}
+for (const repo of [env.LOYALTY_REPO, env.MONOLITH_REPO]) {
+  if (capture('git', ['-C', repo, 'status', '--porcelain']))
+    throw new Error(`Integration requires a clean committed checkout: ${repo}`);
 }
 const versions = {
   loyalty: capture('git', ['-C', env.LOYALTY_REPO, 'rev-parse', 'HEAD']),
@@ -111,6 +101,7 @@ try {
     E2E_RABBIT_URL: `amqp://guest:guest@${endpoint('cinema-rabbitmq', 5672)}`,
     E2E_RABBIT_HTTP: `http://${endpoint('cinema-rabbitmq', 15672)}`,
     E2E_COMPOSE_ARGS: JSON.stringify(compose),
+    E2E_CHECKOUT_EVIDENCE_FILE: resolve('.tools/e2e/checkout-evidence.json'),
     NODE_OPTIONS:
       `${process.env.NODE_OPTIONS ?? ''} --experimental-vm-modules`.trim(),
   };
@@ -119,8 +110,10 @@ try {
   testEnv.E2E_MONOLITH_URL = `http://${endpoint('monolith-api', 8080)}`;
   testEnv.E2E_LOYALTY_URL = `http://${endpoint('loyalty-service', 3000)}`;
   run('node', [resolve(env.LOYALTY_REPO, 'node_modules/jest/bin/jest.js'),
-    '--config', resolve('.tools/e2e/jest.json'), '--runInBand', '--json',
-    '--outputFile=.tools/e2e/transports-results.json'], testEnv);
+    '--config', resolve(loyaltyRepo, 'test/e2e/jest-transports.json'),
+    '--runTestsByPath', resolve(loyaltyRepo, 'test/e2e/checkout.transport-spec.ts'),
+    '--runInBand', '--json',
+    `--outputFile=${resolve('.tools/e2e/transports-results.json')}`], testEnv);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   const logs = spawnSync(

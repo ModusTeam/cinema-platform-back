@@ -31,7 +31,12 @@ dotnet build Cinema.sln
 bun tests/checkout-e2e/run.mjs
 ```
 
-The checkout harness requires the adjacent `../cinema-loyalty-service` checkout, its installed Bun dependencies and Docker Compose. It reads the adjacent harness, copies its checkout tests into ignored `.tools/e2e`, and changes only the old GOLD price expectation from 400/upgraded to the original 600/not upgraded. A source-shape guard fails if that expectation changes upstream. It uses temporary Docker resources with random loopback ports, runs migrations only against those disposable databases, and cleans them up. It does not write files to the loyalty repository. JSON test results are kept locally in `.tools/e2e/transports-results.json`.
+The checkout harness requires a clean, committed loyalty checkout with the synchronized GOLD transport assertions, installed Bun dependencies and Docker Compose. By default it uses `../cinema-loyalty-service`; set `LOYALTY_REPO` to select an isolated worktree. Jest executes that repository's original `test/e2e/checkout.transport-spec.ts` directly through its existing config: no source copying, assertion replacement or test renaming. Both repositories must be clean so `.tools/e2e/transports-versions.json` identifies the exact tested commits. The suite checks declined GOLD prices at the original 600, Refunded tickets, HTTP seat availability, and a new paid GOLD order on the same seat. Synthetic order/journal/ticket/reservation/ledger correlations are saved in `.tools/e2e/checkout-evidence.json`; failed HTTP responses expose an error code/traceId without orderId, so the failure is correlated through its unique seeded user/session/seat and reservation. JSON results are in `.tools/e2e/transports-results.json`. Docker resources use random loopback ports and disposable databases; the runner removes only its own Compose project. Do not run it concurrently with the loyalty transport harness, which shares the local monolith image tag.
+
+```powershell
+$env:LOYALTY_REPO='../cinema-loyalty-integration' # optional clean worktree
+bun tests/checkout-e2e/run.mjs
+```
 
 PostgreSQL tests cover journals abandoned before and after confirmed Use, repeat recovery, active checkout versus recovery, and forced `pg_terminate_backend` during Use and discount calculation with production-style EF retries enabled. Known failures verify seat resale; ambiguous-payment recovery verifies the seat remains held and blocks expiration/cancellation. RPC response-loss tests inject `DeadlineExceeded`/`Unavailable` at the generated client boundary; these are unit tests, not real network fault injection. The live checkout suite covers HTTP, real loyalty gRPC, PostgreSQL, RabbitMQ, Redis outage/restart, points refunds and GOLD rollback with restored prices.
 
