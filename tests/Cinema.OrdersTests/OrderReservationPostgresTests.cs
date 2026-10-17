@@ -3,6 +3,8 @@ using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Jobs;
 using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Orders.Commands.CreateOrder;
+using Cinema.Application.Orders.Commands.StartCheckout;
+using Cinema.Application.Orders.Queries.GetOrderStatus;
 using Cinema.Application.Orders.Commands.CancelOrder;
 using Cinema.Application.Orders.Dtos;
 using Cinema.Application.Orders.Queries.GetMyOrders;
@@ -46,6 +48,65 @@ namespace Cinema.OrdersTests;
 // Only run with a disposable pgvector PostgreSQL database named cinema_orders_test_*.
 public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
+    [Fact]
+    public async Task Reservation_Only_Creates_Pending_Order_Without_Checkout_Or_Loyalty()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+        locks.ValidateAndExtendLockAsync(database.Session.Id.Value, database.Seat.Id.Value,
+            database.UserId, Arg.Any<CancellationToken>()).Returns(true);
+        IPriceCalculator prices = Substitute.For<IPriceCalculator>();
+        prices.CalculatePrice(Arg.Any<Pricing>(), Arg.Any<EntityId<SeatType>>(), Arg.Any<DateTime>()).Returns(50m);
+
+        ReserveOrderCommandHandler handler = new(new OrderReservationService(database.Context, prices),
+            currentUser, locks, database.Context);
+        Result<ReservedOrderDto> result = await handler.Handle(
+            new ReserveOrderCommand(database.Session.Id.Value, [database.Seat.Id.Value]),
+            TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TotalAmount.Should().Be(50m);
+        result.Value.Status.Should().Be(nameof(OrderStatus.Pending));
+        await using ApplicationDbContext verify = database.NewContext();
+        Order order = await verify.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        order.Id.Value.Should().Be(result.Value.Id);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Reserved);
+    }
+
+    [Fact]
+    public async Task Existing_Order_Checkout_Command_Uses_Owner_And_Atomic_Claim()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reservation = await database.ReserveAsync(database.Seat.Id.Value);
+        reservation.IsSuccess.Should().BeTrue();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("transaction-1"));
+        await using ApplicationDbContext context = database.NewContext();
+        OrderCheckoutOrchestrator orchestrator = CreateCheckout(context, payment);
+        StartCheckoutCommandHandler handler = new(currentUser, orchestrator);
+        StartCheckoutCommand command = new(reservation.Value, "token", false, false);
+
+        currentUser.UserId.Returns(Guid.NewGuid());
+        (await handler.Handle(command, TestContext.Current.CancellationToken)).Error.Code.Should().Be("Order.NotFound");
+        await payment.DidNotReceiveWithAnyArgs().ProcessPaymentAsync(default, default!, default!, default);
+
+        currentUser.UserId.Returns(database.UserId);
+        Result<Guid> result = await handler.Handle(command, TestContext.Current.CancellationToken);
+        result.IsSuccess.Should().BeTrue();
+        (await handler.Handle(command, TestContext.Current.CancellationToken)).Value.Should().Be(reservation.Value);
+        await payment.Received(1).ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+        GetOrderStatusQueryHandler status = new(verify, currentUser);
+        (await status.Handle(new GetOrderStatusQuery(reservation.Value), TestContext.Current.CancellationToken))
+            .Value.Status.Should().Be(nameof(OrderStatus.Paid));
+    }
+
     [Fact]
     public async Task Missing_Lock_Releases_Other_Owned_Seats_Before_Reservation()
     {
