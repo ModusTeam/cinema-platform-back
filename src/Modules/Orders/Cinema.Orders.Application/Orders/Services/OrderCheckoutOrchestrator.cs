@@ -366,22 +366,14 @@ public class OrderCheckoutOrchestrator(
 
         int ticketCount = tickets.Count;
 
+        await publishEndpoint.Publish(new TicketPurchasedEvent(
+            userId,
+            orderId,
+            order.TotalAmount,
+            ticketCount,
+            DateTime.UtcNow
+        ), ct);
         await context.SaveChangesAsync(ct);
-
-        try
-        {
-            await publishEndpoint.Publish(new TicketPurchasedEvent(
-                userId,
-                orderId,
-                order.TotalAmount,
-                ticketCount,
-                DateTime.UtcNow
-            ), ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogCritical(ex, "Purchase publication failed for paid Order {OrderId}. Manual delivery reconciliation required.", orderId);
-        }
 
         return Result.Success(order.Id.Value);
     }

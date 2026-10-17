@@ -43,11 +43,6 @@ public class UpdateProfileCommandHandler(
             ? DateTime.SpecifyKind(request.DateOfBirth.Value, DateTimeKind.Utc)
             : user.DateOfBirth;
 
-        var result = await userManager.UpdateAsync(user);
-
-        if (!result.Succeeded)
-            return Result.Failure(new Error("User.UpdateFailed", result.Errors.First().Description));
-
         var shouldSendDateOfBirthSetEvent = !hadDateOfBirth && user.DateOfBirth.HasValue;
 
         try
@@ -83,9 +78,13 @@ public class UpdateProfileCommandHandler(
         catch (Exception ex)
         {
             logger.LogCritical(ex,
-                "Failed to publish profile integration messages for User {UserId}. DateOfBirth may be stale in Loyalty service.",
+                "Failed to stage profile integration messages for User {UserId}. DateOfBirth may be stale in Loyalty service.",
                 user.Id);
         }
+
+        var result = await userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+            return Result.Failure(new Error("User.UpdateFailed", result.Errors.First().Description));
 
         return Result.Success();
     }

@@ -32,11 +32,6 @@ public class SetMyDateOfBirthCommandHandler(
 
         user.DateOfBirth = DateTime.SpecifyKind(request.DateOfBirth.Date, DateTimeKind.Utc);
 
-        var updateResult = await userManager.UpdateAsync(user);
-        if (!updateResult.Succeeded)
-            return Result.Failure<SetMyDateOfBirthResponse>(
-                new Error("User.UpdateFailed", updateResult.Errors.First().Description));
-
         try
         {
             var endpoint = await sendEndpointProvider.GetSendEndpoint(
@@ -58,9 +53,14 @@ public class SetMyDateOfBirthCommandHandler(
         catch (Exception ex)
         {
             logger.LogCritical(ex,
-                "Failed to send {Event} for User {UserId}. Birthday bonus may be delayed in Loyalty service.",
+                "Failed to stage {Event} for User {UserId}. Birthday bonus may be delayed in Loyalty service.",
                 nameof(NestJsUserDateOfBirthSetEvent), user.Id);
         }
+
+        var updateResult = await userManager.UpdateAsync(user);
+        if (!updateResult.Succeeded)
+            return Result.Failure<SetMyDateOfBirthResponse>(
+                new Error("User.UpdateFailed", updateResult.Errors.First().Description));
 
         return Result.Success(new SetMyDateOfBirthResponse(user.DateOfBirth.Value));
     }
