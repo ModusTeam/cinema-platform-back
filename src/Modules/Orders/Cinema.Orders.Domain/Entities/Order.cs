@@ -159,6 +159,13 @@ public class Order : BaseEntity
         Status = OrderStatus.PaymentOutcomeUnknown;
     }
 
+    public void ResetPaymentBeforeCharge()
+    {
+        if (Status != OrderStatus.PaymentProcessing)
+            throw new DomainException($"Cannot reset payment for an order in {Status} status.");
+        Status = OrderStatus.Pending;
+    }
+
     public void MarkAsExpired()
     {
         if (Status == OrderStatus.Expired)

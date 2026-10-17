@@ -4,6 +4,7 @@ using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using Cinema.Application.Common.Utils;
+using System.Data;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -35,8 +36,11 @@ public class CancelOrderCommandHandler(
         if (order.UserId != currentUserId && !isAdmin)
             return Result.Failure(new Error("Order.NotFound", "Order not found."));
 
-        if (order.Status == OrderStatus.Cancelled || order.Status == OrderStatus.Failed)
+        if (order.Status is OrderStatus.Cancelled or OrderStatus.Failed or OrderStatus.Expired)
             return Result.Failure(new Error("Order.AlreadyCancelled", "Order is already cancelled."));
+
+        if (order.Status is OrderStatus.PaymentProcessing or OrderStatus.PaymentOutcomeUnknown)
+            return Result.Failure(new Error("Order.InvalidState", "Payment outcome requires reconciliation before cancellation."));
 
         List<Ticket> tickets = await context.Tickets
             .IgnoreQueryFilters()
@@ -46,8 +50,9 @@ public class CancelOrderCommandHandler(
         if (tickets.Count == 0)
             return Result.Failure(new Error("Order.InvalidState", "Order has no tickets to cancel."));
 
-        if (tickets.Any(ticket => ticket.TicketStatus != TicketStatus.Valid || ticket.SessionId != order.SessionId))
-            return Result.Failure(new Error("Order.InvalidState", "Order contains a ticket that cannot be refunded."));
+        TicketStatus expectedTicketStatus = order.Status == OrderStatus.Pending ? TicketStatus.Reserved : TicketStatus.Valid;
+        if (tickets.Any(ticket => ticket.TicketStatus != expectedTicketStatus || ticket.SessionId != order.SessionId))
+            return Result.Failure(new Error("Order.InvalidState", "Order tickets require reconciliation before cancellation."));
 
         if (order.Status == OrderStatus.Paid && order.PaidAmount > 0 &&
             string.IsNullOrEmpty(order.PaymentTransactionId))
@@ -92,11 +97,33 @@ public class CancelOrderCommandHandler(
                 return Result.Failure(new Error("Loyalty.GoldRollbackFailed", "Loyalty service rejected GOLD upgrade rollback."));
         }
 
+        if (order.Status == OrderStatus.Pending && context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+        {
+            await using var transaction = await context.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+            int claimed = await context.Orders
+                .Where(candidate => candidate.Id == orderId && candidate.Status == OrderStatus.Pending)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.Status, OrderStatus.Cancelled), ct);
+            if (claimed == 0)
+            {
+                await transaction.RollbackAsync(ct);
+                return Result.Failure(new Error("Order.InvalidState", "Order state changed during cancellation."));
+            }
+
+            order.MarkAsCancelled();
+            foreach (Ticket ticket in tickets)
+                ticket.ReleaseReservation(order);
+            await context.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return Result.Success();
+        }
+
         order.MarkAsCancelled();
-        
         foreach (Ticket ticket in tickets)
         {
-            ticket.MarkAsRefunded();
+            if (expectedTicketStatus == TicketStatus.Reserved)
+                ticket.ReleaseReservation(order);
+            else
+                ticket.MarkAsRefunded();
         }
 
         await context.SaveChangesAsync(ct);

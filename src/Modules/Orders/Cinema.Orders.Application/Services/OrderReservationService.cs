@@ -41,7 +41,7 @@ public class OrderReservationService(
                 var areSeatsSold = await context.Tickets
                     .AnyAsync(t => targetSeatIds.Contains(t.SeatId) && 
                                    t.SessionId == new EntityId<Session>(sessionId) &&
-                                   (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
+                                   (t.TicketStatus == TicketStatus.Reserved || t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
                  
                 if (areSeatsSold) return Result.Failure<Guid>(new Error("Order.SeatsSold", "Seats already sold."));
                  
@@ -63,8 +63,8 @@ public class OrderReservationService(
                 }
                 
                 Order order = Order.CreateWithoutTickets(userId, session, seats, prices);
-                List<Ticket> tickets = seats.Select(seat => Ticket.New(
-                    EntityId<Ticket>.New(), prices[seat.Id], TicketStatus.Valid,
+                List<Ticket> tickets = seats.Select(seat => Ticket.Reserve(
+                    EntityId<Ticket>.New(), prices[seat.Id],
                     order.Id, session.Id, seat.Id)).ToList();
                 context.Orders.Add(order);
                 context.Tickets.AddRange(tickets);

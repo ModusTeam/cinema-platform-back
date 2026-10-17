@@ -30,7 +30,7 @@ public class GetSessionByIdQueryHandler(
         var soldSeats = await context.Tickets
             .AsNoTracking()
             .Where(t => t.SessionId == sessionId && 
-                        (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used))
+                        (t.TicketStatus == TicketStatus.Reserved || t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used))
             .Select(t => t.SeatId.Value)
             .ToListAsync(ct);
 
