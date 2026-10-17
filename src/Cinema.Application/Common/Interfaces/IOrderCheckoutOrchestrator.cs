@@ -4,6 +4,8 @@ namespace Cinema.Application.Common.Interfaces;
 
 public interface IOrderCheckoutOrchestrator
 {
+    Task RecoverGoldCheckoutsAsync(CancellationToken ct);
+
     Task<Result<Guid>> ProcessCheckoutAsync(
         Guid userId,
         Guid sessionId,

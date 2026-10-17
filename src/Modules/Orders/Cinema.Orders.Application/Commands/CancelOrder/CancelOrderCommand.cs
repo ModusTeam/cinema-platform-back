@@ -35,6 +35,9 @@ public class CancelOrderCommandHandler(
         if (order.UserId != currentUserId && !isAdmin)
             return Result.Failure(new Error("Order.NotFound", "Order not found."));
 
+        if (order.GoldPaymentOutcomeUnknown)
+            return Result.Failure(new Error("Order.PaymentReconciliationRequired", "Resolve the unknown payment outcome before cancellation."));
+
         if (order.Status == OrderStatus.Cancelled || order.Status == OrderStatus.Failed)
             return Result.Failure(new Error("Order.AlreadyCancelled", "Order is already cancelled."));
 
