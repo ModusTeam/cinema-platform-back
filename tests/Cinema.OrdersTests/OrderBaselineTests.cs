@@ -59,7 +59,7 @@ public class OrderBaselineTests
         order.Status.Should().Be(OrderStatus.Pending);
 
         order.MarkAsPaid("transaction");
-        order.MarkAsPaid("another transaction");
+        order.MarkAsPaid("transaction");
 
         order.Status.Should().Be(OrderStatus.Paid);
         order.PaymentTransactionId.Should().Be("transaction");

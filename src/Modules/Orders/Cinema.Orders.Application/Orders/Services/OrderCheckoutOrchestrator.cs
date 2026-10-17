@@ -54,8 +54,23 @@ public class OrderCheckoutOrchestrator(
         }
 
         List<Ticket> tickets = await context.Tickets
+            .IgnoreQueryFilters()
             .Where(t => t.OrderId == order.Id)
             .ToListAsync(ct);
+
+        if (tickets.Count == 0 || tickets.Any(t => t.SessionId != order.SessionId || t.TicketStatus != TicketStatus.Reserved))
+            return Result.Failure<Guid>(new Error("Order.InvalidState", "Order tickets require reconciliation before checkout."));
+
+        if (!await TryClaimPaymentAsync(order, ct))
+            return Result.Failure<Guid>(new Error("Order.InvalidState", "Order is already being processed."));
+
+        if (context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
+        {
+            // ExecuteUpdate does not update tracked instances. Start subsequent work from the claimed row.
+            context.ClearChangeTracker();
+            order = await context.Orders.SingleAsync(o => o.Id == new EntityId<Order>(orderId), ct);
+            tickets = await context.Tickets.IgnoreQueryFilters().Where(t => t.OrderId == order.Id).ToListAsync(ct);
+        }
 
         Guid trustedSessionId = order.SessionId.Value;
         List<Guid> trustedSeatIds = tickets.Select(t => t.SeatId.Value).ToList();
@@ -70,6 +85,7 @@ public class OrderCheckoutOrchestrator(
             if (sessionWithPricing is null)
             {
                 await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
+                await ResetUnchargedClaimAsync(order, ct);
                 return Result.Failure<Guid>(new Error("Session.NotFound", "Session not found."));
             }
 
@@ -84,6 +100,7 @@ public class OrderCheckoutOrchestrator(
             if (goldUpgradeQuoteResult.IsFailure)
             {
                 await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
+                await ResetUnchargedClaimAsync(order, ct);
                 return Result.Failure<Guid>(goldUpgradeQuoteResult.Error);
             }
 
@@ -91,6 +108,7 @@ public class OrderCheckoutOrchestrator(
             if (!goldUpgradeQuote.IsApplied)
             {
                 await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
+                await ResetUnchargedClaimAsync(order, ct);
                 return Result.Failure<Guid>(new Error(
                     "Order.NoEligibleTickets",
                     goldUpgradeQuote.Reason ?? "Select at least one premium or VIP seat to apply GOLD upgrade."));
@@ -100,6 +118,7 @@ public class OrderCheckoutOrchestrator(
             if (!goldUpgradeResult.Success)
             {
                 await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
+                await ResetUnchargedClaimAsync(order, ct);
                 return Result.Failure<Guid>(new Error("Order.GoldUpgradeFailed", $"Gold upgrade failed: {goldUpgradeResult.Error}"));
             }
 
@@ -126,6 +145,7 @@ public class OrderCheckoutOrchestrator(
         var loyaltyDiscountResult = await ResolveLoyaltyDiscountAsync(userId, trustedSessionId, orderId, orderAmount, useLoyaltyPoints, ct);
         if (loyaltyDiscountResult.IsFailure)
         {
+            await ResetUnchargedClaimAsync(order, ct);
             return Result.Failure<Guid>(loyaltyDiscountResult.Error);
         }
 
@@ -135,9 +155,13 @@ public class OrderCheckoutOrchestrator(
         if (!paymentResult.IsSuccess)
         {
             if (paymentResult.FailureCode == UnknownPaymentOutcomeCode)
+            {
+                order.MarkPaymentOutcomeUnknown();
+                await context.SaveChangesAsync(CancellationToken.None);
                 return Result.Failure<Guid>(new Error("Payment.OutcomeUnknown", "Payment outcome requires reconciliation."));
+            }
 
-            return await FailOrderAsync(orderId, paymentResult.ErrorMessage!, trustedSessionId, trustedSeatIds, userId, ct);
+            return await FailOrderAsync(orderId, paymentResult.ErrorMessage!, ct);
         }
 
         try
@@ -146,32 +170,45 @@ public class OrderCheckoutOrchestrator(
         }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "FATAL: DB Update failed after successful payment for Order {OrderId}. Initiating emergency refunds.", orderId);
-            
-            PaymentResult refundResult;
-            try
+            logger.LogCritical(ex, "Confirmation failed after payment for Order {OrderId}. Manual reconciliation required.", orderId);
+            context.ClearChangeTracker();
+            Order? persistedOrder = await context.Orders.SingleOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), CancellationToken.None);
+            if (persistedOrder?.Status == OrderStatus.PaymentProcessing)
             {
-                refundResult = await paymentService.RefundPaymentAsync(paymentResult.TransactionId!, ct);
+                persistedOrder.MarkPaymentOutcomeUnknown();
+                await context.SaveChangesAsync(CancellationToken.None);
             }
-            catch (Exception refundException)
-            {
-                logger.LogCritical(refundException, "Payment refund outcome is unknown for Order {OrderId}. Manual reconciliation required.", orderId);
-                return Result.Failure<Guid>(new Error("Payment.OutcomeUnknown", "Payment outcome requires reconciliation."));
-            }
-
-            if (!refundResult.IsSuccess)
-            {
-                logger.LogCritical("Payment refund failed for Order {OrderId}. Manual reconciliation required.", orderId);
-                return Result.Failure<Guid>(new Error("Payment.OutcomeUnknown", "Payment outcome requires reconciliation."));
-            }
-            
-            if (pointsToDeduct > 0)
-            {
-                await CompensateLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);
-            }
-                
-            return Result.Failure<Guid>(new Error("Order.ConfirmationFailed", "Order confirmation failed after payment refund. GOLD upgrade may require reconciliation."));
+            return Result.Failure<Guid>(new Error("Payment.OutcomeUnknown", "Payment outcome requires reconciliation."));
         }
+    }
+
+    private async Task<bool> TryClaimPaymentAsync(Order order, CancellationToken ct)
+    {
+        if (context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
+        {
+            order.StartPayment();
+            await context.SaveChangesAsync(ct);
+            return true;
+        }
+
+        return await context.Orders
+            .Where(candidate => candidate.Id == order.Id && candidate.Status == OrderStatus.Pending)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.Status, OrderStatus.PaymentProcessing), ct) == 1;
+    }
+
+    private async Task ResetUnchargedClaimAsync(Order order, CancellationToken ct)
+    {
+        if (context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
+        {
+            order.ResetPaymentBeforeCharge();
+            await context.SaveChangesAsync(ct);
+            return;
+        }
+
+        await context.Orders
+            .Where(candidate => candidate.Id == order.Id && candidate.Status == OrderStatus.PaymentProcessing)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.Status, OrderStatus.Pending), ct);
+        context.ClearChangeTracker();
     }
 
     private async Task<Result<(int PointsToDeduct, decimal AmountToPay)>> ResolveLoyaltyDiscountAsync(
@@ -312,7 +349,12 @@ public class OrderCheckoutOrchestrator(
 
         order.MarkAsPaid(transactionId);
 
-        int ticketCount = await context.Tickets.CountAsync(t => t.OrderId == order.Id, ct);
+        List<Ticket> tickets = await context.Tickets.IgnoreQueryFilters()
+            .Where(ticket => ticket.OrderId == order.Id).ToListAsync(ct);
+        foreach (Ticket ticket in tickets)
+            ticket.ConfirmPurchase(order);
+
+        int ticketCount = tickets.Count;
 
         await context.SaveChangesAsync(ct);
 
@@ -334,20 +376,17 @@ public class OrderCheckoutOrchestrator(
         return Result.Success(order.Id.Value);
     }
 
-    private async Task<Result<Guid>> FailOrderAsync(
-        Guid orderId, string reason,
-        Guid sessionId, List<Guid> seatIds, Guid userId, CancellationToken ct)
+    private async Task<Result<Guid>> FailOrderAsync(Guid orderId, string reason, CancellationToken ct)
     {
         var order = await context.Orders.FindAsync([new EntityId<Order>(orderId)], ct);
         if (order != null)
         {
             List<Ticket> tickets = await context.Tickets.IgnoreQueryFilters()
-                .Where(ticket => ticket.OrderId == order.Id && ticket.TicketStatus == TicketStatus.Valid)
+                .Where(ticket => ticket.OrderId == order.Id && ticket.TicketStatus == TicketStatus.Reserved)
                 .ToListAsync(ct);
-            foreach (Ticket ticket in tickets)
-                ticket.MarkAsRefunded();
-
             order.MarkAsFailed();
+            foreach (Ticket ticket in tickets)
+                ticket.ReleaseReservation(order);
             await context.SaveChangesAsync(ct);
         }
 

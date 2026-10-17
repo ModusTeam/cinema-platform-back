@@ -1,4 +1,4 @@
-﻿using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
@@ -83,7 +83,7 @@ public class CalculateLoyaltyDiscountPreviewQueryHandler(
             .AsNoTracking()
             .AnyAsync(t => targetSeatIds.Contains(t.SeatId)
                            && t.SessionId == sessionId
-                           && (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
+                           && (t.TicketStatus == TicketStatus.Reserved || t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
 
         if (areSeatsSold)
         {

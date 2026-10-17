@@ -26,7 +26,7 @@ public class GetMyOrdersQueryHandler(
             .IgnoreQueryFilters()
             .Where(o => o.UserId == userId)
             .Where(o => o.Session!.StartTime > now)
-            .Where(o => o.Status != OrderStatus.Cancelled && o.Status != OrderStatus.Failed)
+            .Where(o => o.Status != OrderStatus.Cancelled && o.Status != OrderStatus.Failed && o.Status != OrderStatus.Expired)
             .OrderBy(o => o.Session!.StartTime)
             .ProjectToType<OrderDto>() 
             .ToListAsync(ct);
@@ -35,7 +35,7 @@ public class GetMyOrdersQueryHandler(
             .AsNoTracking()
             .IgnoreQueryFilters()
             .Where(o => o.UserId == userId)
-            .Where(o => o.Session!.StartTime <= now || o.Status == OrderStatus.Cancelled || o.Status == OrderStatus.Failed)
+            .Where(o => o.Session!.StartTime <= now || o.Status == OrderStatus.Cancelled || o.Status == OrderStatus.Failed || o.Status == OrderStatus.Expired)
             .OrderByDescending(o => o.Session!.StartTime)
             .ProjectToType<OrderDto>()
             .ToListAsync(ct);

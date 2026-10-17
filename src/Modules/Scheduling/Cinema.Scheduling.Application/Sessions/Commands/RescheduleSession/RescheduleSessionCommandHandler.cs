@@ -28,7 +28,7 @@ public class RescheduleSessionCommandHandler(
         
         var hasActiveTickets = await context.Tickets.AnyAsync(t =>
             t.SessionId == sessionId &&
-            (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
+            (t.TicketStatus == TicketStatus.Reserved || t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
 
         if (hasActiveTickets)
         {

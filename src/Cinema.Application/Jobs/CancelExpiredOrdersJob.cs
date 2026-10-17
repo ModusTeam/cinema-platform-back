@@ -1,5 +1,7 @@
+using System.Data;
 using Cinema.Application.Common.Constants;
 using Cinema.Application.Common.Interfaces;
+using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -9,69 +11,94 @@ namespace Cinema.Application.Jobs;
 
 public class CancelExpiredOrdersJob(
     IApplicationDbContext context,
+    ISeatLockingService seatLockingService,
+    ITicketNotifier ticketNotifier,
     ILogger<CancelExpiredOrdersJob> logger)
 {
     private const int BatchSize = 100;
 
     public async Task Process(CancellationToken ct)
     {
-        logger.LogInformation("Starting CancelExpiredOrdersJob...");
-        
-        var timeoutThreshold = DateTime.UtcNow.AddMinutes(-OrderConstants.SeatLockDurationMinutes);
-
-        bool hasMore = true;
+        DateTime timeoutThreshold = DateTime.UtcNow.AddMinutes(-OrderConstants.SeatLockDurationMinutes);
         int totalProcessed = 0;
 
-        while (hasMore)
+        while (true)
         {
-            var expiredOrdersBatch = await context.Orders
-                .Where(o => o.Status == OrderStatus.Pending && o.BookingDate < timeoutThreshold)
+            // Pending/Valid is a legacy ambiguity: preserve it for payment reconciliation.
+            List<EntityId<Order>> orderIds = await context.Orders.AsNoTracking()
+                .Where(order => order.Status == OrderStatus.Pending && order.BookingDate < timeoutThreshold &&
+                    context.Tickets.IgnoreQueryFilters().Any(ticket => ticket.OrderId == order.Id && ticket.TicketStatus == TicketStatus.Reserved) &&
+                    !context.Tickets.IgnoreQueryFilters().Any(ticket => ticket.OrderId == order.Id && ticket.TicketStatus != TicketStatus.Reserved))
+                .OrderBy(order => order.BookingDate)
                 .Take(BatchSize)
+                .Select(order => order.Id)
                 .ToListAsync(ct);
 
-            if (expiredOrdersBatch.Count == 0)
-            {
-                hasMore = false;
+            if (orderIds.Count == 0)
                 break;
-            }
 
-            var orderIds = expiredOrdersBatch.Select(o => o.Id).ToList();
-            var ticketsByOrder = (await context.Tickets.IgnoreQueryFilters()
-                    .Where(t => orderIds.Contains(t.OrderId) && t.TicketStatus == TicketStatus.Valid)
-                    .ToListAsync(ct))
-                .GroupBy(t => t.OrderId)
-                .ToDictionary(group => group.Key, group => group.ToList());
-
-            foreach (var order in expiredOrdersBatch)
+            foreach (EntityId<Order> id in orderIds)
             {
-                try
+                if (context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
                 {
-                    if (ticketsByOrder.TryGetValue(order.Id, out var tickets))
-                    {
-                        foreach (Ticket ticket in tickets)
-                            ticket.MarkAsRefunded();
-                    }
+                    Order? inMemoryOrder = await context.Orders.FindAsync([id], ct);
+                    if (inMemoryOrder?.Status != OrderStatus.Pending)
+                        continue;
+                    inMemoryOrder.MarkAsExpired();
+                    List<Ticket> inMemoryTickets = await context.Tickets.IgnoreQueryFilters()
+                        .Where(ticket => ticket.OrderId == id).ToListAsync(ct);
+                    foreach (Ticket ticket in inMemoryTickets)
+                        ticket.ReleaseReservation(inMemoryOrder);
+                    await context.SaveChangesAsync(ct);
+                    totalProcessed++;
+                    context.ClearChangeTracker();
+                    await NotifyReleasedSeatsAsync(inMemoryOrder, inMemoryTickets, ct);
+                    continue;
+                }
 
-                    order.MarkAsCancelled();
-                    
-                    logger.LogInformation("Marked order {OrderId} as cancelled (expired).", order.Id.Value);
-                }
-                catch (Exception ex)
+                await using var transaction = await context.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+                int claimed = await context.Orders
+                    .Where(order => order.Id == id && order.Status == OrderStatus.Pending && order.BookingDate < timeoutThreshold)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(order => order.Status, OrderStatus.Expired), ct);
+                if (claimed == 0)
                 {
-                    logger.LogError(ex, "Failed to process expiration for order {OrderId}", order.Id.Value);
+                    await transaction.RollbackAsync(ct);
+                    continue;
                 }
+
+                context.ClearChangeTracker();
+                Order expiredOrder = await context.Orders.SingleAsync(order => order.Id == id, ct);
+                List<Ticket> tickets = await context.Tickets.IgnoreQueryFilters()
+                    .Where(ticket => ticket.OrderId == id).ToListAsync(ct);
+                foreach (Ticket ticket in tickets)
+                    ticket.ReleaseReservation(expiredOrder);
+
+                await context.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                totalProcessed++;
+                context.ClearChangeTracker();
+                await NotifyReleasedSeatsAsync(expiredOrder, tickets, ct);
             }
-            
-            await context.SaveChangesAsync(ct);
-            
-            totalProcessed += expiredOrdersBatch.Count;
 
-            context.ClearChangeTracker();
+            if (orderIds.Count < BatchSize)
+                break;
         }
 
-        if (totalProcessed > 0)
+        logger.LogInformation("CancelExpiredOrdersJob completed. Total expired: {Count}", totalProcessed);
+    }
+
+    private async Task NotifyReleasedSeatsAsync(Order order, List<Ticket> tickets, CancellationToken ct)
+    {
+        List<Guid> seatIds = tickets.Select(ticket => ticket.SeatId.Value).ToList();
+        try
         {
-            logger.LogInformation("CancelExpiredOrdersJob completed. Total cancelled: {Count}", totalProcessed);
+            await seatLockingService.UnlockSeatsAsync(order.SessionId.Value, seatIds, order.UserId, ct, notifyClients: false);
+            foreach (Guid seatId in seatIds)
+                await ticketNotifier.NotifySeatUnlockedAsync(order.SessionId.Value, seatId, ct);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Seat release notification failed for expired order {OrderId}", order.Id.Value);
         }
     }
 }

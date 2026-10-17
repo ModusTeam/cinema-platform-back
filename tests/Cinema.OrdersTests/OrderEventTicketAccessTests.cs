@@ -180,7 +180,7 @@ public class OrderEventTicketAccessTests
             if (number <= 101)
                 expired.Add(order);
             context.Orders.Add(order);
-            Ticket ticket = Ticket.New(EntityId<Ticket>.New(), 20m, TicketStatus.Valid,
+            Ticket ticket = Ticket.New(EntityId<Ticket>.New(), 20m, number <= 101 ? TicketStatus.Reserved : TicketStatus.Valid,
                 order.Id, sessionId, seat.Id);
             tickets.Add(ticket);
             context.Tickets.Add(ticket);
@@ -189,12 +189,14 @@ public class OrderEventTicketAccessTests
         context.SeatTypes.Add(seatType);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         context.ClearChangeTracker();
-        await new CancelExpiredOrdersJob(context, NullLogger<CancelExpiredOrdersJob>.Instance)
+        await new CancelExpiredOrdersJob(context, Substitute.For<ISeatLockingService>(), Substitute.For<ITicketNotifier>(), NullLogger<CancelExpiredOrdersJob>.Instance)
             .Process(TestContext.Current.CancellationToken);
 
         context.ChangeTracker.Entries().Should().BeEmpty();
+        (await context.Orders.CountAsync(o => o.Status == OrderStatus.Expired,
+            TestContext.Current.CancellationToken)).Should().Be(101);
         (await context.Orders.CountAsync(o => o.Status == OrderStatus.Cancelled,
-            TestContext.Current.CancellationToken)).Should().Be(102);
+            TestContext.Current.CancellationToken)).Should().Be(1);
         (await context.Orders.CountAsync(o => o.Status == OrderStatus.Failed,
             TestContext.Current.CancellationToken)).Should().Be(1);
         (await context.Orders.CountAsync(o => o.Status == OrderStatus.Paid,
@@ -207,7 +209,7 @@ public class OrderEventTicketAccessTests
         {
             Ticket ticket = tickets.Single(t => t.OrderId == order.Id);
             (await context.Tickets.SingleAsync(t => t.Id == ticket.Id, TestContext.Current.CancellationToken))
-                .TicketStatus.Should().Be(TicketStatus.Refunded);
+                .TicketStatus.Should().Be(TicketStatus.Released);
         }
     }
 

@@ -32,7 +32,7 @@ public class UpdateSeatStatusCommandHandler(IApplicationDbContext context)
                 .AsNoTracking()
                 .Where(t => 
                     t.SeatId == seatId && 
-                    t.TicketStatus == TicketStatus.Valid &&
+                    (t.TicketStatus == TicketStatus.Reserved || t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used) &&
                     t.Session!.StartTime > DateTime.UtcNow)
                 .Select(t => t.Session!.StartTime)
                 .ToListAsync(ct);

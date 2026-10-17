@@ -40,12 +40,44 @@ public class Ticket
         EntityId<Order> orderId,
         EntityId<Session> sessionId,
         EntityId<Seat> seatId) => new(id, priceSnapshot, ticketStatus, orderId, sessionId, seatId);
+
+    public static Ticket Reserve(
+        EntityId<Ticket> id,
+        decimal priceSnapshot,
+        EntityId<Order> orderId,
+        EntityId<Session> sessionId,
+        EntityId<Seat> seatId) => new(id, priceSnapshot, TicketStatus.Reserved, orderId, sessionId, seatId);
+
+    public void ConfirmPurchase(Order order)
+    {
+        if (order.Id != OrderId || order.SessionId != SessionId || order.Status != OrderStatus.Paid)
+            throw new DomainException("Ticket purchase requires confirmation of its owning order.");
+        if (TicketStatus == TicketStatus.Valid)
+            return;
+        if (TicketStatus != TicketStatus.Reserved)
+            throw new DomainException($"Cannot confirm a ticket in {TicketStatus} status.");
+        TicketStatus = TicketStatus.Valid;
+    }
+
+    public void ReleaseReservation(Order order)
+    {
+        if (order.Id != OrderId || order.SessionId != SessionId ||
+            order.Status is not (OrderStatus.Failed or OrderStatus.Expired or OrderStatus.Cancelled))
+            throw new DomainException("Ticket release requires a terminal owning order.");
+        if (TicketStatus == TicketStatus.Released)
+            return;
+        if (TicketStatus != TicketStatus.Reserved)
+            throw new DomainException($"Cannot release a ticket in {TicketStatus} status.");
+        TicketStatus = TicketStatus.Released;
+    }
     
 
     public void MarkAsRefunded()
     {
-        if (TicketStatus == TicketStatus.Used)
-            throw new DomainException("Cannot refund a ticket that has already been used.");
+        if (TicketStatus == TicketStatus.Refunded)
+            return;
+        if (TicketStatus != TicketStatus.Valid)
+            throw new DomainException($"Cannot refund a ticket in {TicketStatus} status.");
             
         TicketStatus = TicketStatus.Refunded;
     }
@@ -62,6 +94,8 @@ public class Ticket
 
     public void ApplyGoldUpgrade(decimal standardPrice)
     {
+        if (TicketStatus is not (TicketStatus.Reserved or TicketStatus.Valid))
+            throw new DomainException($"Cannot upgrade a ticket in {TicketStatus} status.");
         if (IsGoldUpgraded)
             throw new DomainException("Ticket is already gold upgraded.");
 

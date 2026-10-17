@@ -87,7 +87,7 @@ public class CalculateCheckoutPreviewQueryHandler(
             .AsNoTracking()
             .AnyAsync(t => targetSeatIds.Contains(t.SeatId)
                            && t.SessionId == sessionId
-                           && (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
+                           && (t.TicketStatus == TicketStatus.Reserved || t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
 
         if (areSeatsSold)
         {

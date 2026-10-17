@@ -8,20 +8,21 @@ namespace Cinema.OrdersTests;
 internal static class OrderTicketFixture
 {
     public static (Order Order, List<Ticket> Tickets) Create(
-        Guid userId, Session session, List<Seat> seats, Dictionary<EntityId<Seat>, decimal> prices)
+        Guid userId, Session session, List<Seat> seats, Dictionary<EntityId<Seat>, decimal> prices,
+        TicketStatus ticketStatus = TicketStatus.Valid)
     {
         Order order = Order.CreateWithoutTickets(userId, session, seats, prices);
         List<Ticket> tickets = seats.Select(seat => Ticket.New(
-            EntityId<Ticket>.New(), prices[seat.Id], TicketStatus.Valid,
+            EntityId<Ticket>.New(), prices[seat.Id], ticketStatus,
             order.Id, session.Id, seat.Id)).ToList();
         return (order, tickets);
     }
 
     public static Order CreateAndTrack(
         ApplicationDbContext context, Guid userId, Session session, List<Seat> seats,
-        Dictionary<EntityId<Seat>, decimal> prices)
+        Dictionary<EntityId<Seat>, decimal> prices, TicketStatus ticketStatus = TicketStatus.Valid)
     {
-        (Order order, List<Ticket> tickets) = Create(userId, session, seats, prices);
+        (Order order, List<Ticket> tickets) = Create(userId, session, seats, prices, ticketStatus);
         context.Orders.Add(order);
         context.Tickets.AddRange(tickets);
         return order;

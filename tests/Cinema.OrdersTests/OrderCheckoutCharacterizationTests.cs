@@ -117,7 +117,7 @@ public class OrderCheckoutCharacterizationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Decline_Releases_Ticket_While_Provider_Exception_Leaves_Order_Pending(bool providerThrows)
+    public async Task Decline_Releases_Ticket_While_Provider_Exception_Requires_Reconciliation(bool providerThrows)
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         if (providerThrows)
@@ -130,18 +130,18 @@ public class OrderCheckoutCharacterizationTests
         Result<Guid> result = await fixture.CheckoutAsync();
 
         result.Error.Code.Should().Be(providerThrows ? "Payment.OutcomeUnknown" : "Payment.Failed");
-        fixture.Order.Status.Should().Be(providerThrows ? OrderStatus.Pending : OrderStatus.Failed);
-        fixture.Tickets.Single().TicketStatus.Should().Be(providerThrows ? TicketStatus.Valid : TicketStatus.Refunded);
+        fixture.Order.Status.Should().Be(providerThrows ? OrderStatus.PaymentOutcomeUnknown : OrderStatus.Failed);
+        fixture.Tickets.Single().TicketStatus.Should().Be(providerThrows ? TicketStatus.Reserved : TicketStatus.Released);
         await fixture.Locks.DidNotReceiveWithAnyArgs().UnlockSeatsAsync(default, default!, default, TestContext.Current.CancellationToken);
         await fixture.Publisher.DidNotReceiveWithAnyArgs().Publish(Arg.Any<TicketPurchasedEvent>(), TestContext.Current.CancellationToken);
     }
 
     [Fact]
-    public async Task Pending_Order_Already_Has_A_Valid_Ticket()
+    public async Task Pending_Order_Has_A_Reserved_Ticket()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         fixture.Order.Status.Should().Be(OrderStatus.Pending);
-        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
+        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Reserved);
     }
 
     [Fact]
@@ -435,7 +435,7 @@ public class OrderCheckoutCharacterizationTests
         Result<Guid> result = await fixture.CheckoutAsync(gold: true, usePoints: true);
 
         result.Error.Code.Should().Be("Payment.OutcomeUnknown");
-        fixture.Order.Status.Should().Be(OrderStatus.Pending);
+        fixture.Order.Status.Should().Be(OrderStatus.PaymentOutcomeUnknown);
         fixture.Tickets.Single().IsGoldUpgraded.Should().BeTrue();
         await fixture.Loyalty.DidNotReceiveWithAnyArgs().RollbackGoldUpgradeAsync(default, default, TestContext.Current.CancellationToken);
         await fixture.Loyalty.DidNotReceiveWithAnyArgs().RefundPointsAsync(default, default, default, default!, TestContext.Current.CancellationToken);
@@ -509,7 +509,7 @@ public class OrderCheckoutCharacterizationTests
             Dictionary<EntityId<Seat>, decimal> seatPrices = fixture.Seats
                 .Select((seat, index) => (seat, price: prices[index]))
                 .ToDictionary(item => item.seat.Id, item => item.price);
-            fixture.Order = OrderTicketFixture.CreateAndTrack(fixture.Context, fixture.UserId, fixture.Session, fixture.Seats, seatPrices);
+            fixture.Order = OrderTicketFixture.CreateAndTrack(fixture.Context, fixture.UserId, fixture.Session, fixture.Seats, seatPrices, TicketStatus.Reserved);
             fixture.Context.Halls.Add(hall);
             fixture.Context.SeatTypes.Add(seatType);
             fixture.Context.Pricings.Add(pricing);
