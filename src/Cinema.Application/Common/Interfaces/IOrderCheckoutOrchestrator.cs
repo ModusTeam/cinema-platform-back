@@ -8,6 +8,14 @@ public interface IOrderCheckoutOrchestrator
 
     Task<Result<Guid>> ProcessCheckoutAsync(
         Guid userId,
+        Guid orderId,
+        bool applyGoldUpgrade,
+        bool useLoyaltyPoints,
+        string paymentToken,
+        CancellationToken ct);
+
+    Task<Result<Guid>> ProcessCheckoutAsync(
+        Guid userId,
         Guid sessionId,
         List<Guid> seatIds,
         Guid orderId,

@@ -30,6 +30,13 @@ public class ValidateTicketCommandHandler(IApplicationDbContext context)
 
         if (ticket.TicketStatus == TicketStatus.Refunded)
             return Result.Failure<string>(new Error("Ticket.Refunded", "Ticket was refunded. Access denied."));
+
+        if (ticket.TicketStatus is TicketStatus.Reserved or TicketStatus.Released)
+            return Result.Failure<string>(new Error("Ticket.NotPurchased", "Ticket has not been purchased."));
+
+        if (!await context.Orders.AsNoTracking().AnyAsync(
+                order => order.Id == ticket.OrderId && order.Status == OrderStatus.Paid, ct))
+            return Result.Failure<string>(new Error("Ticket.NotPurchased", "Ticket has not been purchased."));
         
         if (ticket.Session!.StartTime.Date != DateTime.UtcNow.Date)
             return Result.Failure<string>(new Error("Ticket.WrongDate", $"Session is on {ticket.Session!.StartTime}."));

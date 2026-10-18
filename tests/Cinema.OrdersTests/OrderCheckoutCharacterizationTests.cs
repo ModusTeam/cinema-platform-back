@@ -97,7 +97,7 @@ public class OrderCheckoutCharacterizationTests
     }
 
     [Fact]
-    public async Task Publish_Exception_After_Save_Keeps_Paid_Order_And_Does_Not_Refund()
+    public async Task Purchase_Event_Staging_Failure_Leaves_Payment_Outcome_Uncertain_Without_Refund()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         fixture.Payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>())
@@ -107,19 +107,18 @@ public class OrderCheckoutCharacterizationTests
 
         Result<Guid> result = await fixture.CheckoutAsync();
 
-        result.IsSuccess.Should().BeTrue();
+        result.IsFailure.Should().BeTrue();
         await fixture.Payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, TestContext.Current.CancellationToken);
         fixture.Context.ChangeTracker.Clear();
         Order persisted = await fixture.Context.Orders.SingleAsync(o => o.Id == fixture.Order.Id,
             TestContext.Current.CancellationToken);
-        persisted.Status.Should().Be(OrderStatus.Paid);
-        persisted.PaymentTransactionId.Should().Be("charged-transaction");
+        persisted.Status.Should().Be(OrderStatus.PaymentOutcomeUnknown);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Decline_Releases_Ticket_While_Provider_Exception_Leaves_Order_Pending(bool providerThrows)
+    public async Task Decline_Releases_Ticket_While_Provider_Exception_Requires_Reconciliation(bool providerThrows)
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         if (providerThrows)
@@ -132,18 +131,18 @@ public class OrderCheckoutCharacterizationTests
         Result<Guid> result = await fixture.CheckoutAsync();
 
         result.Error.Code.Should().Be(providerThrows ? "Payment.OutcomeUnknown" : "Payment.Failed");
-        fixture.Order.Status.Should().Be(providerThrows ? OrderStatus.Pending : OrderStatus.Failed);
-        fixture.Tickets.Single().TicketStatus.Should().Be(providerThrows ? TicketStatus.Valid : TicketStatus.Refunded);
+        fixture.Order.Status.Should().Be(providerThrows ? OrderStatus.PaymentOutcomeUnknown : OrderStatus.Failed);
+        fixture.Tickets.Single().TicketStatus.Should().Be(providerThrows ? TicketStatus.Reserved : TicketStatus.Released);
         await fixture.Locks.DidNotReceiveWithAnyArgs().UnlockSeatsAsync(default, default!, default, TestContext.Current.CancellationToken);
         await fixture.Publisher.DidNotReceiveWithAnyArgs().Publish(Arg.Any<TicketPurchasedEvent>(), TestContext.Current.CancellationToken);
     }
 
     [Fact]
-    public async Task Pending_Order_Already_Has_A_Valid_Ticket()
+    public async Task Pending_Order_Has_A_Reserved_Ticket()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         fixture.Order.Status.Should().Be(OrderStatus.Pending);
-        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
+        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Reserved);
     }
 
     [Fact]
@@ -311,7 +310,7 @@ public class OrderCheckoutCharacterizationTests
         fixture.Context.ChangeTracker.Clear();
         Order persisted = await fixture.Context.Orders.SingleAsync(TestContext.Current.CancellationToken);
         persisted.TotalAmount.Should().Be(100m);
-        fixture.Tickets.Should().OnlyContain(ticket => !ticket.IsGoldUpgraded && ticket.PriceSnapshot == 50m && ticket.TicketStatus == TicketStatus.Refunded);
+        fixture.Tickets.Should().OnlyContain(ticket => !ticket.IsGoldUpgraded && ticket.PriceSnapshot == 50m && ticket.TicketStatus == TicketStatus.Released);
         await fixture.Loyalty.Received(1).UseGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());
         await fixture.Payment.DidNotReceiveWithAnyArgs().ProcessPaymentAsync(default, default!, default!, TestContext.Current.CancellationToken);
     }
@@ -434,17 +433,17 @@ public class OrderCheckoutCharacterizationTests
         result.Error.Code.Should().Be("Payment.OutcomeUnknown");
         fixture.Context.ChangeTracker.Clear();
         Order persisted = await fixture.Context.Orders.SingleAsync(TestContext.Current.CancellationToken);
-        persisted.Status.Should().Be(OrderStatus.Pending);
+        persisted.Status.Should().Be(OrderStatus.PaymentOutcomeUnknown);
         persisted.GoldCheckoutState.Should().Be(GoldCheckoutState.Compensated);
         persisted.TotalAmount.Should().Be(50m);
         fixture.Tickets.Single().IsGoldUpgraded.Should().BeFalse();
-        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Valid);
+        fixture.Tickets.Single().TicketStatus.Should().Be(TicketStatus.Reserved);
         fixture.Context.Entry(persisted).Property(order => order.BookingDate).CurrentValue = DateTime.UtcNow.AddHours(-1);
         await fixture.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
-        await new CancelExpiredOrdersJob(fixture.Context, NullLogger<CancelExpiredOrdersJob>.Instance)
-            .Process(TestContext.Current.CancellationToken);
+        await new CancelExpiredOrdersJob(fixture.Context, fixture.Locks, Substitute.For<ITicketNotifier>(),
+                NullLogger<CancelExpiredOrdersJob>.Instance).Process(TestContext.Current.CancellationToken);
         fixture.Context.ChangeTracker.Clear();
-        (await fixture.Context.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Pending);
+        (await fixture.Context.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.PaymentOutcomeUnknown);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(fixture.UserId);
         Result cancellation = await new CancelOrderCommandHandler(fixture.Context, currentUser, fixture.Payment, fixture.Loyalty)
@@ -508,7 +507,6 @@ public class OrderCheckoutCharacterizationTests
         {
             fixture.Payment.ProcessPaymentAsync(30m, "UAH", "token", Arg.Any<CancellationToken>()).Returns(PaymentResult.Success("charged"));
             fixture.FailBeforeConfirmationSave = true;
-            fixture.Payment.RefundPaymentAsync("charged", Arg.Any<CancellationToken>()).Returns(PaymentResult.Success("refunded"));
         }
         if (failure is "exception" or "cancellation")
             fixture.Loyalty.DeductPointsAsync(fixture.UserId, 10, fixture.Order.Id.Value, Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -529,7 +527,7 @@ public class OrderCheckoutCharacterizationTests
         Ticket ticket = await fixture.Context.Tickets.SingleAsync(TestContext.Current.CancellationToken);
         ticket.PriceSnapshot.Should().Be(50m);
         ticket.IsGoldUpgraded.Should().BeFalse();
-        ticket.TicketStatus.Should().Be(TicketStatus.Refunded);
+        ticket.TicketStatus.Should().Be(failure == "confirmation" ? TicketStatus.Reserved : TicketStatus.Released);
     }
 
     [Fact]
@@ -686,7 +684,7 @@ public class OrderCheckoutCharacterizationTests
             Dictionary<EntityId<Seat>, decimal> seatPrices = fixture.Seats
                 .Select((seat, index) => (seat, price: prices[index]))
                 .ToDictionary(item => item.seat.Id, item => item.price);
-            fixture.Order = OrderTicketFixture.CreateAndTrack(fixture.Context, fixture.UserId, fixture.Session, fixture.Seats, seatPrices);
+            fixture.Order = OrderTicketFixture.CreateAndTrack(fixture.Context, fixture.UserId, fixture.Session, fixture.Seats, seatPrices, TicketStatus.Reserved);
             fixture.Context.Halls.Add(hall);
             fixture.Context.SeatTypes.Add(seatType);
             fixture.Context.Pricings.Add(pricing);

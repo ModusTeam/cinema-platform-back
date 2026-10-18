@@ -6,6 +6,7 @@ using Cinema.Tickets.Infrastructure.Persistence.Configurations;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
 using Cinema.Infrastructure.Persistence.Converters;
+using MassTransit;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -59,6 +60,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrderConfiguration).Assembly);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(TicketConfiguration).Assembly);
         base.OnModelCreating(modelBuilder);
+        modelBuilder.AddInboxStateEntity();
+        modelBuilder.AddOutboxMessageEntity();
+        modelBuilder.AddOutboxStateEntity();
     }
     
     public void ClearChangeTracker()

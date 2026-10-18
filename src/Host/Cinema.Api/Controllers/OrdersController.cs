@@ -1,10 +1,12 @@
 ﻿using Cinema.Application.Orders.Commands.CancelOrder;
 using Cinema.Application.Orders.Commands.CreateOrder;
+using Cinema.Application.Orders.Commands.StartCheckout;
 using Cinema.Application.Orders.Dtos;
 using Cinema.Application.Orders.Queries.GetMyOrders;
 using Cinema.Application.Orders.Queries.GetUserOrders;
 using Cinema.Application.Orders.Queries.CalculateLoyaltyDiscountPreview;
 using Cinema.Application.Orders.Queries.CalculateCheckoutPreview;
+using Cinema.Application.Orders.Queries.GetOrderStatus;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,6 +15,28 @@ namespace Cinema.Api.Controllers;
 [Authorize]
 public class OrdersController : ApiController
 {
+    [HttpPost("reservations")]
+    public async Task<IActionResult> Reserve([FromBody] ReserveOrderRequest request)
+    {
+        var result = await Mediator.Send(new ReserveOrderCommand(request.SessionId, request.SeatIds));
+        return HandleResult(result);
+    }
+
+    [HttpPost("{id:guid}/checkout")]
+    public async Task<IActionResult> StartCheckout(Guid id, [FromBody] StartCheckoutRequest request)
+    {
+        var result = await Mediator.Send(new StartCheckoutCommand(
+            id, request.PaymentToken, request.UseLoyaltyPoints, request.ApplyGoldUpgrade));
+        return HandleResult(result);
+    }
+
+    [HttpGet("{id:guid}/status")]
+    public async Task<IActionResult> GetStatus(Guid id)
+    {
+        var result = await Mediator.Send(new GetOrderStatusQuery(id));
+        return HandleResult(result);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateOrderRequest request)
     {
@@ -75,5 +99,7 @@ public class OrdersController : ApiController
 }
 
 public record CreateOrderRequest(Guid SessionId, List<Guid> SeatIds, string PaymentToken, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);
+public record ReserveOrderRequest(Guid SessionId, List<Guid> SeatIds);
+public record StartCheckoutRequest(string PaymentToken, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);
 public record LoyaltyDiscountPreviewRequest(Guid SessionId, List<Guid> SeatIds);
 public record CheckoutPreviewRequest(Guid SessionId, List<Guid> SeatIds, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);

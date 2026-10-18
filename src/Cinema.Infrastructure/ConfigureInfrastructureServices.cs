@@ -67,6 +67,8 @@ public static class ConfigureInfrastructureServices
         services.AddSingleton(dataSource);
 
         services.AddScoped<Cinema.Infrastructure.Persistence.Interceptors.DispatchDomainEventsInterceptor>();
+        services.AddScoped<IPostCommitDomainEventDispatcher>(sp =>
+            sp.GetRequiredService<Cinema.Infrastructure.Persistence.Interceptors.DispatchDomainEventsInterceptor>());
         services.AddScoped<ApplicationDbContextInitializer>();
 
         services.AddDbContext<ApplicationDbContext>((sp, options) =>
@@ -145,7 +147,12 @@ public static class ConfigureInfrastructureServices
 
         services.AddMassTransit(x =>
         {
-            x.AddConsumer<TicketPurchasedConsumer>();
+            x.AddEntityFrameworkOutbox<ApplicationDbContext>(outbox =>
+            {
+                outbox.UsePostgres();
+                outbox.UseBusOutbox();
+            });
+            x.AddConsumer<TicketPurchasedConsumer, TicketPurchasedConsumerDefinition>();
 
             x.AddConsumer<TierUpgradedConsumer>();
 

@@ -31,7 +31,7 @@ public class LockSeatCommandValidator : AbstractValidator<LockSeatCommand>
 
                 return !await dbContext.Tickets.AsNoTracking()
                     .AnyAsync(t => t.SessionId == session.Id && t.SeatId == new EntityId<Seat>(command.SeatId) &&
-                                   (t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
+                                   (t.TicketStatus == TicketStatus.Reserved || t.TicketStatus == TicketStatus.Valid || t.TicketStatus == TicketStatus.Used), ct);
             })
             .WithMessage("Invalid Session or Seat.");
     }

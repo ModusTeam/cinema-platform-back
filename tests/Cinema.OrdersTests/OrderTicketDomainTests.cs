@@ -71,7 +71,7 @@ public class OrderTicketDomainTests
             .DeleteBehavior.Should().Be(DeleteBehavior.Cascade);
         ticketType.GetQueryFilter().Should().NotBeNull();
         ticketType.GetIndexes().Should().ContainSingle(index => index.IsUnique &&
-            index.GetFilter() == "ticket_status IN (0, 1)");
+            index.GetFilter() == "ticket_status IN (0, 1, 3)");
     }
 
     [Fact]
@@ -236,15 +236,18 @@ public class OrderTicketDomainTests
         Order order = Order.New(EntityId<Order>.New(), 20m, Guid.NewGuid(), EntityId<Session>.New());
         context.Orders.Add(order);
         order.MarkAsPaid("transaction");
-        order.MarkAsPaid("duplicate");
+        order.MarkAsPaid("transaction");
 
         CancellationToken cancellationToken = TestContext.Current.CancellationToken;
-        await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context, cancellationToken);
+        DispatchDomainEventsInterceptor interceptor = new(publisher);
+        await interceptor.DispatchDomainEvents(context, cancellationToken);
 
         order.DomainEvents.Should().BeEmpty();
         await publisher.Received(1).Publish(Arg.Is<OrderPaidEvent>(e => e.Order == order), cancellationToken);
+        await publisher.DidNotReceive().Publish(Arg.Any<DomainEventNotification<OrderPaidEvent>>(), cancellationToken);
+        await interceptor.DispatchAfterCommitAsync(cancellationToken);
         await publisher.Received(1).Publish(Arg.Is<DomainEventNotification<OrderPaidEvent>>(n => n.DomainEvent.Order == order), cancellationToken);
-        await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context, cancellationToken);
+        await interceptor.DispatchDomainEvents(context, cancellationToken);
         publisher.ReceivedCalls().Count().Should().Be(2);
     }
 
