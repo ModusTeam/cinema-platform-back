@@ -47,6 +47,7 @@ using NSubstitute;
 using Mapster;
 using System.Data.Common;
 using System.Collections.Concurrent;
+using System.Net.Sockets;
 using Xunit;
 
 // Paid notifications intentionally call the existing overload without a cancellation token.
@@ -87,6 +88,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
     public async Task Committed_Purchase_Outbox_Message_Delivers_When_RabbitMq_Starts_Later()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        await EnsureRabbitMqAvailableAsync();
         Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
         reserved.IsSuccess.Should().BeTrue();
         await using (ServiceProvider unavailableBroker = CreateOutboxServices(database.ConnectionString, rabbitPort: 5673))
@@ -135,8 +137,9 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         }
         finally
         {
+            using CancellationTokenSource stopTimeout = new(TimeSpan.FromSeconds(10));
             foreach (IHostedService service in hostedServices.AsEnumerable().Reverse())
-                await service.StopAsync(CancellationToken.None);
+                await service.StopAsync(stopTimeout.Token);
         }
     }
 
@@ -274,6 +277,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
     public async Task Consumer_Outbox_Deduplicates_MessageId_Without_Dropping_Distinct_Messages()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        await EnsureRabbitMqAvailableAsync();
         IEmailService email = Substitute.For<IEmailService>();
         ITicketGenerator generator = Substitute.For<ITicketGenerator>();
         generator.GenerateTicketPdf(Arg.Any<TicketPurchasedMessage>()).Returns([1, 2, 3]);
@@ -303,8 +307,26 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         }
         finally
         {
+            using CancellationTokenSource stopTimeout = new(TimeSpan.FromSeconds(10));
             foreach (IHostedService service in hostedServices.AsEnumerable().Reverse())
-                await service.StopAsync(CancellationToken.None);
+                await service.StopAsync(stopTimeout.Token);
+        }
+    }
+
+    private static async Task EnsureRabbitMqAvailableAsync()
+    {
+        using TcpClient client = new();
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(3));
+        try
+        {
+            await client.ConnectAsync("localhost", 5672, timeout.Token);
+        }
+        catch (Exception exception) when (exception is SocketException or OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                "RabbitMQ integration tests require a broker at localhost:5672. " +
+                "Set CINEMA_TEST_RABBITMQ_USERNAME and CINEMA_TEST_RABBITMQ_PASSWORD if it does not use guest/guest.",
+                exception);
         }
     }
 
@@ -335,6 +357,12 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
     {
         ServiceCollection services = new();
         services.AddLogging();
+        services.Configure<MassTransitHostOptions>(options =>
+        {
+            options.WaitUntilStarted = true;
+            options.StartTimeout = TimeSpan.FromSeconds(15);
+            options.StopTimeout = TimeSpan.FromSeconds(10);
+        });
         if (withIdentity)
             services.AddIdentityCore<User>().AddEntityFrameworkStores<ApplicationDbContext>();
         if (withDomainHandlers)
@@ -377,8 +405,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             {
                 bus.Host("localhost", rabbitPort, "/", host =>
                 {
-                    host.Username("guest");
-                    host.Password("guest");
+                    host.Username(Environment.GetEnvironmentVariable("CINEMA_TEST_RABBITMQ_USERNAME") ?? "guest");
+                    host.Password(Environment.GetEnvironmentVariable("CINEMA_TEST_RABBITMQ_PASSWORD") ?? "guest");
                 });
                 if (withPurchaseConsumer)
                     bus.ConfigureEndpoints(context);

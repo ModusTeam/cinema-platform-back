@@ -3,16 +3,17 @@ name: .NET CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
 
 jobs:
   dotnet-tests:
     name: dotnet-tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       CINEMA_TEST_POSTGRES_CONNECTION: Host=localhost;Port=5432;Database=cinema_orders_test_ci;Username=postgres;Password=postgres_password
       CINEMA_TEST_REDIS_CONNECTION: localhost:6379
+      CINEMA_TEST_RABBITMQ_USERNAME: cinema_test
+      CINEMA_TEST_RABBITMQ_PASSWORD: cinema_test_password
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -36,6 +37,18 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: cinema_test
+          RABBITMQ_DEFAULT_PASS: cinema_test_password
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -46,4 +59,4 @@ jobs:
       - name: Build
         run: dotnet build Cinema.sln --configuration Release --no-restore
       - name: Test
-        run: dotnet test Cinema.sln --configuration Release --no-build -- --fail-skips on
+        run: dotnet test Cinema.sln --configuration Release --no-build -- --fail-skips on --timeout 10m --long-running 30 --show-slowest-tests 15
