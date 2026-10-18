@@ -16,7 +16,8 @@ public class CancelOrderCommandHandler(
     IApplicationDbContext context,
     ICurrentUserService currentUser,
     IPaymentService paymentService,
-    ILoyaltyService loyaltyService)
+    ILoyaltyService loyaltyService,
+    IPostCommitDomainEventDispatcher? postCommitDispatcher = null)
     : IRequestHandler<CancelOrderCommand, Result>
 {
     public async Task<Result> Handle(CancelOrderCommand request, CancellationToken ct)
@@ -114,6 +115,8 @@ public class CancelOrderCommandHandler(
                 ticket.ReleaseReservation(order);
             await context.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            if (postCommitDispatcher is not null)
+                await postCommitDispatcher.DispatchAfterCommitAsync(ct);
             return Result.Success();
         }
 

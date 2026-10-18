@@ -24,7 +24,7 @@ namespace Cinema.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Cinema.Domain.Entities.Genre", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Genre", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
@@ -55,58 +55,7 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("genres", (string)null);
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.Hall", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<bool>("IsActive")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(true)
-                        .HasColumnName("is_active");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("name");
-
-                    b.Property<int>("TotalCapacity")
-                        .HasColumnType("integer")
-                        .HasColumnName("total_capacity");
-
-                    b.HasKey("Id")
-                        .HasName("pk_halls");
-
-                    b.HasIndex("Name")
-                        .IsUnique()
-                        .HasDatabaseName("ix_halls_name");
-
-                    b.ToTable("halls", (string)null);
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.HallTechnology", b =>
-                {
-                    b.Property<Guid>("HallId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("hall_id");
-
-                    b.Property<Guid>("TechnologyId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("technology_id");
-
-                    b.HasKey("HallId", "TechnologyId")
-                        .HasName("pk_hall_technologies");
-
-                    b.HasIndex("TechnologyId")
-                        .HasDatabaseName("ix_hall_technologies_technology_id");
-
-                    b.ToTable("hall_technologies", (string)null);
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.Movie", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Movie", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
@@ -183,7 +132,7 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("movies", (string)null);
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.MovieGenre", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.MovieGenre", b =>
                 {
                     b.Property<Guid>("MovieId")
                         .HasColumnType("uuid")
@@ -200,6 +149,57 @@ namespace Cinema.Infrastructure.Migrations
                         .HasDatabaseName("ix_movie_genres_genre_id");
 
                     b.ToTable("movie_genres", (string)null);
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.Hall", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("TotalCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("total_capacity");
+
+                    b.HasKey("Id")
+                        .HasName("pk_halls");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_halls_name");
+
+                    b.ToTable("halls", (string)null);
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.HallTechnology", b =>
+                {
+                    b.Property<Guid>("HallId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("hall_id");
+
+                    b.Property<Guid>("TechnologyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("technology_id");
+
+                    b.HasKey("HallId", "TechnologyId")
+                        .HasName("pk_hall_technologies");
+
+                    b.HasIndex("TechnologyId")
+                        .HasDatabaseName("ix_hall_technologies_technology_id");
+
+                    b.ToTable("hall_technologies", (string)null);
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.Order", b =>
@@ -685,6 +685,224 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("MassTransit.EntityFrameworkCoreIntegration.InboxState", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("Consumed")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("consumed");
+
+                    b.Property<Guid>("ConsumerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("consumer_id");
+
+                    b.Property<DateTime?>("Delivered")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delivered");
+
+                    b.Property<DateTime?>("ExpirationTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expiration_time");
+
+                    b.Property<long?>("LastSequenceNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_sequence_number");
+
+                    b.Property<Guid>("LockId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lock_id");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
+
+                    b.Property<int>("ReceiveCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("receive_count");
+
+                    b.Property<DateTime>("Received")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bytea")
+                        .HasColumnName("row_version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_inbox_state");
+
+                    b.HasAlternateKey("MessageId", "ConsumerId")
+                        .HasName("ak_inbox_state_message_id_consumer_id");
+
+                    b.HasIndex("Delivered")
+                        .HasDatabaseName("ix_inbox_state_delivered");
+
+                    b.ToTable("inbox_state", (string)null);
+                });
+
+            modelBuilder.Entity("MassTransit.EntityFrameworkCoreIntegration.OutboxMessage", b =>
+                {
+                    b.Property<long>("SequenceNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("sequence_number");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("SequenceNumber"));
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("body");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("content_type");
+
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<Guid?>("CorrelationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("correlation_id");
+
+                    b.Property<string>("DestinationAddress")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("destination_address");
+
+                    b.Property<DateTime?>("EnqueueTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("enqueue_time");
+
+                    b.Property<DateTime?>("ExpirationTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expiration_time");
+
+                    b.Property<string>("FaultAddress")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("fault_address");
+
+                    b.Property<string>("Headers")
+                        .HasColumnType("text")
+                        .HasColumnName("headers");
+
+                    b.Property<Guid?>("InboxConsumerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("inbox_consumer_id");
+
+                    b.Property<Guid?>("InboxMessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("inbox_message_id");
+
+                    b.Property<Guid?>("InitiatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("initiator_id");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
+
+                    b.Property<string>("MessageType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("message_type");
+
+                    b.Property<Guid?>("OutboxId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("outbox_id");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text")
+                        .HasColumnName("properties");
+
+                    b.Property<Guid?>("RequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("ResponseAddress")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("response_address");
+
+                    b.Property<DateTime>("SentTime")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sent_time");
+
+                    b.Property<string>("SourceAddress")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("source_address");
+
+                    b.HasKey("SequenceNumber")
+                        .HasName("pk_outbox_message");
+
+                    b.HasIndex("EnqueueTime")
+                        .HasDatabaseName("ix_outbox_message_enqueue_time");
+
+                    b.HasIndex("ExpirationTime")
+                        .HasDatabaseName("ix_outbox_message_expiration_time");
+
+                    b.HasIndex("OutboxId", "SequenceNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_outbox_message_outbox_id_sequence_number");
+
+                    b.HasIndex("InboxMessageId", "InboxConsumerId", "SequenceNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_outbox_message_inbox_message_id_inbox_consumer_id_sequence_");
+
+                    b.ToTable("outbox_message", (string)null);
+                });
+
+            modelBuilder.Entity("MassTransit.EntityFrameworkCoreIntegration.OutboxState", b =>
+                {
+                    b.Property<Guid>("OutboxId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("outbox_id");
+
+                    b.Property<DateTime>("Created")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created");
+
+                    b.Property<DateTime?>("Delivered")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delivered");
+
+                    b.Property<long?>("LastSequenceNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_sequence_number");
+
+                    b.Property<Guid>("LockId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lock_id");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bytea")
+                        .HasColumnName("row_version");
+
+                    b.HasKey("OutboxId")
+                        .HasName("pk_outbox_state");
+
+                    b.HasIndex("Created")
+                        .HasDatabaseName("ix_outbox_state_created");
+
+                    b.ToTable("outbox_state", (string)null);
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
                 {
                     b.Property<Guid>("Id")
@@ -847,30 +1065,9 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.HallTechnology", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Movie", b =>
                 {
-                    b.HasOne("Cinema.Domain.Entities.Hall", "Hall")
-                        .WithMany("Technologies")
-                        .HasForeignKey("HallId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_hall_technologies_halls_hall_id");
-
-                    b.HasOne("Cinema.Domain.Entities.Technology", "Technology")
-                        .WithMany()
-                        .HasForeignKey("TechnologyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_hall_technologies_technologies_technology_id");
-
-                    b.Navigation("Hall");
-
-                    b.Navigation("Technology");
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.Movie", b =>
-                {
-                    b.OwnsMany("Cinema.Domain.Entities.MovieCastMember", "Cast", b1 =>
+                    b.OwnsMany("Cinema.Catalog.Domain.Entities.MovieCastMember", "Cast", b1 =>
                         {
                             b1.Property<Guid>("MovieId")
                                 .HasColumnType("uuid");
@@ -908,16 +1105,16 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Cast");
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.MovieGenre", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.MovieGenre", b =>
                 {
-                    b.HasOne("Cinema.Domain.Entities.Genre", "Genre")
+                    b.HasOne("Cinema.Catalog.Domain.Entities.Genre", "Genre")
                         .WithMany("MovieGenres")
                         .HasForeignKey("GenreId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_movie_genres_genres_genre_id");
 
-                    b.HasOne("Cinema.Domain.Entities.Movie", "Movie")
+                    b.HasOne("Cinema.Catalog.Domain.Entities.Movie", "Movie")
                         .WithMany("MovieGenres")
                         .HasForeignKey("MovieId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -929,6 +1126,27 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Movie");
                 });
 
+            modelBuilder.Entity("Cinema.Domain.Entities.HallTechnology", b =>
+                {
+                    b.HasOne("Cinema.Domain.Entities.Hall", "Hall")
+                        .WithMany("Technologies")
+                        .HasForeignKey("HallId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_hall_technologies_halls_hall_id");
+
+                    b.HasOne("Cinema.Domain.Entities.Technology", "Technology")
+                        .WithMany()
+                        .HasForeignKey("TechnologyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_hall_technologies_technologies_technology_id");
+
+                    b.Navigation("Hall");
+
+                    b.Navigation("Technology");
+                });
+
             modelBuilder.Entity("Cinema.Domain.Entities.Order", b =>
                 {
                     b.HasOne("Cinema.Domain.Entities.Session", "Session")
@@ -938,7 +1156,7 @@ namespace Cinema.Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_orders_sessions_session_id");
 
-                    b.HasOne("Cinema.Domain.Entities.User", "User")
+                    b.HasOne("Cinema.Domain.Entities.User", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -946,8 +1164,6 @@ namespace Cinema.Infrastructure.Migrations
                         .HasConstraintName("fk_orders_users_user_id");
 
                     b.Navigation("Session");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.PricingItem", b =>
@@ -1043,8 +1259,8 @@ namespace Cinema.Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_sessions_halls_hall_id");
 
-                    b.HasOne("Cinema.Domain.Entities.Movie", "Movie")
-                        .WithMany("Sessions")
+                    b.HasOne("Cinema.Catalog.Domain.Entities.Movie", "Movie")
+                        .WithMany()
                         .HasForeignKey("MovieId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
@@ -1066,8 +1282,8 @@ namespace Cinema.Infrastructure.Migrations
 
             modelBuilder.Entity("Cinema.Domain.Entities.Ticket", b =>
                 {
-                    b.HasOne("Cinema.Domain.Entities.Order", "Order")
-                        .WithMany("Tickets")
+                    b.HasOne("Cinema.Domain.Entities.Order", null)
+                        .WithMany()
                         .HasForeignKey("OrderId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
@@ -1081,17 +1297,29 @@ namespace Cinema.Infrastructure.Migrations
                         .HasConstraintName("fk_tickets_seats_seat_id");
 
                     b.HasOne("Cinema.Domain.Entities.Session", "Session")
-                        .WithMany("Tickets")
+                        .WithMany()
                         .HasForeignKey("SessionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_tickets_sessions_session_id");
 
-                    b.Navigation("Order");
-
                     b.Navigation("Seat");
 
                     b.Navigation("Session");
+                });
+
+            modelBuilder.Entity("MassTransit.EntityFrameworkCoreIntegration.OutboxMessage", b =>
+                {
+                    b.HasOne("MassTransit.EntityFrameworkCoreIntegration.OutboxState", null)
+                        .WithMany()
+                        .HasForeignKey("OutboxId")
+                        .HasConstraintName("fk_outbox_message_outbox_state_outbox_id");
+
+                    b.HasOne("MassTransit.EntityFrameworkCoreIntegration.InboxState", null)
+                        .WithMany()
+                        .HasForeignKey("InboxMessageId", "InboxConsumerId")
+                        .HasPrincipalKey("MessageId", "ConsumerId")
+                        .HasConstraintName("fk_outbox_message_inbox_state_inbox_message_id_inbox_consumer_");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
@@ -1151,7 +1379,12 @@ namespace Cinema.Infrastructure.Migrations
                         .HasConstraintName("fk_asp_net_user_tokens_asp_net_users_user_id");
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.Genre", b =>
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Genre", b =>
+                {
+                    b.Navigation("MovieGenres");
+                });
+
+            modelBuilder.Entity("Cinema.Catalog.Domain.Entities.Movie", b =>
                 {
                     b.Navigation("MovieGenres");
                 });
@@ -1165,26 +1398,9 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Technologies");
                 });
 
-            modelBuilder.Entity("Cinema.Domain.Entities.Movie", b =>
-                {
-                    b.Navigation("MovieGenres");
-
-                    b.Navigation("Sessions");
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.Order", b =>
-                {
-                    b.Navigation("Tickets");
-                });
-
             modelBuilder.Entity("Cinema.Domain.Entities.Pricing", b =>
                 {
                     b.Navigation("PricingItems");
-                });
-
-            modelBuilder.Entity("Cinema.Domain.Entities.Session", b =>
-                {
-                    b.Navigation("Tickets");
                 });
 #pragma warning restore 612, 618
         }

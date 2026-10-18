@@ -239,12 +239,15 @@ public class OrderTicketDomainTests
         order.MarkAsPaid("transaction");
 
         CancellationToken cancellationToken = TestContext.Current.CancellationToken;
-        await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context, cancellationToken);
+        DispatchDomainEventsInterceptor interceptor = new(publisher);
+        await interceptor.DispatchDomainEvents(context, cancellationToken);
 
         order.DomainEvents.Should().BeEmpty();
         await publisher.Received(1).Publish(Arg.Is<OrderPaidEvent>(e => e.Order == order), cancellationToken);
+        await publisher.DidNotReceive().Publish(Arg.Any<DomainEventNotification<OrderPaidEvent>>(), cancellationToken);
+        await interceptor.DispatchAfterCommitAsync(cancellationToken);
         await publisher.Received(1).Publish(Arg.Is<DomainEventNotification<OrderPaidEvent>>(n => n.DomainEvent.Order == order), cancellationToken);
-        await new DispatchDomainEventsInterceptor(publisher).DispatchDomainEvents(context, cancellationToken);
+        await interceptor.DispatchDomainEvents(context, cancellationToken);
         publisher.ReceivedCalls().Count().Should().Be(2);
     }
 

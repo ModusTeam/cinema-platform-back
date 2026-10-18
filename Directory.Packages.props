@@ -19,9 +19,10 @@
     <PackageVersion Include="Hangfire.PostgreSql" Version="1.20.13" />
     <PackageVersion Include="Mapster" Version="7.4.0" />
     <PackageVersion Include="Mapster.DependencyInjection" Version="1.0.1" />
-    <PackageVersion Include="MassTransit" Version="8.5.8" />
-    <PackageVersion Include="MassTransit.Abstractions" Version="8.5.8" />
-    <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.8" />
+    <PackageVersion Include="MassTransit" Version="8.5.5" />
+    <PackageVersion Include="MassTransit.Abstractions" Version="8.5.5" />
+    <PackageVersion Include="MassTransit.EntityFrameworkCore" Version="8.5.5" />
+    <PackageVersion Include="MassTransit.RabbitMQ" Version="8.5.5" />
     <PackageVersion Include="MessagePack" Version="2.5.301" />
     <PackageVersion Include="MediatR" Version="14.0.0" />
     <PackageVersion Include="MediatR.Contracts" Version="2.0.1" />

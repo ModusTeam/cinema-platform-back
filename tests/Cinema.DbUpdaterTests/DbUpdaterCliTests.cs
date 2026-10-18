@@ -73,6 +73,8 @@ public class DbUpdaterCliTests
 
             ProcessResult update = await RunAsync([], connectionString);
             Assert.Equal(0, update.ExitCode);
+            Assert.Equal(3, await ScalarAsync<long>(connectionString,
+                "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('inbox_state', 'outbox_message', 'outbox_state')"));
             Assert.Equal((int)OrderStatus.Pending, await ScalarAsync<int>(connectionString,
                 "SELECT status FROM orders WHERE id = @id", order.Id.Value));
             Assert.Equal((int)TicketStatus.Valid, await ScalarAsync<int>(connectionString,

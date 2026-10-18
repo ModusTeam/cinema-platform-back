@@ -24,7 +24,12 @@ public class OrderCheckoutOrchestrator(
 {
     private const string UnknownPaymentOutcomeCode = "payment_outcome_unknown";
 
-    public async Task<Result<Guid>> ProcessCheckoutAsync(
+    public Task<Result<Guid>> ProcessCheckoutAsync(
+        Guid userId, Guid orderId, bool applyGoldUpgrade, bool useLoyaltyPoints,
+        string paymentToken, CancellationToken ct) =>
+        ProcessCheckoutCoreAsync(userId, orderId, applyGoldUpgrade, useLoyaltyPoints, paymentToken, ct);
+
+    public Task<Result<Guid>> ProcessCheckoutAsync(
         Guid userId,
         Guid sessionId,
         List<Guid> seatIds,
@@ -32,7 +37,12 @@ public class OrderCheckoutOrchestrator(
         bool applyGoldUpgrade,
         bool useLoyaltyPoints,
         string paymentToken,
-        CancellationToken ct)
+        CancellationToken ct) =>
+        ProcessCheckoutCoreAsync(userId, orderId, applyGoldUpgrade, useLoyaltyPoints, paymentToken, ct);
+
+    private async Task<Result<Guid>> ProcessCheckoutCoreAsync(
+        Guid userId, Guid orderId, bool applyGoldUpgrade, bool useLoyaltyPoints,
+        string paymentToken, CancellationToken ct)
     {
         var order = await context.Orders
             .FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId) && o.UserId == userId, ct);
@@ -356,22 +366,14 @@ public class OrderCheckoutOrchestrator(
 
         int ticketCount = tickets.Count;
 
+        await publishEndpoint.Publish(new TicketPurchasedEvent(
+            userId,
+            orderId,
+            order.TotalAmount,
+            ticketCount,
+            DateTime.UtcNow
+        ), ct);
         await context.SaveChangesAsync(ct);
-
-        try
-        {
-            await publishEndpoint.Publish(new TicketPurchasedEvent(
-                userId,
-                orderId,
-                order.TotalAmount,
-                ticketCount,
-                DateTime.UtcNow
-            ), ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogCritical(ex, "Purchase publication failed for paid Order {OrderId}. Manual delivery reconciliation required.", orderId);
-        }
 
         return Result.Success(order.Id.Value);
     }

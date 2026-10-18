@@ -15,39 +15,15 @@ public class CreateOrderCommandHandler(
 {
     public async Task<Result<Guid>> Handle(CreateOrderCommand request, CancellationToken ct)
     {
-        var userId = currentUser.UserId;
-        if (userId == null)
-            return Result.Failure<Guid>(new Error("Auth.Required", "User not authenticated"));
-
-        foreach (var seatId in request.SeatIds)
-        {
-            if (!await seatLockingService.ValidateAndExtendLockAsync(request.SessionId, seatId, userId.Value, ct))
-            {
-                await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);
-                return Result.Failure<Guid>(new Error("Order.LockExpired", $"Lock expired for seat {seatId}."));
-            }
-        }
-
-        Result<Guid> reservationResult;
-        try
-        {
-            reservationResult = await reservationService.ReserveOrderAsync(userId.Value, request.SessionId, request.SeatIds, ct);
-        }
-        catch
-        {
-            await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);
-            throw;
-        }
+        Guid? userId = currentUser.UserId;
+        Result<Guid> reservationResult = await OrderReservationWorkflow.ReserveAsync(
+            reservationService, seatLockingService, userId, request.SessionId, request.SeatIds, ct);
         if (reservationResult.IsFailure)
-        {
-            await seatLockingService.UnlockSeatsAsync(request.SessionId, request.SeatIds, userId.Value, ct);
             return reservationResult;
-        }
 
-        var orderId = reservationResult.Value;
-
+        Guid orderId = reservationResult.Value;
         var checkoutResult = await checkoutOrchestrator.ProcessCheckoutAsync(
-            userId.Value,
+            userId!.Value,
             request.SessionId,
             request.SeatIds,
             orderId,

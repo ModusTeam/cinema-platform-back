@@ -1,8 +1,11 @@
 using Cinema.Application;
 using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Contracts;
 using Cinema.Application.Jobs;
 using Cinema.Application.Common.Models.Payments;
 using Cinema.Application.Orders.Commands.CreateOrder;
+using Cinema.Application.Orders.Commands.StartCheckout;
+using Cinema.Application.Orders.Queries.GetOrderStatus;
 using Cinema.Application.Orders.Commands.CancelOrder;
 using Cinema.Application.Orders.Dtos;
 using Cinema.Application.Orders.Queries.GetMyOrders;
@@ -12,6 +15,8 @@ using Cinema.Application.Orders.EventHandlers;
 using Cinema.Application.Common.Models.DomainEventNotification;
 using Cinema.Application.Orders.IntegrationEvents;
 using Cinema.Application.Orders.Services;
+using Cinema.Application.Account.Commands.SetMyDateOfBirth;
+using Cinema.Application.Account.Commands.UpdateProfile;
 using Cinema.Application.Services;
 using Cinema.Application.Seats.Commands.LockSeat;
 using Cinema.Application.Sessions.Queries.GetSessionById;
@@ -24,6 +29,7 @@ using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using Cinema.Infrastructure.Persistence;
 using Cinema.Infrastructure.Persistence.Interceptors;
+using Cinema.Infrastructure.Messaging.Consumers;
 using Cinema.Orders.Application;
 using Cinema.Domain.Events;
 using FluentAssertions;
@@ -32,10 +38,16 @@ using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Cinema.Application.Common.Settings;
 using Npgsql;
 using NSubstitute;
 using Mapster;
 using System.Data.Common;
+using System.Collections.Concurrent;
+using System.Net.Sockets;
 using Xunit;
 
 // Paid notifications intentionally call the existing overload without a cancellation token.
@@ -46,6 +58,453 @@ namespace Cinema.OrdersTests;
 // Only run with a disposable pgvector PostgreSQL database named cinema_orders_test_*.
 public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
+    [Fact]
+    public async Task Paid_Transition_And_Purchase_Outbox_Record_Commit_Or_Roll_Back_Together()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        reserved.IsSuccess.Should().BeTrue();
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString);
+
+        await StagePaidTransitionAsync(services, reserved.Value, database.UserId, commit: false);
+        await using (ApplicationDbContext verify = database.NewContext())
+        {
+            (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Pending);
+            (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(0);
+        }
+
+        await StagePaidTransitionAsync(services, reserved.Value, database.UserId, commit: true);
+        await using (ApplicationDbContext verify = database.NewContext())
+        {
+            (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+            (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+            (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+        }
+    }
+
+    [Fact]
+    public async Task Committed_Purchase_Outbox_Message_Delivers_When_RabbitMq_Starts_Later()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        await EnsureRabbitMqAvailableAsync();
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        reserved.IsSuccess.Should().BeTrue();
+        await using (ServiceProvider unavailableBroker = CreateOutboxServices(database.ConnectionString, rabbitPort: 5673))
+        {
+            await StagePaidTransitionAsync(unavailableBroker, reserved.Value, database.UserId, commit: true);
+            using CancellationTokenSource connectionTimeout = new(TimeSpan.FromSeconds(2));
+            Func<Task> connect = () => unavailableBroker.GetRequiredService<IBusControl>()
+                .StartAsync(connectionTimeout.Token);
+            await connect.Should().ThrowAsync<Exception>();
+            connectionTimeout.IsCancellationRequested.Should().BeTrue();
+        }
+
+        await using (ApplicationDbContext verify = database.NewContext())
+            (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(1);
+
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString, capturePurchaseEvents: true);
+        ConcurrentQueue<TicketPurchasedEvent> received = services.GetRequiredService<ConcurrentQueue<TicketPurchasedEvent>>();
+        List<IHostedService> hostedServices = services.GetServices<IHostedService>().ToList();
+        foreach (IHostedService service in hostedServices)
+            await service.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(20));
+            while (true)
+            {
+                await using ApplicationDbContext verifyDelivery = database.NewContext();
+                if (await verifyDelivery.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                        .CountAsync(timeout.Token) == 0)
+                    break;
+                await Task.Delay(200, timeout.Token);
+            }
+
+            using CancellationTokenSource receiveTimeout = new(TimeSpan.FromSeconds(20));
+            while (received.IsEmpty)
+                await Task.Delay(200, receiveTimeout.Token);
+            received.Should().ContainSingle();
+            TicketPurchasedEvent delivered = received.Single();
+            delivered.UserId.Should().Be(database.UserId);
+            delivered.OrderId.Should().Be(reserved.Value);
+            delivered.TotalAmount.Should().Be(50m);
+            delivered.TicketsCount.Should().Be(1);
+
+            await using ApplicationDbContext verify = database.NewContext();
+            (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+        }
+        finally
+        {
+            using CancellationTokenSource stopTimeout = new(TimeSpan.FromSeconds(10));
+            foreach (IHostedService service in hostedServices.AsEnumerable().Reverse())
+                await service.StopAsync(stopTimeout.Token);
+        }
+    }
+
+    [Fact]
+    public async Task Paid_Checkout_Stages_Each_Existing_Integration_Event_Once()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        reserved.IsSuccess.Should().BeTrue();
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString, withDomainHandlers: true);
+        await StagePaidTransitionAsync(services, reserved.Value, database.UserId, commit: true);
+
+        await using ApplicationDbContext verify = database.NewContext();
+        List<string> messageTypes = await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+            .Select(message => message.MessageType).ToListAsync(TestContext.Current.CancellationToken);
+        messageTypes.Should().HaveCount(3);
+        messageTypes.Should().ContainSingle(type => type.Contains($":{nameof(TicketPurchasedEvent)}"));
+        messageTypes.Should().ContainSingle(type => type.Contains($":{nameof(TicketPurchasedMessage)}"));
+        messageTypes.Should().ContainSingle(type => type.Contains($":{nameof(NestJsTicketPurchasedEvent)}"));
+    }
+
+    [Fact]
+    public async Task Identity_Changes_And_Outbox_Messages_Commit_Or_Roll_Back_Together()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Guid birthdayUserId = Guid.NewGuid();
+        await using (ApplicationDbContext seed = database.NewContext())
+        {
+            seed.Users.Add(new User
+            {
+                Id = birthdayUserId,
+                UserName = $"birthday-{Guid.NewGuid():N}",
+                Email = $"birthday-{Guid.NewGuid():N}@cinema.test",
+                SecurityStamp = Guid.NewGuid().ToString()
+            });
+            await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString, withIdentity: true);
+        await using (AsyncServiceScope scope = services.CreateAsyncScope())
+        {
+            ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+            currentUser.UserId.Returns(database.UserId);
+            UpdateProfileCommandHandler handler = new(currentUser,
+                scope.ServiceProvider.GetRequiredService<UserManager<User>>(),
+                scope.ServiceProvider.GetRequiredService<ISendEndpointProvider>(),
+                NullLogger<UpdateProfileCommandHandler>.Instance);
+            Result result = await handler.Handle(new UpdateProfileCommand("Ada", "Lovelace",
+                new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc)), TestContext.Current.CancellationToken);
+            result.IsSuccess.Should().BeTrue();
+        }
+
+        await using (ApplicationDbContext verify = database.NewContext())
+        {
+            User updated = await verify.Users.SingleAsync(user => user.Id == database.UserId,
+                TestContext.Current.CancellationToken);
+            updated.FirstName.Should().Be("Ada");
+            updated.DateOfBirth.Should().Be(new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            List<string> messageTypes = await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                .Select(message => message.MessageType).ToListAsync(TestContext.Current.CancellationToken);
+            messageTypes.Should().HaveCount(2);
+            messageTypes.Should().ContainSingle(type => type.Contains(nameof(UserProfileUpdatedMessage)));
+            messageTypes.Should().ContainSingle(type => type.Contains(nameof(NestJsUserDateOfBirthSetEvent)));
+        }
+
+        await using (AsyncServiceScope scope = services.CreateAsyncScope())
+        {
+            ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+            currentUser.UserId.Returns(database.UserId);
+            ISendEndpointProvider unavailablePublisher = Substitute.For<ISendEndpointProvider>();
+            unavailablePublisher.GetSendEndpoint(Arg.Any<Uri>())
+                .Returns(Task.FromException<ISendEndpoint>(new InvalidOperationException("test staging failure")));
+            UpdateProfileCommandHandler handler = new(currentUser,
+                scope.ServiceProvider.GetRequiredService<UserManager<User>>(), unavailablePublisher,
+                NullLogger<UpdateProfileCommandHandler>.Instance);
+            Result failed = await handler.Handle(new UpdateProfileCommand("Changed", "Name", null),
+                TestContext.Current.CancellationToken);
+            failed.IsFailure.Should().BeTrue();
+            failed.Error.Code.Should().Be("User.MessageStagingFailed");
+        }
+
+        await using (ApplicationDbContext verify = database.NewContext())
+        {
+            (await verify.Users.SingleAsync(user => user.Id == database.UserId,
+                TestContext.Current.CancellationToken)).FirstName.Should().Be("Ada");
+            (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+        }
+
+        await using (AsyncServiceScope scope = services.CreateAsyncScope())
+        {
+            ApplicationDbContext context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await using var transaction = await context.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+            ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+            currentUser.UserId.Returns(birthdayUserId);
+            SetMyDateOfBirthCommandHandler handler = new(currentUser,
+                scope.ServiceProvider.GetRequiredService<UserManager<User>>(),
+                scope.ServiceProvider.GetRequiredService<ISendEndpointProvider>(),
+                NullLogger<SetMyDateOfBirthCommandHandler>.Instance);
+            (await handler.Handle(new SetMyDateOfBirthCommand(new DateTime(1992, 2, 2)),
+                TestContext.Current.CancellationToken)).IsSuccess.Should().BeTrue();
+            await transaction.RollbackAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using (ApplicationDbContext verify = database.NewContext())
+        {
+            (await verify.Users.SingleAsync(user => user.Id == birthdayUserId,
+                TestContext.Current.CancellationToken)).DateOfBirth.Should().BeNull();
+            (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+        }
+
+        await using (AsyncServiceScope scope = services.CreateAsyncScope())
+        {
+            ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+            currentUser.UserId.Returns(birthdayUserId);
+            SetMyDateOfBirthCommandHandler handler = new(currentUser,
+                scope.ServiceProvider.GetRequiredService<UserManager<User>>(),
+                scope.ServiceProvider.GetRequiredService<ISendEndpointProvider>(),
+                NullLogger<SetMyDateOfBirthCommandHandler>.Instance);
+            (await handler.Handle(new SetMyDateOfBirthCommand(new DateTime(1992, 2, 2)),
+                TestContext.Current.CancellationToken)).IsSuccess.Should().BeTrue();
+        }
+
+        await using (ApplicationDbContext verify = database.NewContext())
+        {
+            (await verify.Users.SingleAsync(user => user.Id == birthdayUserId,
+                TestContext.Current.CancellationToken)).DateOfBirth.Should().NotBeNull();
+            (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(3);
+        }
+    }
+
+    [Fact]
+    public async Task Consumer_Outbox_Deduplicates_MessageId_Without_Dropping_Distinct_Messages()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        await EnsureRabbitMqAvailableAsync();
+        IEmailService email = Substitute.For<IEmailService>();
+        ITicketGenerator generator = Substitute.For<ITicketGenerator>();
+        generator.GenerateTicketPdf(Arg.Any<TicketPurchasedMessage>()).Returns([1, 2, 3]);
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString, withPurchaseConsumer: true,
+            emailService: email, ticketGenerator: generator);
+        List<IHostedService> hostedServices = services.GetServices<IHostedService>().ToList();
+        foreach (IHostedService service in hostedServices)
+            await service.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            Guid messageId = Guid.NewGuid();
+            TicketPurchasedMessage message = new(Guid.NewGuid(), "buyer@cinema.test", "Buyer", "Movie",
+                DateTime.UtcNow.AddDays(1), "https://cinema.test/ticket", database.UserId, 50m);
+            IBus bus = services.GetRequiredService<IBus>();
+            await bus.Publish(message, context => context.MessageId = messageId, TestContext.Current.CancellationToken);
+            await WaitForEmailCountAsync(email, 1);
+            await WaitForInboxCountAsync(database, 1);
+            await bus.Publish(message, context => context.MessageId = messageId, TestContext.Current.CancellationToken);
+            await Task.Delay(2000, TestContext.Current.CancellationToken);
+
+            email.ReceivedCalls().Should().HaveCount(1);
+            await bus.Publish(message, context => context.MessageId = Guid.NewGuid(),
+                TestContext.Current.CancellationToken);
+            await WaitForEmailCountAsync(email, 2);
+            await WaitForInboxCountAsync(database, 2);
+            email.ReceivedCalls().Should().HaveCount(2);
+        }
+        finally
+        {
+            using CancellationTokenSource stopTimeout = new(TimeSpan.FromSeconds(10));
+            foreach (IHostedService service in hostedServices.AsEnumerable().Reverse())
+                await service.StopAsync(stopTimeout.Token);
+        }
+    }
+
+    private static async Task EnsureRabbitMqAvailableAsync()
+    {
+        using TcpClient client = new();
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(3));
+        try
+        {
+            await client.ConnectAsync("localhost", 5672, timeout.Token);
+        }
+        catch (Exception exception) when (exception is SocketException or OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                "RabbitMQ integration tests require a broker at localhost:5672. " +
+                "Set CINEMA_TEST_RABBITMQ_USERNAME and CINEMA_TEST_RABBITMQ_PASSWORD if it does not use guest/guest.",
+                exception);
+        }
+    }
+
+    private static async Task WaitForEmailCountAsync(IEmailService email, int count)
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(20));
+        while (email.ReceivedCalls().Count() < count)
+            await Task.Delay(200, timeout.Token);
+    }
+
+    private static async Task WaitForInboxCountAsync(ReservationDatabase database, int count)
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(20));
+        while (true)
+        {
+            await using ApplicationDbContext verify = database.NewContext();
+            int delivered = await verify.Set<MassTransit.EntityFrameworkCoreIntegration.InboxState>()
+                .CountAsync(timeout.Token);
+            if (delivered == count)
+                return;
+            await Task.Delay(200, timeout.Token);
+        }
+    }
+
+    private static ServiceProvider CreateOutboxServices(string connectionString, bool withDomainHandlers = false,
+        bool withPurchaseConsumer = false, IEmailService? emailService = null, ITicketGenerator? ticketGenerator = null,
+        ushort rabbitPort = 5672, bool capturePurchaseEvents = false, bool withIdentity = false)
+    {
+        ServiceCollection services = new();
+        services.AddLogging();
+        services.Configure<MassTransitHostOptions>(options =>
+        {
+            options.WaitUntilStarted = true;
+            options.StartTimeout = TimeSpan.FromSeconds(15);
+            options.StopTimeout = TimeSpan.FromSeconds(10);
+        });
+        if (withIdentity)
+            services.AddIdentityCore<User>().AddEntityFrameworkStores<ApplicationDbContext>();
+        if (withDomainHandlers)
+        {
+            services.AddOrdersApplication();
+            services.Configure<FrontendSettings>(settings => settings.BaseUrl = "https://cinema.test");
+            services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
+            services.AddScoped<DispatchDomainEventsInterceptor>();
+            services.AddScoped<IPostCommitDomainEventDispatcher>(provider =>
+                provider.GetRequiredService<DispatchDomainEventsInterceptor>());
+            services.AddScoped(_ => Substitute.For<ISeatLockingService>());
+            services.AddScoped(_ => Substitute.For<ITicketNotifier>());
+        }
+        if (withPurchaseConsumer)
+        {
+            services.AddSingleton(emailService!);
+            services.AddSingleton(ticketGenerator!);
+        }
+        if (capturePurchaseEvents)
+            services.AddSingleton(new ConcurrentQueue<TicketPurchasedEvent>());
+        services.AddDbContext<ApplicationDbContext>((provider, options) =>
+        {
+            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector()).UseSnakeCaseNamingConvention();
+            if (withDomainHandlers)
+                options.AddInterceptors(provider.GetRequiredService<DispatchDomainEventsInterceptor>());
+        });
+        services.AddMassTransit(registration =>
+        {
+            if (withPurchaseConsumer)
+                registration.AddConsumer<TicketPurchasedConsumer, TicketPurchasedConsumerDefinition>();
+            if (capturePurchaseEvents)
+                registration.AddConsumer<CapturedPurchaseEventConsumer>();
+            registration.AddEntityFrameworkOutbox<ApplicationDbContext>(outbox =>
+            {
+                outbox.UsePostgres();
+                outbox.QueryDelay = TimeSpan.FromSeconds(1);
+                outbox.UseBusOutbox();
+            });
+            registration.UsingRabbitMq((context, bus) =>
+            {
+                bus.Host("localhost", rabbitPort, "/", host =>
+                {
+                    host.Username(Environment.GetEnvironmentVariable("CINEMA_TEST_RABBITMQ_USERNAME") ?? "guest");
+                    host.Password(Environment.GetEnvironmentVariable("CINEMA_TEST_RABBITMQ_PASSWORD") ?? "guest");
+                });
+                if (withPurchaseConsumer)
+                    bus.ConfigureEndpoints(context);
+                if (capturePurchaseEvents)
+                    bus.ReceiveEndpoint($"phase3-purchase-{Guid.NewGuid():N}", endpoint =>
+                    {
+                        endpoint.AutoDelete = true;
+                        endpoint.Durable = false;
+                        endpoint.ConfigureConsumer<CapturedPurchaseEventConsumer>(context);
+                    });
+            });
+        });
+        return services.BuildServiceProvider();
+    }
+
+    private static async Task StagePaidTransitionAsync(ServiceProvider services, Guid orderId, Guid userId, bool commit)
+    {
+        await using AsyncServiceScope scope = services.CreateAsyncScope();
+        ApplicationDbContext context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        IPublishEndpoint publisher = scope.ServiceProvider.GetRequiredService<IPublishEndpoint>();
+        await using var transaction = await context.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        Order order = await context.Orders.SingleAsync(candidate => candidate.Id == new EntityId<Order>(orderId),
+            TestContext.Current.CancellationToken);
+        Ticket ticket = await context.Tickets.SingleAsync(TestContext.Current.CancellationToken);
+        order.MarkAsPaid("outbox-test-transaction");
+        ticket.ConfirmPurchase(order);
+        await publisher.Publish(new TicketPurchasedEvent(userId, orderId, order.TotalAmount, 1, DateTime.UtcNow),
+            TestContext.Current.CancellationToken);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        if (commit)
+        {
+            await transaction.CommitAsync(TestContext.Current.CancellationToken);
+            if (scope.ServiceProvider.GetService<IPostCommitDomainEventDispatcher>() is { } dispatcher)
+                await dispatcher.DispatchAfterCommitAsync(TestContext.Current.CancellationToken);
+        }
+        else
+            await transaction.RollbackAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Reservation_Only_Creates_Pending_Order_Without_Checkout_Or_Loyalty()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        currentUser.UserId.Returns(database.UserId);
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+        locks.ValidateAndExtendLockAsync(database.Session.Id.Value, database.Seat.Id.Value,
+            database.UserId, Arg.Any<CancellationToken>()).Returns(true);
+        IPriceCalculator prices = Substitute.For<IPriceCalculator>();
+        prices.CalculatePrice(Arg.Any<Pricing>(), Arg.Any<EntityId<SeatType>>(), Arg.Any<DateTime>()).Returns(50m);
+
+        ReserveOrderCommandHandler handler = new(new OrderReservationService(database.Context, prices),
+            currentUser, locks, database.Context);
+        Result<ReservedOrderDto> result = await handler.Handle(
+            new ReserveOrderCommand(database.Session.Id.Value, [database.Seat.Id.Value]),
+            TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.TotalAmount.Should().Be(50m);
+        result.Value.Status.Should().Be(nameof(OrderStatus.Pending));
+        await using ApplicationDbContext verify = database.NewContext();
+        Order order = await verify.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        order.Id.Value.Should().Be(result.Value.Id);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Reserved);
+    }
+
+    [Fact]
+    public async Task Existing_Order_Checkout_Command_Uses_Owner_And_Atomic_Claim()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reservation = await database.ReserveAsync(database.Seat.Id.Value);
+        reservation.IsSuccess.Should().BeTrue();
+        ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("transaction-1"));
+        await using ApplicationDbContext context = database.NewContext();
+        OrderCheckoutOrchestrator orchestrator = CreateCheckout(context, payment);
+        StartCheckoutCommandHandler handler = new(currentUser, orchestrator);
+        StartCheckoutCommand command = new(reservation.Value, "token", false, false);
+
+        currentUser.UserId.Returns(Guid.NewGuid());
+        (await handler.Handle(command, TestContext.Current.CancellationToken)).Error.Code.Should().Be("Order.NotFound");
+        await payment.DidNotReceiveWithAnyArgs().ProcessPaymentAsync(default, default!, default!, default);
+
+        currentUser.UserId.Returns(database.UserId);
+        Result<Guid> result = await handler.Handle(command, TestContext.Current.CancellationToken);
+        result.IsSuccess.Should().BeTrue();
+        (await handler.Handle(command, TestContext.Current.CancellationToken)).Value.Should().Be(reservation.Value);
+        await payment.Received(1).ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+        GetOrderStatusQueryHandler status = new(verify, currentUser);
+        (await status.Handle(new GetOrderStatusQuery(reservation.Value), TestContext.Current.CancellationToken))
+            .Value.Status.Should().Be(nameof(OrderStatus.Paid));
+    }
+
     [Fact]
     public async Task Missing_Lock_Releases_Other_Owned_Seats_Before_Reservation()
     {
@@ -419,14 +878,16 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             .Returns(call => call.ArgAt<INotification>(0) is DomainEventNotification<OrderCancelledDomainEvent> notification
                 ? eventHandler!.Handle(notification, call.ArgAt<CancellationToken>(1))
                 : Task.CompletedTask);
-        await using ApplicationDbContext cancellation = database.NewContext(publisher);
+        DispatchDomainEventsInterceptor dispatcher = new(publisher);
+        await using ApplicationDbContext cancellation = database.NewContext(domainInterceptor: dispatcher);
         eventHandler = new(cancellation, locks, notifier,
             NullLogger<OrderCancelledEventHandler>.Instance);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(database.UserId);
         IPaymentService payment = Substitute.For<IPaymentService>();
 
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, Substitute.For<ILoyaltyService>())
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment,
+                Substitute.For<ILoyaltyService>(), dispatcher)
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -665,7 +1126,16 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         IPaymentService payment = Substitute.For<IPaymentService>();
         payment.RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>())
             .Returns(PaymentResult.Success("refund-1"));
-        await using ApplicationDbContext cancellation = database.NewContext(interceptor: new FailOrderUpdateInterceptor());
+        IPublisher publisher = Substitute.For<IPublisher>();
+        ISeatLockingService locks = Substitute.For<ISeatLockingService>();
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        OrderCancelledEventHandler? handler = null;
+        publisher.Publish(Arg.Any<INotification>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<INotification>(0) is DomainEventNotification<OrderCancelledDomainEvent> notification
+                ? handler!.Handle(notification, call.ArgAt<CancellationToken>(1))
+                : Task.CompletedTask);
+        await using ApplicationDbContext cancellation = database.NewContext(publisher, new FailOrderUpdateInterceptor());
+        handler = new(cancellation, locks, notifier, NullLogger<OrderCancelledEventHandler>.Instance);
 
         Func<Task> cancel = async () => await new CancelOrderCommandHandler(cancellation, currentUser, payment,
             Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(reserved.Value),
@@ -674,6 +1144,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         DbUpdateException failure = (await cancel.Should().ThrowAsync<DbUpdateException>()).Which;
         failure.InnerException.Should().BeOfType<InvalidOperationException>();
         await payment.Received(1).RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>());
+        await locks.DidNotReceiveWithAnyArgs().UnlockSeatsAsync(default, default!, default, default);
+        await notifier.DidNotReceiveWithAnyArgs().NotifySeatUnlockedAsync(default, default, default);
         await using ApplicationDbContext verify = database.NewContext();
         (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
             TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
@@ -1467,7 +1939,13 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             ReservationDatabase database = new(connectionString, adminConnectionString, databaseName);
             try
             {
-                User user = new() { Id = database._userId, UserName = $"order-test-{Guid.NewGuid():N}" };
+                User user = new()
+                {
+                    Id = database._userId,
+                    UserName = $"order-test-{Guid.NewGuid():N}",
+                    Email = $"order-{Guid.NewGuid():N}@cinema.test",
+                    SecurityStamp = Guid.NewGuid().ToString()
+                };
                 string suffix = Guid.NewGuid().ToString("N");
                 Movie movie = Movie.CreateManual($"Reservation test {suffix}", "test", 90, DateTime.UtcNow.Year, MovieStatus.ComingSoon);
                 Hall hall = Hall.Create(EntityId<Hall>.New(), $"Reservation test hall {suffix}");
@@ -1495,11 +1973,14 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             }
         }
 
-        public ApplicationDbContext NewContext(IPublisher? publisher = null, DbCommandInterceptor? interceptor = null)
+        public ApplicationDbContext NewContext(IPublisher? publisher = null, DbCommandInterceptor? interceptor = null,
+            DispatchDomainEventsInterceptor? domainInterceptor = null)
         {
             DbContextOptionsBuilder<ApplicationDbContext> builder = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseNpgsql(ConnectionString, x => x.UseVector()).UseSnakeCaseNamingConvention();
-            if (publisher is not null)
+            if (domainInterceptor is not null)
+                builder.AddInterceptors(domainInterceptor);
+            else if (publisher is not null)
                 builder.AddInterceptors(new DispatchDomainEventsInterceptor(publisher));
             if (interceptor is not null)
                 builder.AddInterceptors(interceptor);
@@ -1537,5 +2018,15 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             await using NpgsqlCommand drop = new($"DROP DATABASE {_databaseName} WITH (FORCE)", admin);
             await drop.ExecuteNonQueryAsync();
         }
+    }
+}
+
+public sealed class CapturedPurchaseEventConsumer(ConcurrentQueue<TicketPurchasedEvent> received)
+    : IConsumer<TicketPurchasedEvent>
+{
+    public Task Consume(ConsumeContext<TicketPurchasedEvent> context)
+    {
+        received.Enqueue(context.Message);
+        return Task.CompletedTask;
     }
 }

@@ -95,7 +95,7 @@ public class OrderCheckoutCharacterizationTests
     }
 
     [Fact]
-    public async Task Publish_Exception_After_Save_Keeps_Paid_Order_And_Does_Not_Refund()
+    public async Task Purchase_Event_Staging_Failure_Leaves_Payment_Outcome_Uncertain_Without_Refund()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();
         fixture.Payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>())
@@ -105,13 +105,12 @@ public class OrderCheckoutCharacterizationTests
 
         Result<Guid> result = await fixture.CheckoutAsync();
 
-        result.IsSuccess.Should().BeTrue();
+        result.IsFailure.Should().BeTrue();
         await fixture.Payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, TestContext.Current.CancellationToken);
         fixture.Context.ChangeTracker.Clear();
         Order persisted = await fixture.Context.Orders.SingleAsync(o => o.Id == fixture.Order.Id,
             TestContext.Current.CancellationToken);
-        persisted.Status.Should().Be(OrderStatus.Paid);
-        persisted.PaymentTransactionId.Should().Be("charged-transaction");
+        persisted.Status.Should().Be(OrderStatus.PaymentOutcomeUnknown);
     }
 
     [Theory]
