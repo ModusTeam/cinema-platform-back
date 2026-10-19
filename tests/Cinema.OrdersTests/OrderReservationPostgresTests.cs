@@ -892,10 +892,10 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
 
         result.IsSuccess.Should().BeTrue();
         Order trackedOrder = cancellation.ChangeTracker.Entries<Order>().Single().Entity;
-        List<Ticket> refundedTickets = await OrderTicketFixture.ForOrder(cancellation, trackedOrder)
+        List<Ticket> releasedTickets = await OrderTicketFixture.ForOrder(cancellation, trackedOrder)
             .ToListAsync(TestContext.Current.CancellationToken);
-        refundedTickets.Should().HaveCount(2);
-        refundedTickets.Should().OnlyContain(t => t.OrderId == trackedOrder.Id && t.TicketStatus == TicketStatus.Released);
+        releasedTickets.Should().HaveCount(2);
+        releasedTickets.Should().OnlyContain(t => t.OrderId == trackedOrder.Id && t.TicketStatus == TicketStatus.Released);
         await locks.Received(1).UnlockSeatsAsync(database.Session.Id.Value,
             Arg.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(new[] { database.Seat.Id.Value, second.Id.Value })),
             database.UserId, Arg.Any<CancellationToken>(), false);
@@ -911,7 +911,206 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
     }
 
     [Fact]
-    public async Task Cancellation_Refunds_Ticket_In_Inactive_Hall()
+    public async Task Pending_Cancellation_Production_Retry_Commits_And_Dispatches_After_Dispose()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Seat second = await database.AddSeatAsync();
+        Result<Guid> reserved = await database.ReserveAsync([database.Seat.Id.Value, second.Id.Value]);
+        await using ApplicationDbContext cancellation = database.NewContext(retries: true);
+        cancellation.Database.CreateExecutionStrategy().RetriesOnFailure.Should().BeTrue();
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        IPostCommitDomainEventDispatcher dispatcher = Substitute.For<IPostCommitDomainEventDispatcher>();
+        dispatcher.DispatchAfterCommitAsync(Arg.Any<CancellationToken>()).Returns(async _ =>
+        {
+            cancellation.Database.CurrentTransaction.Should().BeNull();
+            cancellation.Database.CreateExecutionStrategy().RetriesOnFailure.Should().BeTrue();
+            await AssertCancellationStateAsync(database, reserved.Value, OrderStatus.Cancelled, TicketStatus.Released);
+        });
+
+        Result result = await new CancelOrderCommandHandler(cancellation, CancellationUser(database), payment, loyalty, dispatcher)
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        await dispatcher.Received(1).DispatchAfterCommitAsync(Arg.Any<CancellationToken>());
+        payment.ReceivedCalls().Should().BeEmpty();
+        loyalty.ReceivedCalls().Should().BeEmpty();
+        await AssertCancellationStateAsync(database, reserved.Value, OrderStatus.Cancelled, TicketStatus.Released);
+    }
+
+    [Fact]
+    public async Task Pending_Cancellation_Production_Retry_Rolls_Back_Before_Commit()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await database.Context.Database.ExecuteSqlRawAsync("""
+            CREATE FUNCTION reject_ticket_release() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'injected ticket release failure'; END $$;
+            CREATE TRIGGER reject_ticket_release BEFORE UPDATE OF ticket_status ON tickets
+            FOR EACH ROW WHEN (NEW.ticket_status=4) EXECUTE FUNCTION reject_ticket_release();
+            """, TestContext.Current.CancellationToken);
+        await using ApplicationDbContext cancellation = database.NewContext(retries: true);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        IPostCommitDomainEventDispatcher dispatcher = Substitute.For<IPostCommitDomainEventDispatcher>();
+        Func<Task> cancel = async () => await new CancelOrderCommandHandler(
+            cancellation, CancellationUser(database), payment, loyalty, dispatcher)
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        (await cancel.Should().ThrowAsync<DbUpdateException>())
+            .Which.InnerException.Should().BeOfType<PostgresException>()
+            .Which.MessageText.Should().Be("injected ticket release failure");
+        await AssertCancellationStateAsync(database, reserved.Value, OrderStatus.Pending, TicketStatus.Reserved);
+        await dispatcher.DidNotReceiveWithAnyArgs().DispatchAfterCommitAsync(default);
+        payment.ReceivedCalls().Should().BeEmpty();
+        loyalty.ReceivedCalls().Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pending_Cancellation_Production_Retry_Rejects_Processing_And_Unknown(bool unknown)
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        Order order = await database.Context.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        order.StartPayment();
+        if (unknown) order.MarkPaymentOutcomeUnknown();
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await using ApplicationDbContext cancellation = database.NewContext(retries: true);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+
+        Result result = await new CancelOrderCommandHandler(cancellation, CancellationUser(database), payment, loyalty)
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        result.Error.Code.Should().Be("Order.InvalidState");
+        await AssertCancellationStateAsync(database, reserved.Value,
+            unknown ? OrderStatus.PaymentOutcomeUnknown : OrderStatus.PaymentProcessing, TicketStatus.Reserved);
+        payment.ReceivedCalls().Should().BeEmpty();
+        loyalty.ReceivedCalls().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Pending_Cancellation_Production_Retry_Lost_Claim_Does_Not_Release_Checkout()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        CancellationClaimBarrier barrier = new();
+        await using ApplicationDbContext cancellation = database.NewContext(interceptor: barrier, retries: true);
+        await using ApplicationDbContext checkoutContext = database.NewContext(retries: true);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        IPostCommitDomainEventDispatcher dispatcher = Substitute.For<IPostCommitDomainEventDispatcher>();
+        TaskCompletionSource paymentStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<PaymentResult> finishPayment = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            paymentStarted.TrySetResult();
+            return finishPayment.Task;
+        });
+        Task<Result> cancel = new CancelOrderCommandHandler(
+            cancellation, CancellationUser(database), payment, loyalty, dispatcher)
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+        Task<Result<Guid>>? checkout = null;
+        try
+        {
+            // Cancellation read Pending, but checkout wins before its conditional claim.
+            await barrier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            checkout = CreateCheckout(checkoutContext, payment).ProcessCheckoutAsync(
+                database.UserId, reserved.Value, false, false, "token", TestContext.Current.CancellationToken);
+            await paymentStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            barrier.Release.TrySetResult();
+            (await cancel).Error.Code.Should().Be("Order.InvalidState");
+            await AssertCancellationStateAsync(database, reserved.Value, OrderStatus.PaymentProcessing, TicketStatus.Reserved);
+            await dispatcher.DidNotReceiveWithAnyArgs().DispatchAfterCommitAsync(default);
+            await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, default);
+            loyalty.ReceivedCalls().Should().BeEmpty();
+            finishPayment.TrySetResult(PaymentResult.Success("checkout-wins"));
+            (await checkout).IsSuccess.Should().BeTrue();
+            await AssertCancellationStateAsync(database, reserved.Value, OrderStatus.Paid, TicketStatus.Valid);
+        }
+        finally
+        {
+            barrier.Release.TrySetResult();
+            finishPayment.TrySetResult(PaymentResult.Success("checkout-wins"));
+            await cancel.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            if (checkout is not null)
+                await checkout.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task Pending_Cancellation_Production_Retry_Lost_Commit_Acknowledgement_Is_Not_Rollback()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        LostCancellationCommitAcknowledgement lost = new();
+        await using ApplicationDbContext cancellation = database.NewContext(retries: true, transactionInterceptor: lost);
+        IPostCommitDomainEventDispatcher dispatcher = Substitute.For<IPostCommitDomainEventDispatcher>();
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        Func<Task> cancel = async () => await new CancelOrderCommandHandler(
+            cancellation, CancellationUser(database), payment, loyalty, dispatcher)
+            .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
+
+        await cancel.Should().ThrowAsync<IOException>().WithMessage("injected lost commit acknowledgement");
+        lost.Commits.Should().Be(1);
+        await AssertCancellationStateAsync(database, reserved.Value, OrderStatus.Cancelled, TicketStatus.Released);
+        await dispatcher.DidNotReceiveWithAnyArgs().DispatchAfterCommitAsync(default);
+        payment.ReceivedCalls().Should().BeEmpty();
+        loyalty.ReceivedCalls().Should().BeEmpty();
+    }
+
+    private static ICurrentUserService CancellationUser(ReservationDatabase database)
+    {
+        ICurrentUserService user = Substitute.For<ICurrentUserService>();
+        user.UserId.Returns(database.UserId);
+        user.IsInRole("Admin").Returns(true);
+        return user;
+    }
+
+    private static async Task AssertCancellationStateAsync(
+        ReservationDatabase database, Guid orderId, OrderStatus orderStatus, TicketStatus ticketStatus)
+    {
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(orderId),
+            TestContext.Current.CancellationToken)).Status.Should().Be(orderStatus);
+        (await verify.Tickets.IgnoreQueryFilters().Where(t => t.OrderId == new EntityId<Order>(orderId))
+            .ToListAsync(TestContext.Current.CancellationToken))
+            .Should().NotBeEmpty().And.OnlyContain(ticket => ticket.TicketStatus == ticketStatus);
+    }
+
+    private sealed class CancellationClaimBarrier : DbCommandInterceptor
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.StartsWith("UPDATE orders", StringComparison.OrdinalIgnoreCase))
+            {
+                Entered.TrySetResult();
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    private sealed class LostCancellationCommitAcknowledgement : DbTransactionInterceptor
+    {
+        public int Commits { get; private set; }
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+        {
+            Commits++;
+            throw new IOException("injected lost commit acknowledgement");
+        }
+    }
+
+    [Fact]
+    public async Task Cancellation_Releases_Reserved_Ticket_In_Inactive_Hall()
     {
         await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
         Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
@@ -974,7 +1173,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         await payment.Received(1).RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>());
         await loyalty.Received(1).RefundPointsAsync(database.UserId, 10, reserved.Value,
             Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await using ApplicationDbContext verify = database.NewContext();
+        await using ApplicationDbContext verify = database.NewContext(retries: true);
         (await verify.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
             TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Cancelled);
         (await verify.Tickets.Where(ticket => ticket.OrderId == new EntityId<Order>(reserved.Value))
@@ -2137,7 +2336,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         }
 
         public ApplicationDbContext NewContext(IPublisher? publisher = null, DbCommandInterceptor? interceptor = null,
-            bool retries = false, DispatchDomainEventsInterceptor? domainInterceptor = null)
+            bool retries = false, DispatchDomainEventsInterceptor? domainInterceptor = null, DbTransactionInterceptor? transactionInterceptor = null)
         {
             DbContextOptionsBuilder<ApplicationDbContext> builder = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseNpgsql(ConnectionString, x => { x.UseVector(); if (retries) x.EnableRetryOnFailure(3); }).UseSnakeCaseNamingConvention();
@@ -2147,6 +2346,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
                 builder.AddInterceptors(new DispatchDomainEventsInterceptor(publisher));
             if (interceptor is not null)
                 builder.AddInterceptors(interceptor);
+            if (transactionInterceptor is not null)
+                builder.AddInterceptors(transactionInterceptor);
             DbContextOptions<ApplicationDbContext> options = builder.Options;
             return new ApplicationDbContext(options);
         }
