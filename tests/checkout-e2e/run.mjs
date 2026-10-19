@@ -101,6 +101,11 @@ try {
     E2E_RABBIT_URL: `amqp://guest:guest@${endpoint('cinema-rabbitmq', 5672)}`,
     E2E_RABBIT_HTTP: `http://${endpoint('cinema-rabbitmq', 15672)}`,
     E2E_COMPOSE_ARGS: JSON.stringify(compose),
+    E2E_TEST_JWT_SETTINGS: JSON.stringify({
+      secret: config.services['monolith-api'].environment.JwtSettings__Secret,
+      issuer: config.services['monolith-api'].environment.JwtSettings__Issuer,
+      audience: config.services['monolith-api'].environment.JwtSettings__Audience,
+    }),
     E2E_CHECKOUT_EVIDENCE_FILE: resolve('.tools/e2e/checkout-evidence.json'),
     NODE_OPTIONS:
       `${process.env.NODE_OPTIONS ?? ''} --experimental-vm-modules`.trim(),
@@ -114,6 +119,7 @@ try {
     '--runTestsByPath', resolve(loyaltyRepo, 'test/e2e/checkout.transport-spec.ts'),
     '--runInBand', '--json',
     `--outputFile=${resolve('.tools/e2e/transports-results.json')}`], testEnv);
+  run('node', [resolve('tests/checkout-e2e/seat-availability.mjs')], testEnv);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   const logs = spawnSync(
