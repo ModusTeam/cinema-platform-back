@@ -14,11 +14,20 @@ using Cinema.Orders.Application;
 using Cinema.Scheduling.Application;
 using Cinema.Scheduling.Infrastructure;
 using Microsoft.OpenApi.Models;
+using Microsoft.AspNetCore.OutputCaching;
 
 namespace Cinema.Api.Modules;
 
 public static class DependencyInjection
 {
+    public const string SeatAvailabilityCachePolicy = "SeatAvailabilityNoCache";
+
+    public static void ConfigureOutputCaching(OutputCacheOptions options)
+    {
+        options.AddBasePolicy(builder => builder.Expire(TimeSpan.FromSeconds(60)));
+        options.AddPolicy(SeatAvailabilityCachePolicy, builder => builder.NoCache());
+    }
+
     public static IServiceCollection AddWebServices(this IServiceCollection services, IConfiguration configuration)
     {
         Mapster.TypeAdapterConfig.GlobalSettings.Scan(Assembly.GetExecutingAssembly());
@@ -28,6 +37,7 @@ public static class DependencyInjection
         services.AddSchedulingApplication();
         services.AddBookingApplication();
         services.AddOrdersApplication();
+        services.AddHostedService<GoldCheckoutRecoveryWorker>();
         services.AddInfrastructureServices(configuration);
         services.AddCatalogInfrastructure(configuration);
         services.AddSchedulingInfrastructure();
@@ -57,10 +67,7 @@ public static class DependencyInjection
         });
 
 
-        services.AddOutputCache(options =>
-        {
-            options.AddBasePolicy(builder => builder.Expire(TimeSpan.FromSeconds(60)));
-        });
+        services.AddOutputCache(ConfigureOutputCaching);
         
         services.AddStackExchangeRedisOutputCache(options =>
         {

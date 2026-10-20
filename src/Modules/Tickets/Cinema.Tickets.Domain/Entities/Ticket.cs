@@ -92,6 +92,12 @@ public class Ticket
 
     public bool IsGoldUpgraded { get; private set; }
 
+    public void RestoreGoldUpgrade(decimal originalPrice)
+    {
+        PriceSnapshot = originalPrice;
+        IsGoldUpgraded = false;
+    }
+
     public void ApplyGoldUpgrade(decimal standardPrice)
     {
         if (TicketStatus is not (TicketStatus.Reserved or TicketStatus.Valid))

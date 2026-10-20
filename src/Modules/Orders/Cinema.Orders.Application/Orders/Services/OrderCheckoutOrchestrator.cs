@@ -26,8 +26,9 @@ public class OrderCheckoutOrchestrator(
 
     public Task<Result<Guid>> ProcessCheckoutAsync(
         Guid userId, Guid orderId, bool applyGoldUpgrade, bool useLoyaltyPoints,
-        string paymentToken, CancellationToken ct) =>
-        ProcessCheckoutCoreAsync(userId, orderId, applyGoldUpgrade, useLoyaltyPoints, paymentToken, ct);
+        string paymentToken, CancellationToken ct)
+        => new CheckoutExecutionStrategy(context).ExecuteAsync(() => ProcessCheckoutLockedAsync(
+            userId, orderId, applyGoldUpgrade, useLoyaltyPoints, paymentToken, ct));
 
     public Task<Result<Guid>> ProcessCheckoutAsync(
         Guid userId,
@@ -37,12 +38,60 @@ public class OrderCheckoutOrchestrator(
         bool applyGoldUpgrade,
         bool useLoyaltyPoints,
         string paymentToken,
-        CancellationToken ct) =>
-        ProcessCheckoutCoreAsync(userId, orderId, applyGoldUpgrade, useLoyaltyPoints, paymentToken, ct);
+        CancellationToken ct)
+        => ProcessCheckoutAsync(userId, orderId, applyGoldUpgrade, useLoyaltyPoints, paymentToken, ct);
+
+    private async Task<Result<Guid>> ProcessCheckoutLockedAsync(
+        Guid userId, Guid orderId,
+        bool applyGoldUpgrade, bool useLoyaltyPoints, string paymentToken, CancellationToken ct)
+    {
+        await using CheckoutOrderLock checkoutLock = await CheckoutOrderLock.AcquireAsync(context, orderId, ct);
+        if (!checkoutLock.IsAcquired)
+            return Result.Failure<Guid>(new Error("Order.CheckoutInProgress", "Checkout or recovery is already in progress."));
+
+        using CancellationTokenSource checkoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, checkoutLock.ConnectionLost);
+        ct = checkoutCancellation.Token;
+        Order? existing = await context.Orders.AsNoTracking()
+            .SingleOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId) && o.UserId == userId, ct);
+        if (existing is null)
+            return Result.Failure<Guid>(new Error("Order.NotFound", "Order not found or unauthorized."));
+
+        if (NeedsGoldRecovery(existing.GoldCheckoutState))
+        {
+            await RecoverGoldOrderAsync(orderId, ct);
+            return Result.Failure<Guid>(new Error("Order.GoldRecoveryRequired", "Previous GOLD checkout failed; compensation is being reconciled."));
+        }
+        if (existing.GoldCheckoutState is GoldCheckoutState.Compensated or GoldCheckoutState.Rejected)
+            return Result.Failure<Guid>(new Error("Order.InvalidState", "Cannot reuse an unsuccessful GOLD checkout."));
+
+        try
+        {
+            return await ProcessCheckoutCoreAsync(userId, orderId,
+                applyGoldUpgrade, useLoyaltyPoints, paymentToken, checkoutLock, ct);
+        }
+        finally
+        {
+            if (applyGoldUpgrade && !checkoutLock.ConnectionLost.IsCancellationRequested)
+            {
+                // Request cancellation must not cancel compensation. The journal survives
+                // this bounded attempt, including an abrupt process termination.
+                using CancellationTokenSource recoveryTimeout = CancellationTokenSource.CreateLinkedTokenSource(checkoutLock.ConnectionLost);
+                recoveryTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+                try
+                {
+                    await RecoverGoldOrderAsync(orderId, recoveryTimeout.Token);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "GOLD compensation remains pending for Order {OrderId}", orderId);
+                }
+            }
+        }
+    }
 
     private async Task<Result<Guid>> ProcessCheckoutCoreAsync(
-        Guid userId, Guid orderId, bool applyGoldUpgrade, bool useLoyaltyPoints,
-        string paymentToken, CancellationToken ct)
+        Guid userId, Guid orderId,
+        bool applyGoldUpgrade, bool useLoyaltyPoints, string paymentToken, CheckoutOrderLock checkoutLock, CancellationToken ct)
     {
         var order = await context.Orders
             .FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId) && o.UserId == userId, ct);
@@ -124,13 +173,6 @@ public class OrderCheckoutOrchestrator(
                     goldUpgradeQuote.Reason ?? "Select at least one premium or VIP seat to apply GOLD upgrade."));
             }
 
-            var goldUpgradeResult = await loyaltyService.UseGoldUpgradeAsync(userId, orderId, ct);
-            if (!goldUpgradeResult.Success)
-            {
-                await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
-                await ResetUnchargedClaimAsync(order, ct);
-                return Result.Failure<Guid>(new Error("Order.GoldUpgradeFailed", $"Gold upgrade failed: {goldUpgradeResult.Error}"));
-            }
 
             Ticket? ticketToUpgrade = tickets
                 .Where(t => !t.IsGoldUpgraded)
@@ -144,6 +186,21 @@ public class OrderCheckoutOrchestrator(
                 throw new DomainException("No eligible ticket found for gold upgrade (ticket price is already less than or equal to standard price).");
 
             decimal priceDifference = ticketToUpgrade.PriceSnapshot - goldUpgradeQuote.BasePrice;
+            if (priceDifference > order.TotalAmount)
+                throw new DomainException("Gold discount must be positive and cannot exceed the order total.");
+
+            order.BeginGoldCheckout(ticketToUpgrade.Id.Value, ticketToUpgrade.PriceSnapshot);
+            await context.SaveChangesAsync(ct);
+            var goldUpgradeResult = await loyaltyService.UseGoldUpgradeAsync(userId, orderId, ct);
+            if (!goldUpgradeResult.Success)
+            {
+                order.RejectGoldUse();
+                await context.SaveChangesAsync(ct);
+                await seatLockingService.UnlockSeatsAsync(trustedSessionId, trustedSeatIds, userId, ct);
+                await ResetUnchargedClaimAsync(order, ct);
+                return Result.Failure<Guid>(new Error("Order.GoldUpgradeFailed", $"Gold upgrade failed: {goldUpgradeResult.Error}"));
+            }
+            order.ConfirmGoldUse();
             order.ApplyGoldDiscount(priceDifference);
             ticketToUpgrade.ApplyGoldUpgrade(goldUpgradeQuote.BasePrice);
             await context.SaveChangesAsync(ct);
@@ -161,7 +218,7 @@ public class OrderCheckoutOrchestrator(
 
         var (pointsToDeduct, amountToPay) = loyaltyDiscountResult.Value;
 
-        var paymentResult = await ProcessPaymentFlowAsync(userId, orderId, amountToPay, paymentToken, pointsToDeduct, applyGoldUpgrade, ct);
+        var paymentResult = await ProcessPaymentFlowAsync(order, amountToPay, paymentToken, pointsToDeduct, checkoutLock, ct);
         if (!paymentResult.IsSuccess)
         {
             if (paymentResult.FailureCode == UnknownPaymentOutcomeCode)
@@ -183,6 +240,8 @@ public class OrderCheckoutOrchestrator(
             logger.LogCritical(ex, "Confirmation failed after payment for Order {OrderId}. Manual reconciliation required.", orderId);
             context.ClearChangeTracker();
             Order? persistedOrder = await context.Orders.SingleOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), CancellationToken.None);
+            if (persistedOrder?.Status == OrderStatus.Paid && persistedOrder.PaymentTransactionId == paymentResult.TransactionId)
+                return Result.Success(orderId);
             if (persistedOrder?.Status == OrderStatus.PaymentProcessing)
             {
                 persistedOrder.MarkPaymentOutcomeUnknown();
@@ -190,6 +249,92 @@ public class OrderCheckoutOrchestrator(
             }
             return Result.Failure<Guid>(new Error("Payment.OutcomeUnknown", "Payment outcome requires reconciliation."));
         }
+    }
+
+    private static bool NeedsGoldRecovery(GoldCheckoutState state) => state is
+        GoldCheckoutState.UsePending or GoldCheckoutState.Consumed or GoldCheckoutState.CompensationPending;
+
+    public Task RecoverGoldCheckoutsAsync(CancellationToken ct)
+        => new CheckoutExecutionStrategy(context).ExecuteAsync(() => RecoverGoldCheckoutsCoreAsync(ct));
+
+    private async Task RecoverGoldCheckoutsCoreAsync(CancellationToken ct)
+    {
+        DateTime now = DateTime.UtcNow;
+        List<Guid> orderIds = await context.Orders.AsNoTracking()
+            .Where(o => (o.GoldCheckoutState == GoldCheckoutState.UsePending ||
+                         o.GoldCheckoutState == GoldCheckoutState.Consumed ||
+                         o.GoldCheckoutState == GoldCheckoutState.CompensationPending) &&
+                        (o.GoldRecoveryAfter == null || o.GoldRecoveryAfter <= now))
+            .OrderBy(o => o.GoldRecoveryAfter).Take(100).Select(o => o.Id.Value).ToListAsync(ct);
+        foreach (Guid orderId in orderIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await using CheckoutOrderLock checkoutLock = await CheckoutOrderLock.AcquireAsync(context, orderId, ct);
+                if (checkoutLock.IsAcquired)
+                {
+                    using CancellationTokenSource recoveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, checkoutLock.ConnectionLost);
+                    await RecoverGoldOrderAsync(orderId, recoveryCancellation.Token);
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex, "GOLD recovery failed for Order {OrderId}; journal retained", orderId);
+            }
+        }
+    }
+
+    private async Task RecoverGoldOrderAsync(Guid orderId, CancellationToken ct)
+    {
+        // Reload the committed state: confirmation may have mutated tracked entities
+        // before a failed SaveChanges. Never persist those mutations during cleanup.
+        Order? order = await context.Orders.AsNoTracking()
+            .SingleOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), ct);
+        if (order is null || !NeedsGoldRecovery(order.GoldCheckoutState) || order.Status == OrderStatus.Paid)
+            return;
+
+        context.ClearChangeTracker();
+        context.Orders.Attach(order);
+        order.RequestGoldCompensation();
+        await context.SaveChangesAsync(ct);
+        bool reservationExists = order.GoldUseConfirmed;
+        if (!reservationExists)
+        {
+            // An interrupted Use may have committed. Replaying its identity settles
+            // that ambiguity; it must never turn into a new order or monthly claim.
+            var replay = await loyaltyService.UseGoldUpgradeAsync(order.UserId, orderId, ct);
+            reservationExists = replay.Success;
+            if (reservationExists)
+            {
+                order.ConfirmGoldUse();
+                order.RequestGoldCompensation();
+                await context.SaveChangesAsync(ct);
+            }
+        }
+        if (reservationExists)
+        {
+            var rollback = await loyaltyService.RollbackGoldUpgradeAsync(order.UserId, orderId, ct);
+            if (!rollback.Success)
+            {
+                logger.LogError("GOLD rollback pending for Order {OrderId}: {Error}", orderId, rollback.Error);
+                return;
+            }
+        }
+
+        Guid ticketId = order.GoldTicketId ?? throw new InvalidOperationException("GOLD journal has no ticket identity.");
+        List<Ticket> tickets = await context.Tickets.IgnoreQueryFilters()
+            .Where(t => t.OrderId == order.Id).ToListAsync(ct);
+        Ticket upgraded = tickets.Single(t => t.Id == new EntityId<Ticket>(ticketId));
+        upgraded.RestoreGoldUpgrade(order.GoldOriginalTicketPrice);
+        order.CompleteGoldCompensation();
+        if (order.Status == OrderStatus.Failed)
+        {
+            foreach (Ticket ticket in tickets.Where(t => t.TicketStatus == TicketStatus.Reserved))
+                ticket.ReleaseReservation(order);
+        }
+        // Ticket, order prices and completion marker commit atomically.
+        await context.SaveChangesAsync(ct);
     }
 
     private async Task<bool> TryClaimPaymentAsync(Order order, CancellationToken ct)
@@ -258,8 +403,10 @@ public class OrderCheckoutOrchestrator(
     }
 
     private async Task<PaymentResult> ProcessPaymentFlowAsync(
-        Guid userId, Guid orderId, decimal amountToPay, string paymentToken, int pointsToDeduct, bool applyGoldUpgrade, CancellationToken ct)
+        Order order, decimal amountToPay, string paymentToken, int pointsToDeduct, CheckoutOrderLock checkoutLock, CancellationToken ct)
     {
+        Guid userId = order.UserId;
+        Guid orderId = order.Id.Value;
         if (pointsToDeduct > 0)
         {
             var deductResult = await DeductLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);
@@ -269,6 +416,13 @@ public class OrderCheckoutOrchestrator(
             }
         }
 
+        if (order.GoldCheckoutState == GoldCheckoutState.Consumed)
+        {
+            // A crash during charge must not free potentially paid seats.
+            order.BeginGoldPayment();
+            await context.SaveChangesAsync(ct);
+        }
+        await checkoutLock.EnsureHeldAsync(ct);
         PaymentResult paymentResult;
         try
         {
@@ -282,22 +436,14 @@ public class OrderCheckoutOrchestrator(
 
         if (!paymentResult.IsSuccess && paymentResult.FailureCode != UnknownPaymentOutcomeCode)
         {
+            if (order.GoldPaymentOutcomeUnknown)
+            {
+                order.ResolveGoldPayment();
+                await context.SaveChangesAsync(ct);
+            }
             if (pointsToDeduct > 0)
             {
                 await CompensateLoyaltyPointsAsync(userId, orderId, pointsToDeduct, ct);
-            }
-
-            if (applyGoldUpgrade)
-            {
-                var rollbackResult = await loyaltyService.RollbackGoldUpgradeAsync(userId, orderId, ct);
-                if (!rollbackResult.Success)
-                {
-                    logger.LogCritical("SAGA COMPENSATION FAILED: Could not rollback Gold Upgrade for user {UserId}, Order {OrderId}. Error: {Error}", userId, orderId, rollbackResult.Error);
-                }
-                else
-                {
-                    logger.LogWarning("Payment failed for Order {OrderId}. Successfully rolled back Gold Upgrade for user {UserId}.", orderId, userId);
-                }
             }
         }
 
@@ -358,6 +504,7 @@ public class OrderCheckoutOrchestrator(
             order.ApplyLoyaltyDiscount(pointsUsed);
 
         order.MarkAsPaid(transactionId);
+        order.CompleteGoldCheckout();
 
         List<Ticket> tickets = await context.Tickets.IgnoreQueryFilters()
             .Where(ticket => ticket.OrderId == order.Id).ToListAsync(ct);

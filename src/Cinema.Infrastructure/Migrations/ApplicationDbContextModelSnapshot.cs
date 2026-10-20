@@ -212,6 +212,41 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("booking_date");
 
+                    b.Property<int>("GoldCheckoutState")
+                        .HasColumnType("integer")
+                        .HasColumnName("gold_checkout_state");
+
+                    b.Property<decimal>("GoldOriginalPaid")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("gold_original_paid");
+
+                    b.Property<decimal>("GoldOriginalTicketPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("gold_original_ticket_price");
+
+                    b.Property<decimal>("GoldOriginalTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("gold_original_total");
+
+                    b.Property<bool>("GoldPaymentOutcomeUnknown")
+                        .HasColumnType("boolean")
+                        .HasColumnName("gold_payment_outcome_unknown");
+
+                    b.Property<DateTime?>("GoldRecoveryAfter")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("gold_recovery_after");
+
+                    b.Property<Guid?>("GoldTicketId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("gold_ticket_id");
+
+                    b.Property<bool>("GoldUseConfirmed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("gold_use_confirmed");
+
                     b.Property<decimal>("PaidAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)")
@@ -251,6 +286,9 @@ namespace Cinema.Infrastructure.Migrations
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_orders_user_id");
+
+                    b.HasIndex("GoldCheckoutState", "GoldRecoveryAfter")
+                        .HasDatabaseName("ix_orders_gold_checkout_state_gold_recovery_after");
 
                     b.HasIndex("Status", "BookingDate")
                         .HasDatabaseName("ix_orders_status_booking_date");

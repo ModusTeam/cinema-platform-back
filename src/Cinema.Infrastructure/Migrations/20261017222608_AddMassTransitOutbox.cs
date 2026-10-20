@@ -142,4 +142,3 @@ namespace Cinema.Infrastructure.Migrations
         }
     }
 }
-

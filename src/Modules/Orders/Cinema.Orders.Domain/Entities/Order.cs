@@ -19,6 +19,73 @@ public class Order : BaseEntity
 
     public int PointsUsed { get; private set; }
 
+    public GoldCheckoutState GoldCheckoutState { get; private set; }
+    public Guid? GoldTicketId { get; private set; }
+    public decimal GoldOriginalTicketPrice { get; private set; }
+    public decimal GoldOriginalTotal { get; private set; }
+    public decimal GoldOriginalPaid { get; private set; }
+    public bool GoldUseConfirmed { get; private set; }
+    public bool GoldPaymentOutcomeUnknown { get; private set; }
+    public DateTime? GoldRecoveryAfter { get; private set; }
+
+    public void BeginGoldCheckout(Guid ticketId, decimal ticketPrice)
+    {
+        if (GoldCheckoutState != GoldCheckoutState.None || Status != OrderStatus.PaymentProcessing)
+            throw new DomainException("GOLD checkout has already been attempted for this order.");
+        GoldTicketId = ticketId;
+        GoldOriginalTicketPrice = ticketPrice;
+        GoldOriginalTotal = TotalAmount;
+        GoldOriginalPaid = PaidAmount;
+        GoldCheckoutState = GoldCheckoutState.UsePending;
+        GoldRecoveryAfter = DateTime.UtcNow;
+    }
+
+    public void ConfirmGoldUse()
+    {
+        GoldUseConfirmed = true;
+        GoldCheckoutState = GoldCheckoutState.Consumed;
+    }
+
+    public void RejectGoldUse()
+    {
+        GoldCheckoutState = GoldCheckoutState.Rejected;
+        GoldRecoveryAfter = null;
+    }
+
+    public void RequestGoldCompensation()
+    {
+        GoldCheckoutState = GoldCheckoutState.CompensationPending;
+        GoldRecoveryAfter = DateTime.UtcNow.AddMinutes(1);
+    }
+
+    public void BeginGoldPayment() => GoldPaymentOutcomeUnknown = true;
+
+    public void ResolveGoldPayment() => GoldPaymentOutcomeUnknown = false;
+
+    public void CompleteGoldCheckout()
+    {
+        if (GoldCheckoutState == GoldCheckoutState.Consumed)
+        {
+            GoldCheckoutState = GoldCheckoutState.Completed;
+            GoldPaymentOutcomeUnknown = false;
+            GoldRecoveryAfter = null;
+        }
+    }
+
+    public void CompleteGoldCompensation()
+    {
+        TotalAmount = GoldOriginalTotal;
+        PaidAmount = GoldOriginalPaid;
+        PointsUsed = 0;
+        PaymentTransactionId = null;
+        GoldCheckoutState = GoldCheckoutState.Compensated;
+        GoldRecoveryAfter = null;
+        if (GoldPaymentOutcomeUnknown && Status == OrderStatus.PaymentProcessing)
+            MarkPaymentOutcomeUnknown();
+        else if (!GoldPaymentOutcomeUnknown)
+            MarkAsFailed();
+    }
+
     public Session? Session { get; private set; }
     
 

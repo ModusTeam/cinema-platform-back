@@ -9,6 +9,8 @@ using Cinema.Application.Sessions.Queries.GetSessionsWithPaginationQuery;
 using Cinema.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using Cinema.Api.Modules;
 
 namespace Cinema.Api.Controllers;
 
@@ -59,6 +61,7 @@ public class SessionsController : ApiController
     }
     
     [HttpGet("{id}/seats")]
+    [OutputCache(PolicyName = DependencyInjection.SeatAvailabilityCachePolicy)]
     [ProducesResponseType(typeof(SessionSeatsVm), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetSeats(Guid id)

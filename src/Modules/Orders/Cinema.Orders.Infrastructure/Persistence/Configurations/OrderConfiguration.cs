@@ -44,6 +44,10 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
             .WithMany()
             .HasForeignKey(x => x.SessionId)
             .OnDelete(DeleteBehavior.Restrict);
+        builder.Property(o => o.GoldOriginalTicketPrice).HasPrecision(18, 2);
+        builder.Property(o => o.GoldOriginalTotal).HasPrecision(18, 2);
+        builder.Property(o => o.GoldOriginalPaid).HasPrecision(18, 2);
+        builder.HasIndex(o => new { o.GoldCheckoutState, o.GoldRecoveryAfter });
         builder.HasIndex(o => new { o.Status, o.BookingDate });
         builder.HasIndex(o => o.UserId);
     }

@@ -4,6 +4,7 @@ using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
 using Cinema.Domain.Shared;
 using Cinema.Application.Common.Utils;
+using Cinema.Application.Orders.Services;
 using System.Data;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +37,12 @@ public class CancelOrderCommandHandler(
 
         if (order.UserId != currentUserId && !isAdmin)
             return Result.Failure(new Error("Order.NotFound", "Order not found."));
+
+        if (order.GoldPaymentOutcomeUnknown)
+            return Result.Failure(new Error("Order.PaymentReconciliationRequired", "Resolve the unknown payment outcome before cancellation."));
+
+        if (order.GoldCheckoutState is GoldCheckoutState.UsePending or GoldCheckoutState.Consumed or GoldCheckoutState.CompensationPending)
+            return Result.Failure(new Error("Order.GoldRecoveryRequired", "GOLD checkout compensation must finish before cancellation."));
 
         if (order.Status is OrderStatus.Cancelled or OrderStatus.Failed or OrderStatus.Expired)
             return Result.Failure(new Error("Order.AlreadyCancelled", "Order is already cancelled."));
@@ -100,24 +107,32 @@ public class CancelOrderCommandHandler(
 
         if (order.Status == OrderStatus.Pending && context.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
         {
-            await using var transaction = await context.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-            int claimed = await context.Orders
-                .Where(candidate => candidate.Id == orderId && candidate.Status == OrderStatus.Pending)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.Status, OrderStatus.Cancelled), ct);
-            if (claimed == 0)
+            Result cancellation = await new CheckoutExecutionStrategy(context).ExecuteAsync(async () =>
             {
-                await transaction.RollbackAsync(ct);
-                return Result.Failure(new Error("Order.InvalidState", "Order state changed during cancellation."));
-            }
+                await using var transaction = await context.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+                int claimed = await context.Orders
+                    .Where(candidate => candidate.Id == orderId && candidate.Status == OrderStatus.Pending)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.Status, OrderStatus.Cancelled), ct);
+                if (claimed == 0)
+                {
+                    await transaction.RollbackAsync(ct);
+                    return Result.Failure(new Error("Order.InvalidState", "Order state changed during cancellation."));
+                }
 
-            order.MarkAsCancelled();
-            foreach (Ticket ticket in tickets)
-                ticket.ReleaseReservation(order);
-            await context.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
+                order.MarkAsCancelled();
+                foreach (Ticket ticket in tickets)
+                    ticket.ReleaseReservation(order);
+                await context.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                return Result.Success();
+            });
+            if (cancellation.IsFailure)
+                return cancellation;
+
+            // Commit and transaction disposal finish before any external dispatch.
             if (postCommitDispatcher is not null)
                 await postCommitDispatcher.DispatchAfterCommitAsync(ct);
-            return Result.Success();
+            return cancellation;
         }
 
         order.MarkAsCancelled();

@@ -27,6 +27,10 @@ public class CancelExpiredOrdersJob(
             // Pending/Valid is a legacy ambiguity: preserve it for payment reconciliation.
             List<EntityId<Order>> orderIds = await context.Orders.AsNoTracking()
                 .Where(order => order.Status == OrderStatus.Pending && order.BookingDate < timeoutThreshold &&
+                    order.GoldCheckoutState != GoldCheckoutState.UsePending &&
+                    order.GoldCheckoutState != GoldCheckoutState.Consumed &&
+                    order.GoldCheckoutState != GoldCheckoutState.CompensationPending &&
+                    !order.GoldPaymentOutcomeUnknown &&
                     context.Tickets.IgnoreQueryFilters().Any(ticket => ticket.OrderId == order.Id && ticket.TicketStatus == TicketStatus.Reserved) &&
                     !context.Tickets.IgnoreQueryFilters().Any(ticket => ticket.OrderId == order.Id && ticket.TicketStatus != TicketStatus.Reserved))
                 .OrderBy(order => order.BookingDate)
@@ -58,7 +62,11 @@ public class CancelExpiredOrdersJob(
 
                 await using var transaction = await context.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
                 int claimed = await context.Orders
-                    .Where(order => order.Id == id && order.Status == OrderStatus.Pending && order.BookingDate < timeoutThreshold)
+                    .Where(order => order.Id == id && order.Status == OrderStatus.Pending && order.BookingDate < timeoutThreshold &&
+                        order.GoldCheckoutState != GoldCheckoutState.UsePending &&
+                        order.GoldCheckoutState != GoldCheckoutState.Consumed &&
+                        order.GoldCheckoutState != GoldCheckoutState.CompensationPending &&
+                        !order.GoldPaymentOutcomeUnknown)
                     .ExecuteUpdateAsync(setters => setters.SetProperty(order => order.Status, OrderStatus.Expired), ct);
                 if (claimed == 0)
                 {
