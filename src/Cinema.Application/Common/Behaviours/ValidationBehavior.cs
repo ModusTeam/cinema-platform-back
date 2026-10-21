@@ -42,23 +42,23 @@ public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TReques
     
     private TResponse CreateValidationResult(List<FluentValidation.Results.ValidationFailure> failures)
     {
-        var type = typeof(TResponse);
-        
+        Type type = typeof(TResponse);
+
         if (type == typeof(Result) || (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Result<>)))
         {
-            var firstFailure = failures.First();
-            var error = new Error(
+            FluentValidation.Results.ValidationFailure firstFailure = failures.First();
+            Error error = new(
                 Code: "Validation." + firstFailure.PropertyName,
                 Description: firstFailure.ErrorMessage
             );
 
-            var failureMethod = type.GetMethod("Failure", BindingFlags.Public | BindingFlags.Static, new[] { typeof(Error) });
+            if (type == typeof(Result))
+                return (TResponse)(object)Result.Failure(error);
 
-            if (failureMethod != null)
-            {
-                var result = failureMethod.Invoke(null, new object[] { error });
-                return (TResponse)result!;
-            }
+            MethodInfo failureMethod = typeof(Result).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Single(method => method.Name == nameof(Result.Failure) && method.IsGenericMethodDefinition)
+                .MakeGenericMethod(type.GenericTypeArguments[0]);
+            return (TResponse)failureMethod.Invoke(null, [error])!;
         }
         throw new ValidationException(failures);
     }

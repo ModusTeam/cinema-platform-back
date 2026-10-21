@@ -37,4 +37,34 @@ public class SeatLayoutService
 
         return seats;
     }
+
+    public List<Seat> GenerateSparseLayout(
+        IEnumerable<(int GridX, int GridY, EntityId<SeatType> SeatTypeId)> coordinates,
+        EntityId<Hall> hallId)
+    {
+        var seats = new List<Seat>();
+        int currentRow = 0;
+        int number = 0;
+
+        foreach (var coordinate in coordinates.OrderBy(s => s.GridY).ThenBy(s => s.GridX))
+        {
+            if (coordinate.GridY != currentRow)
+            {
+                currentRow = coordinate.GridY;
+                number = 0;
+            }
+
+            seats.Add(Seat.New(
+                EntityId<Seat>.New(),
+                currentRow.ToString(),
+                ++number,
+                coordinate.GridX,
+                coordinate.GridY,
+                SeatStatus.Active,
+                hallId,
+                coordinate.SeatTypeId));
+        }
+
+        return seats;
+    }
 }

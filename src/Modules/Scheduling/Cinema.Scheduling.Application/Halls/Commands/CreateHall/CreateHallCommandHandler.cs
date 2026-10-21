@@ -24,13 +24,18 @@ public class CreateHallCommandHandler(
         }
         
         var seatTypeId = new EntityId<SeatType>(request.SeatTypeId);
-        var typeExists = await context.SeatTypes.AnyAsync(x => x.Id == seatTypeId, cancellationToken);
-        if (!typeExists) 
-            return Result.Failure<Guid>(new Error("SeatType.NotFound", "Seat type not found"));
+        List<EntityId<SeatType>> seatTypeIds = request.Seats is null
+            ? [seatTypeId]
+            : request.Seats.Select(s => new EntityId<SeatType>(s.SeatTypeId))
+                .Append(seatTypeId).Distinct().ToList();
+        int existingSeatTypeCount = await context.SeatTypes
+            .CountAsync(x => seatTypeIds.Contains(x.Id), cancellationToken);
+        if (existingSeatTypeCount != seatTypeIds.Count)
+            return Result.Failure<Guid>(new Error("SeatType.NotFound", "One or more provided seat types do not exist."));
 
         if (request.TechnologyIds.Any())
         {
-            var techIdsToCheck = request.TechnologyIds.Select(id => new EntityId<Technology>(id)).ToList();
+            var techIdsToCheck = request.TechnologyIds.Select(id => new EntityId<Technology>(id)).Distinct().ToList();
             
             var existingCount = await context.Technologies
                 .CountAsync(t => techIdsToCheck.Contains(t.Id), cancellationToken);
@@ -44,11 +49,11 @@ public class CreateHallCommandHandler(
         var hallId = new EntityId<Hall>(Guid.NewGuid());
         var hall = Hall.Create(hallId, request.Name);
         
-        var seats = layoutService.GenerateRectangularGrid(
-            request.Rows, 
-            request.SeatsPerRow, 
-            hallId, 
-            seatTypeId);
+        var seats = request.Seats is null
+            ? layoutService.GenerateRectangularGrid(request.Rows, request.SeatsPerRow, hallId, seatTypeId)
+            : layoutService.GenerateSparseLayout(
+                request.Seats.Select(s => (s.GridX, s.GridY, new EntityId<SeatType>(s.SeatTypeId))),
+                hallId);
         
         hall.ApplyLayout(seats);
 

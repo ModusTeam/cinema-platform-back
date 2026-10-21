@@ -8,5 +8,8 @@ public record CreateHallCommand(
     int Rows,
     int SeatsPerRow,
     Guid SeatTypeId,
-    List<Guid> TechnologyIds
+    List<Guid> TechnologyIds,
+    List<CreateHallSeat>? Seats = null
 ) : IRequest<Result<Guid>>;
+
+public record CreateHallSeat(int GridX, int GridY, Guid SeatTypeId);
