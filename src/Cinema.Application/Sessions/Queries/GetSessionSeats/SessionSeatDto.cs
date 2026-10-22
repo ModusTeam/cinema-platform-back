@@ -23,4 +23,7 @@ public record SeatDto(
     bool IsAvailable,
     bool IsSold,
     bool IsLocked
-);
+)
+{
+    public bool IsLockedByCurrentUser { get; init; }
+}

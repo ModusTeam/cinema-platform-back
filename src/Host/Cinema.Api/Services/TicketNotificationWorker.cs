@@ -37,23 +37,32 @@ public class TicketNotificationWorker : BackgroundService, ITicketNotifier
     public Task NotifySeatLockedAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default)
     {
         return _channel.Writer.WriteAsync(async () => 
-            await _hubContext.Clients.Group(sessionId.ToString()).ReceiveSeatStatusChange(seatId, "Locked", userId), ct
+            await _hubContext.Clients.Group(TicketHub.GroupName(sessionId.ToString())).SeatLocked(sessionId, seatId, userId), ct
         ).AsTask();
     }
 
     public Task NotifySeatUnlockedAsync(Guid sessionId, Guid seatId, CancellationToken ct = default)
     {
         return _channel.Writer.WriteAsync(async () => 
-            await _hubContext.Clients.Group(sessionId.ToString()).ReceiveSeatStatusChange(seatId, "Available", null), ct
+            await _hubContext.Clients.Group(TicketHub.GroupName(sessionId.ToString())).SeatUnlocked(sessionId, seatId), ct
         ).AsTask();
     }
 
-    
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _channel.Writer.TryComplete();
+        // .NET 10 schedules ExecuteAsync; let it drain before base.StopAsync can cancel its start.
+        if (ExecuteTask is { } executeTask)
+            await executeTask.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        await base.StopAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("SignalR Notification Worker started.");
         
-        await foreach (var notificationTask in _channel.Reader.ReadAllAsync(stoppingToken))
+        // Completing the writer lets accepted notifications drain during graceful shutdown.
+        await foreach (var notificationTask in _channel.Reader.ReadAllAsync(CancellationToken.None))
         {
             try
             {

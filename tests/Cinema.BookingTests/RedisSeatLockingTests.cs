@@ -57,8 +57,8 @@ public class RedisSeatLockingTests
         Guid secondUser = Guid.NewGuid();
         RedisKey lockKey = $"lock:session:{{{sessionId}}}:{seatId}";
         RedisKey setKey = $"locked_seats:session:{{{sessionId}}}";
-        RedisSeatLockingService service = new(connection,
-            Substitute.For<ITicketNotifier>(), NullLogger<RedisSeatLockingService>.Instance);
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        RedisSeatLockingService service = new(connection, notifier, NullLogger<RedisSeatLockingService>.Instance);
         TaskCompletionSource start = new(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationToken ct = TestContext.Current.CancellationToken;
 
@@ -80,6 +80,8 @@ public class RedisSeatLockingTests
             (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().BeEquivalentTo([seatId]);
             RedisValue owner = await database.StringGetAsync(lockKey);
             owner.ToString().Should().BeOneOf(firstUser.ToString(), secondUser.ToString());
+            await notifier.Received(1).NotifySeatLockedAsync(sessionId, seatId, Guid.Parse(owner.ToString()), ct);
+            notifier.ReceivedCalls().Should().ContainSingle();
         }
         finally
         {
@@ -87,8 +89,10 @@ public class RedisSeatLockingTests
         }
     }
 
-    [Fact]
-    public async Task Batch_Unlock_Only_Removes_And_Notifies_Owned_Seats()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Batch_Unlock_Only_Removes_Owned_Seats_And_Respects_NotifyClients(bool notifyClients)
     {
         string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_REDIS_CONNECTION");
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -112,12 +116,12 @@ public class RedisSeatLockingTests
         {
             (await service.LockSeatAsync(sessionId, ownedSeat, owner, ct)).IsSuccess.Should().BeTrue();
             (await service.LockSeatAsync(sessionId, foreignSeat, other, ct)).IsSuccess.Should().BeTrue();
-            (await service.UnlockSeatsAsync(sessionId, [ownedSeat, foreignSeat], owner, ct)).IsSuccess.Should().BeTrue();
+            (await service.UnlockSeatsAsync(sessionId, [ownedSeat, foreignSeat], owner, ct, notifyClients)).IsSuccess.Should().BeTrue();
 
             (await database.KeyExistsAsync(ownedKey)).Should().BeFalse();
             (await database.KeyExistsAsync(foreignKey)).Should().BeTrue();
             (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().BeEquivalentTo([foreignSeat]);
-            await notifier.Received(1).NotifySeatUnlockedAsync(sessionId, ownedSeat, Arg.Any<CancellationToken>());
+            await notifier.Received(notifyClients ? 1 : 0).NotifySeatUnlockedAsync(sessionId, ownedSeat, ct);
             await notifier.DidNotReceive().NotifySeatUnlockedAsync(sessionId, foreignSeat, Arg.Any<CancellationToken>());
         }
         finally
@@ -141,8 +145,8 @@ public class RedisSeatLockingTests
         Guid otherId = Guid.NewGuid();
         RedisKey lockKey = $"lock:session:{{{sessionId}}}:{seatId}";
         RedisKey setKey = $"locked_seats:session:{{{sessionId}}}";
-        RedisSeatLockingService service = new(connection,
-            Substitute.For<ITicketNotifier>(), NullLogger<RedisSeatLockingService>.Instance);
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        RedisSeatLockingService service = new(connection, notifier, NullLogger<RedisSeatLockingService>.Instance);
         CancellationToken ct = TestContext.Current.CancellationToken;
 
         try
@@ -156,21 +160,29 @@ public class RedisSeatLockingTests
             var conflict = await service.LockSeatAsync(sessionId, seatId, otherId, ct);
             conflict.IsFailure.Should().BeTrue();
             conflict.Error.Code.Should().Be("Seat.AlreadyLocked");
+            await notifier.Received(1).NotifySeatLockedAsync(sessionId, seatId, ownerId, ct);
+            await notifier.DidNotReceive().NotifySeatLockedAsync(sessionId, seatId, otherId, ct);
 
             (await service.ValidateAndExtendLockAsync(sessionId, seatId, ownerId, ct)).Should().BeTrue();
             (await database.KeyTimeToLiveAsync(lockKey)).Should().BeCloseTo(TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5));
 
             (await service.UnlockSeatAsync(sessionId, seatId, otherId, ct)).IsSuccess.Should().BeTrue();
             (await service.ValidateAndExtendLockAsync(sessionId, seatId, ownerId, ct)).Should().BeTrue();
+            await notifier.DidNotReceiveWithAnyArgs().NotifySeatUnlockedAsync(default, default, ct);
 
             (await service.UnlockSeatAsync(sessionId, seatId, ownerId, ct)).IsSuccess.Should().BeTrue();
             (await database.KeyExistsAsync(lockKey)).Should().BeFalse();
+            await notifier.Received(1).NotifySeatUnlockedAsync(sessionId, seatId, ct);
 
             (await service.LockSeatAsync(sessionId, seatId, ownerId, ct)).IsSuccess.Should().BeTrue();
             await database.KeyExpireAsync(lockKey, TimeSpan.Zero);
             (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().BeEmpty();
+            (await service.UnlockSeatAsync(sessionId, seatId, ownerId, ct)).IsSuccess.Should().BeTrue();
+            await notifier.Received(1).NotifySeatUnlockedAsync(sessionId, seatId, ct);
             (await service.LockSeatAsync(sessionId, seatId, otherId, ct)).IsSuccess.Should().BeTrue();
             (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().BeEquivalentTo([seatId]);
+            await notifier.Received(2).NotifySeatLockedAsync(sessionId, seatId, ownerId, ct);
+            await notifier.Received(1).NotifySeatLockedAsync(sessionId, seatId, otherId, ct);
         }
         finally
         {
@@ -178,6 +190,41 @@ public class RedisSeatLockingTests
             await database.KeyDeleteAsync(setKey);
             (await database.KeyExistsAsync(lockKey)).Should().BeFalse();
             (await database.KeyExistsAsync(setKey)).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task Notification_Failure_Does_Not_Remove_Acquired_Redis_Lock()
+    {
+        string? connectionString = Environment.GetEnvironmentVariable("CINEMA_TEST_REDIS_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString))
+            Assert.Skip("Set CINEMA_TEST_REDIS_CONNECTION to run the isolated Redis integration test.");
+
+        using ConnectionMultiplexer connection = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        IDatabase database = connection.GetDatabase();
+        Guid sessionId = Guid.NewGuid();
+        Guid seatId = Guid.NewGuid();
+        Guid ownerId = Guid.NewGuid();
+        Guid otherId = Guid.NewGuid();
+        RedisKey lockKey = $"lock:session:{{{sessionId}}}:{seatId}";
+        RedisKey setKey = $"locked_seats:session:{{{sessionId}}}";
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        CancellationToken ct = TestContext.Current.CancellationToken;
+        notifier.NotifySeatLockedAsync(sessionId, seatId, ownerId, ct)
+            .Returns(Task.FromException(new InvalidOperationException("Notification unavailable")));
+        RedisSeatLockingService service = new(connection, notifier, NullLogger<RedisSeatLockingService>.Instance);
+
+        try
+        {
+            (await service.LockSeatAsync(sessionId, seatId, ownerId, ct)).IsSuccess.Should().BeTrue();
+            (await database.StringGetAsync(lockKey)).ToString().Should().Be(ownerId.ToString());
+            (await service.GetLockedSeatsBySessionAsync(sessionId, ct)).Should().Equal(seatId);
+            (await service.LockSeatAsync(sessionId, seatId, otherId, ct)).IsFailure.Should().BeTrue();
+            await notifier.Received(1).NotifySeatLockedAsync(sessionId, seatId, ownerId, ct);
+        }
+        finally
+        {
+            await database.KeyDeleteAsync([lockKey, setKey]);
         }
     }
 }
