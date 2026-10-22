@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using StackExchange.Redis;
 using Xunit;
 
@@ -77,11 +78,12 @@ public class TicketHubIntegrationTests
             }
 
             await notifier.NotifySeatLockedAsync(otherSessionId, seatId, otherUserId, ct);
+            List<HubEvent> firstBatch = await FlushAsync(notifier, userId, firstEvents.Reader, sessionId);
             Guid orderId = Guid.NewGuid();
             await notifier.NotifyOrderFailed(userId, orderId, "Payment declined");
 
-            List<HubEvent> firstBatch = await FlushAsync(notifier, userId, firstEvents.Reader);
-            List<HubEvent> otherBatch = await FlushAsync(notifier, otherUserId, otherEvents.Reader);
+            firstBatch.AddRange(await FlushAsync(notifier, userId, firstEvents.Reader, sessionId));
+            List<HubEvent> otherBatch = await FlushAsync(notifier, otherUserId, otherEvents.Reader, otherSessionId);
             firstBatch.Select(e => e.Name).Should().Equal("SeatLocked", "SeatUnlocked", "OrderFailed");
             AssertGuids(firstBatch[0], sessionId, seatId, userId);
             AssertGuids(firstBatch[1], sessionId, seatId);
@@ -98,14 +100,14 @@ public class TicketHubIntegrationTests
             first.ConnectionId.Should().NotBe(previousConnectionId);
             await first.InvokeAsync("JoinSessionGroup", $"session:{sessionId}", ct);
             await notifier.NotifySeatLockedAsync(sessionId, seatId, userId, ct);
-            List<HubEvent> rejoined = await FlushAsync(notifier, userId, firstEvents.Reader);
+            List<HubEvent> rejoined = await FlushAsync(notifier, userId, firstEvents.Reader, sessionId);
             rejoined.Should().ContainSingle().Which.Name.Should().Be("SeatLocked");
             AssertGuids(rejoined[0], sessionId, seatId, userId);
 
             await first.InvokeAsync("LeaveSessionGroup", $"session:{sessionId}", ct);
             await notifier.NotifySeatUnlockedAsync(sessionId, seatId, ct);
             (await FlushAsync(notifier, userId, firstEvents.Reader)).Should().BeEmpty();
-            (await FlushAsync(notifier, otherUserId, otherEvents.Reader)).Should().BeEmpty();
+            (await FlushAsync(notifier, otherUserId, otherEvents.Reader, otherSessionId)).Should().BeEmpty();
         }
         finally
         {
@@ -116,6 +118,42 @@ public class TicketHubIntegrationTests
                 await sender.StopAsync(timeout.Token);
             await receiver.StopAsync(timeout.Token);
         }
+    }
+
+    [Fact]
+    public async Task Flush_Waits_For_Group_Delivery_When_User_Marker_Arrives_First()
+    {
+        ITicketNotifier notifier = Substitute.For<ITicketNotifier>();
+        Channel<HubEvent> events = Channel.CreateUnbounded<HubEvent>();
+        Guid sessionId = Guid.NewGuid();
+        Guid seatId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        Guid groupMarker = Guid.Empty;
+        notifier.NotifySeatUnlockedAsync(sessionId, Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                groupMarker = call.ArgAt<Guid>(1);
+                return Task.CompletedTask;
+            });
+        notifier.NotifyOrderCompleted(userId, Arg.Any<Guid>()).Returns(call =>
+        {
+            events.Writer.TryWrite(new HubEvent("OrderCompleted", [JsonSerializer.SerializeToElement(call.ArgAt<Guid>(1))]));
+            return Task.CompletedTask;
+        });
+
+        Task<List<HubEvent>> pending = FlushAsync(notifier, userId, events.Reader, sessionId);
+
+        pending.IsCompleted.Should().BeFalse();
+        groupMarker.Should().NotBeEmpty();
+        events.Writer.TryWrite(new HubEvent("SeatLocked", [JsonSerializer.SerializeToElement(sessionId),
+            JsonSerializer.SerializeToElement(seatId), JsonSerializer.SerializeToElement(userId)]));
+        events.Writer.TryWrite(new HubEvent("SeatUnlocked", [JsonSerializer.SerializeToElement(sessionId), JsonSerializer.SerializeToElement(seatId)]));
+        events.Writer.TryWrite(new HubEvent("SeatUnlocked", [JsonSerializer.SerializeToElement(sessionId), JsonSerializer.SerializeToElement(groupMarker)]));
+        List<HubEvent> received = await pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        received.Select(notification => notification.Name).Should().Equal("SeatLocked", "SeatUnlocked");
+        AssertGuids(received[0], sessionId, seatId, userId);
+        AssertGuids(received[1], sessionId, seatId);
     }
 
     private static async Task<WebApplication> StartAsync(string? redis, string prefix)
@@ -175,21 +213,31 @@ public class TicketHubIntegrationTests
         }
     }
 
-    private static async Task<List<HubEvent>> FlushAsync(ITicketNotifier notifier, Guid userId, ChannelReader<HubEvent> events)
+    private static async Task<List<HubEvent>> FlushAsync(ITicketNotifier notifier, Guid userId, ChannelReader<HubEvent> events,
+        Guid? sessionId = null)
     {
-        // A user-targeted marker follows all queued events on this connection, avoiding timing-based absence assertions.
+        // Redis group and user subscriptions deliver independently; fence each active channel.
         Guid marker = Guid.NewGuid();
+        if (sessionId.HasValue)
+            await notifier.NotifySeatUnlockedAsync(sessionId.Value, marker, TestContext.Current.CancellationToken);
         await notifier.NotifyOrderCompleted(userId, marker);
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
         List<HubEvent> received = [];
-        while (true)
+        bool groupFlushed = !sessionId.HasValue;
+        bool userFlushed = false;
+        while (!groupFlushed || !userFlushed)
         {
             HubEvent current = await events.ReadAsync(timeout.Token);
             if (current.Name == "OrderCompleted" && current.Arguments[0].GetGuid() == marker)
-                return received;
-            received.Add(current);
+                userFlushed = true;
+            else if (sessionId.HasValue && current.Name == "SeatUnlocked"
+                && current.Arguments[0].GetGuid() == sessionId.Value && current.Arguments[1].GetGuid() == marker)
+                groupFlushed = true;
+            else
+                received.Add(current);
         }
+        return received;
     }
 
     private static void AssertGuids(HubEvent notification, params Guid[] expected)

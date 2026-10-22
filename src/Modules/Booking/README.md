@@ -40,8 +40,9 @@ SignalR events provide immediate updates; the seats endpoint provides authoritat
 
 `tests/Cinema.BookingTests` distinguishes mocked Redis unit tests (`RedisSeatNotificationTests`), mocked typed-hub worker tests and production DI checks (`TicketNotificationWorkerTests`), and real hub JSON integration tests (`TicketHubIntegrationTests`). The latter uses in-memory ASP.NET Core TestServer hosts and real .NET SignalR clients, including session isolation, user targeting, leave, and fresh-connection rejoin. It does not run the complete API startup pipeline, automatic reconnect transport recovery, or a browser.
 
-Real Redis tests (`RedisSeatLockingTests` and the two-host hub/backplane case) run when `CINEMA_TEST_REDIS_CONNECTION` contains a working connection string; otherwise they skip. They use unique session/seat keys, clean up in `finally`, and isolate the test backplane channel prefix. No production Redis keys or lock TTL settings are changed. Run with the repository's .NET 10 Microsoft.Testing.Platform runner:
+Real Redis tests (`RedisSeatLockingTests` and the two-host hub/backplane case) run when `CINEMA_TEST_REDIS_CONNECTION` contains a working connection string; otherwise they skip. They use unique session/seat keys, clean up in `finally`, and isolate the test backplane channel prefix. No production Redis keys or lock TTL settings are changed. The strict command below requires that variable to point to a working Redis instance: `--fail-skips on` treats missing-infrastructure skips as failures. Build Release first because `--no-build` reuses the existing test binaries. Run with the repository's .NET 10 Microsoft.Testing.Platform runner:
 
 ```sh
+dotnet build tests/Cinema.BookingTests/Cinema.BookingTests.csproj -c Release
 dotnet test --project tests/Cinema.BookingTests/Cinema.BookingTests.csproj -c Release --no-build -- --fail-skips on --timeout 2m
 ```
