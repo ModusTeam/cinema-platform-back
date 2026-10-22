@@ -1,5 +1,6 @@
 ﻿using System.Data;
 using Cinema.Domain.Entities;
+using Cinema.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -19,6 +20,7 @@ public interface IApplicationDbContext
     DbSet<Order> Orders { get; }
     DbSet<User> Users { get; }
     DbSet<Ticket> Tickets { get; }
+    DbSet<SeatLock> SeatLocks { get; }
     ChangeTracker ChangeTracker { get; }
     DbSet<Pricing> Pricings { get; }
     DbSet<HallTechnology> HallTechnologies { get; } 
@@ -27,4 +29,5 @@ public interface IApplicationDbContext
     DatabaseFacade Database { get; }
     Task<IDbContextTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken);
     void ClearChangeTracker();
+    Task<IDbContextTransaction> BeginHallTransactionAsync(EntityId<Hall> hallId, CancellationToken cancellationToken);
 }
