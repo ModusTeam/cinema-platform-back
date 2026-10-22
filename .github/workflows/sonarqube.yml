@@ -11,9 +11,51 @@ permissions:
 
 jobs:
   sonar:
+    # Fork pull requests cannot access SONAR_TOKEN; never run untrusted code with secrets.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: SonarQube
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      CINEMA_TEST_POSTGRES_CONNECTION: Host=localhost;Port=5432;Database=cinema_orders_test_sonar;Username=postgres;Password=postgres_password
+      CINEMA_TEST_REDIS_CONNECTION: localhost:6379
+      CINEMA_TEST_RABBITMQ_USERNAME: cinema_test
+      CINEMA_TEST_RABBITMQ_PASSWORD: cinema_test_password
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_password
+          POSTGRES_DB: cinema_orders_test_sonar
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cinema_orders_test_sonar"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: cinema_test
+          RABBITMQ_DEFAULT_PASS: cinema_test_password
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout repository
@@ -24,7 +66,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          # The collector targets .NET 8; production/tests use .NET 10.
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -34,6 +79,9 @@ jobs:
 
       - name: Install SonarScanner
         run: dotnet tool install --global dotnet-sonarscanner
+
+      - name: Install coverage collector
+        run: dotnet tool install --global dotnet-coverage --version 18.12.0
 
       - name: Restore
         run: dotnet restore Cinema.sln
@@ -46,9 +94,25 @@ jobs:
           /k:"5e375a2d13b64dea05d851d482cd822e3055272a"
           /o:"modusteam"
           /d:sonar.token="$SONAR_TOKEN"
+          /d:sonar.cs.vscoveragexml.reportsPaths=coverage.xml
+          /d:sonar.dotnet.excludeTestProjects=true
+          /d:sonar.coverage.exclusions="tests/**,**/obj/**,**/*.g.cs,**/*.Designer.cs,**/*ModelSnapshot.cs"
 
       - name: Build
         run: dotnet build Cinema.sln --configuration Release --no-incremental
+
+      - name: Test with coverage
+        run: >-
+          dotnet-coverage collect
+          "dotnet test Cinema.sln --configuration Release --no-build -- --fail-skips on --timeout 10m --long-running 30 --show-slowest-tests 15"
+          -f xml -o coverage.xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-coverage
+          path: coverage.xml
+          if-no-files-found: error
 
       - name: End SonarQube analysis
         env:

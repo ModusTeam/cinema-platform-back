@@ -50,6 +50,19 @@ public class Hall
         RecalculateCapacity();
     }
 
+    public void ReplaceLayout(IEnumerable<Seat> seats)
+    {
+        var replacement = seats.ToList();
+        if (replacement.Count == 0)
+            throw new DomainException("Cannot apply an empty seat layout.");
+        if (replacement.Any(seat => seat.HallId != Id))
+            throw new DomainException("One or more seats belong to a different hall.");
+
+        _seats.Clear();
+        _seats.AddRange(replacement);
+        RecalculateCapacity();
+    }
+
     public void UpdateTechnologies(IEnumerable<EntityId<Technology>> newTechnologyIds)
     {
         var newIdsSet = new HashSet<EntityId<Technology>>(newTechnologyIds);

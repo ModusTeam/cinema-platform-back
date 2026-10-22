@@ -7,7 +7,8 @@ namespace Cinema.Application.Halls.Commands.CreateHall
         public CreateHallCommandValidator()
         {
             RuleFor(x => x.Name)
-                .NotEmpty().WithMessage("Hall name is required.");
+                .Must(name => !string.IsNullOrWhiteSpace(name))
+                .WithMessage("Hall name is required.");
 
             RuleFor(x => x.Rows)
                 .GreaterThan(0).WithMessage("Rows must be strictly greater than zero.");
@@ -20,6 +21,15 @@ namespace Cinema.Application.Halls.Commands.CreateHall
                 
             RuleForEach(x => x.TechnologyIds)
                 .NotEmpty().WithMessage("Technology ID must be a valid GUID.");
+
+            RuleFor(x => x.TechnologyIds)
+                .Cascade(CascadeMode.Stop)
+                .Must(ids => ids is not null && ids.Count == ids.Distinct().Count())
+                .WithMessage("Technology IDs must be unique.");
+
+            When(x => x.Seats is not null, () =>
+                RuleFor(x => new SparseHallLayout(x.Rows, x.SeatsPerRow, x.Seats!))
+                    .SetValidator(new SparseHallLayoutValidator()).OverridePropertyName(string.Empty));
         }
     }
 }

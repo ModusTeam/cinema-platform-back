@@ -5,6 +5,7 @@ using Cinema.Orders.Infrastructure.Persistence.Configurations;
 using Cinema.Tickets.Infrastructure.Persistence.Configurations;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
+using Cinema.Domain.Common;
 using Cinema.Infrastructure.Persistence.Converters;
 using MassTransit;
 using Microsoft.AspNetCore.Identity;
@@ -44,6 +45,24 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         return await Database.BeginTransactionAsync(isolationLevel, cancellationToken);
     }
     
+    public async Task<IDbContextTransaction> BeginHallTransactionAsync(
+        EntityId<Hall> hallId, CancellationToken cancellationToken)
+    {
+        var transaction = await BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, cancellationToken);
+        try
+        {
+            // FOR UPDATE also conflicts with the key-share lock taken by session FK inserts.
+            await Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT id FROM halls WHERE id = {hallId.Value} FOR UPDATE", cancellationToken);
+            return transaction;
+        }
+        catch
+        {
+            await transaction.DisposeAsync();
+            throw;
+        }
+    }
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Properties<DateTime>()

@@ -1,5 +1,6 @@
 using Cinema.Application.Halls.Commands.CreateHall;
 using Cinema.Application.Halls.Commands.DeleteHall;
+using Cinema.Application.Halls.Commands.ReplaceHallLayout;
 using Cinema.Application.Halls.Commands.UpdateHall;
 using Cinema.Application.Halls.Dtos;
 using Cinema.Application.Halls.Queries.GetHallById;
@@ -64,4 +65,11 @@ public class HallsController : ApiController
     {
         return HandleResult(await Mediator.Send(new DeleteHallCommand(id)));
     }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("{id:guid}/layout")]
+    public async Task<IActionResult> ReplaceLayout(Guid id, [FromBody] ReplaceHallLayoutRequest request,
+        CancellationToken ct)
+        => HandleResult(await Mediator.Send(new ReplaceHallLayoutCommand(
+            id, request.Rows, request.SeatsPerRow, request.Seats), ct));
 }

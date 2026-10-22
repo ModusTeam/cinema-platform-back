@@ -18,6 +18,7 @@ public static class ConfigureServices
         TypeAdapterConfig.GlobalSettings.Scan(assembly);
         TypeAdapterConfig.GlobalSettings.Compile();
         services.AddScoped<SessionSchedulingService>();
+        services.AddScoped<HallLayoutEditingService>();
         services.AddScoped<SeatLayoutService>();
         return services;
     }
