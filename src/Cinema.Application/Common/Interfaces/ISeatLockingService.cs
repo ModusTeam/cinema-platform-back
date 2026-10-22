@@ -1,3 +1,4 @@
+using Cinema.Application.Common.Models.Booking;
 using Cinema.Domain.Shared;
 
 namespace Cinema.Application.Common.Interfaces;
@@ -11,6 +12,9 @@ public interface ISeatLockingService
     Task<bool> ValidateAndExtendLockAsync(Guid sessionId, Guid seatId, Guid userId, CancellationToken ct = default);
     
     Task<IEnumerable<Guid>> GetLockedSeatsAsync(Guid sessionId, IEnumerable<Guid> seatIds, CancellationToken ct = default);
+
+    Task<IReadOnlyList<SeatLockState>> GetSeatLocksAsync(Guid sessionId, IEnumerable<Guid> seatIds,
+        Guid? currentUserId, CancellationToken ct = default);
 
     Task<IEnumerable<Guid>> GetLockedSeatsBySessionAsync(Guid sessionId, CancellationToken ct = default);
 }

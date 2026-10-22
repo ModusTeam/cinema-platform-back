@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Constants;
 using Cinema.Application.Common.Interfaces;
+using Cinema.Application.Common.Models.Booking;
 using Cinema.Domain.Shared;
 using Microsoft.Extensions.Logging;
 using Polly;
@@ -272,7 +273,15 @@ public class RedisSeatLockingService : ISeatLockingService
 
     public async Task<IEnumerable<Guid>> GetLockedSeatsAsync(Guid sessionId, IEnumerable<Guid> seatIds, CancellationToken ct = default)
     {
+        var locks = await GetSeatLocksAsync(sessionId, seatIds, null, ct);
+        return locks.Select(seatLock => seatLock.SeatId);
+    }
+
+    public async Task<IReadOnlyList<SeatLockState>> GetSeatLocksAsync(Guid sessionId, IEnumerable<Guid> seatIds,
+        Guid? currentUserId, CancellationToken ct = default)
+    {
         var seatIdArray = seatIds.ToArray();
+        if (seatIdArray.Length == 0) return [];
         var keys = seatIdArray.Select(id => new RedisKey(GetKey(sessionId, id))).ToArray();
 
         try
@@ -280,11 +289,16 @@ public class RedisSeatLockingService : ISeatLockingService
             var values = await _resiliencePipeline.ExecuteAsync(async token =>
                 await _db.StringGetAsync(keys), ct);
             
-            var lockedSeats = new List<Guid>();
+            var lockedSeats = new List<SeatLockState>();
             
             for (var i = 0; i < values.Length; i++)
             {
-                if (values[i].HasValue) lockedSeats.Add(seatIdArray[i]);
+                if (!values[i].HasValue) continue;
+
+                bool isOwned = currentUserId.HasValue
+                    && Guid.TryParse(values[i].ToString(), out Guid ownerId)
+                    && ownerId == currentUserId.Value;
+                lockedSeats.Add(new SeatLockState(seatIdArray[i], isOwned));
             }
             
             return lockedSeats;

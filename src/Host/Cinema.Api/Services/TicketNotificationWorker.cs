@@ -62,7 +62,7 @@ public class TicketNotificationWorker : BackgroundService, ITicketNotifier
         _logger.LogInformation("SignalR Notification Worker started.");
         
         // Completing the writer lets accepted notifications drain during graceful shutdown.
-        await foreach (var notificationTask in _channel.Reader.ReadAllAsync())
+        await foreach (var notificationTask in _channel.Reader.ReadAllAsync(CancellationToken.None))
         {
             try
             {

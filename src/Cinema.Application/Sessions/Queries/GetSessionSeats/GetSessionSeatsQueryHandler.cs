@@ -13,7 +13,8 @@ public class GetSessionSeatsQueryHandler(
     IApplicationDbContext context,
     IPriceCalculator priceCalculator,
     ISeatLockingService seatLockingService,
-    ISeatTypeProvider seatTypeProvider)
+    ISeatTypeProvider seatTypeProvider,
+    ICurrentUserService currentUserService)
     : IRequestHandler<GetSessionSeatsQuery, Result<SessionSeatsVm>>
 {
     public async Task<Result<SessionSeatsVm>> Handle(GetSessionSeatsQuery request, CancellationToken ct)
@@ -48,8 +49,9 @@ public class GetSessionSeatsQueryHandler(
             .Where(s => !soldSeatIdsSet.Contains(s.Id))
             .Select(s => s.Id.Value)
             .ToList();
-        var lockedSeatIds = await seatLockingService.GetLockedSeatsAsync(request.SessionId, availableSeatGuids, ct);
-        var lockedSeatIdsSet = lockedSeatIds.ToHashSet();
+        Guid? currentUserId = currentUserService.UserId;
+        var locks = await seatLockingService.GetSeatLocksAsync(request.SessionId, availableSeatGuids, currentUserId, ct);
+        var locksBySeatId = locks.ToDictionary(seatLock => seatLock.SeatId);
         
         var pricing = await context.Pricings
             .Include(p => p.PricingItems)
@@ -71,7 +73,8 @@ public class GetSessionSeatsQueryHandler(
             }
 
             var isSold = soldSeatIdsSet.Contains(seat.Id);
-            var isLocked = lockedSeatIdsSet.Contains(seat.Id.Value);
+            locksBySeatId.TryGetValue(seat.Id.Value, out var seatLock);
+            var isLocked = !isSold && seatLock is not null;
             
             var typeName = seatTypeProvider.GetName(seat.SeatTypeId);
 
@@ -87,7 +90,11 @@ public class GetSessionSeatsQueryHandler(
                 IsAvailable: !isSold && !isLocked,
                 IsSold: isSold,
                 IsLocked: isLocked
-            ));
+            )
+            {
+                IsLockedByCurrentUser = isLocked && currentUserId.HasValue
+                    && seatLock?.IsLockedByCurrentUser == true
+            });
         }
         
         var vm = new SessionSeatsVm(
