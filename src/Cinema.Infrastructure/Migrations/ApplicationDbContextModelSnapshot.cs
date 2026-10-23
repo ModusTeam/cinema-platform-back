@@ -252,6 +252,10 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("numeric(18,2)")
                         .HasColumnName("paid_amount");
 
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("paid_at");
+
                     b.Property<string>("PaymentTransactionId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")

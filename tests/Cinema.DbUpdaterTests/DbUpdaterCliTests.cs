@@ -67,12 +67,30 @@ public class DbUpdaterCliTests
             context.SeatTypes.Add(seatType);
             context.Pricings.Add(pricing);
             context.Sessions.Add(session);
-            context.Orders.Add(order);
-            context.Tickets.Add(ticket);
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            // Seed the previous schema explicitly: the current EF model already includes PaidAt.
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO orders (id, total_amount, paid_amount, booking_date, status, user_id, session_id, points_used)
+                VALUES ({order.Id.Value}, {order.TotalAmount}, {order.PaidAmount}, {order.BookingDate},
+                    {(int)OrderStatus.Pending}, {userId}, {session.Id.Value}, {0});
+                INSERT INTO tickets (id, price_snapshot, ticket_status, order_id, session_id, seat_id)
+                VALUES ({ticket.Id.Value}, {ticket.PriceSnapshot}, {(int)TicketStatus.Valid},
+                    {order.Id.Value}, {session.Id.Value}, {seat.Id.Value});
+                """, TestContext.Current.CancellationToken);
+            Guid legacyPaidOrder = Guid.NewGuid();
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO orders (id, total_amount, paid_amount, booking_date, status,
+                    user_id, session_id, points_used, payment_transaction_id)
+                VALUES ({legacyPaidOrder}, {50m}, {50m}, {DateTime.UtcNow}, {(int)OrderStatus.Paid},
+                    {userId}, {session.Id.Value}, {0}, {"legacy-transaction"});
+                """, TestContext.Current.CancellationToken);
 
             ProcessResult update = await RunAsync([], connectionString);
             Assert.Equal(0, update.ExitCode);
+            Assert.Equal(2, await ScalarAsync<long>(connectionString,
+                "SELECT count(*) FROM orders WHERE paid_at IS NULL"));
+            Assert.Equal((int)OrderStatus.Paid, await ScalarAsync<int>(connectionString,
+                "SELECT status FROM orders WHERE id = @id", legacyPaidOrder));
             Assert.Equal(3, await ScalarAsync<long>(connectionString,
                 "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('inbox_state', 'outbox_message', 'outbox_state')"));
             Assert.Equal((int)OrderStatus.Pending, await ScalarAsync<int>(connectionString,

@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace Cinema.Application.Orders.IntegrationEvents;
 
@@ -18,7 +18,9 @@ public record NestJsTicketPurchasedDto(
     [property: JsonPropertyName("downloadUrl")] string  DownloadUrl,
     [property: JsonPropertyName("paidAmount")]  double  PaidAmount,
     [property: JsonPropertyName("pointsUsed")]  int     PointsUsed,
-    [property: JsonPropertyName("totalPrice")]  double  TotalPrice
+    [property: JsonPropertyName("totalPrice")]  double  TotalPrice,
+    [property: JsonPropertyName("sessionId")] Guid SessionId,
+    [property: JsonPropertyName("paidAt")] DateTime PaidAt
 );
 
 public record NestJsTicketPurchasedEvent(

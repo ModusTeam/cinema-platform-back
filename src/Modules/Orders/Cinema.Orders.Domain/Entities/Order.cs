@@ -11,6 +11,7 @@ public class Order : BaseEntity
     public decimal TotalAmount { get; private set; }
     public decimal PaidAmount { get; private set; }
     public DateTime BookingDate { get; private set; }
+    public DateTime? PaidAt { get; private set; }
     public OrderStatus Status { get; private set; }
     public string? PaymentTransactionId { get; private set; }
 
@@ -74,6 +75,7 @@ public class Order : BaseEntity
 
     public void CompleteGoldCompensation()
     {
+        EnsurePaymentFactsMutable();
         TotalAmount = GoldOriginalTotal;
         PaidAmount = GoldOriginalPaid;
         PointsUsed = 0;
@@ -153,6 +155,9 @@ public class Order : BaseEntity
 
     public void ApplyLoyaltyDiscount(int pointsUsed)
     {
+        if (PaymentTransactionId is not null && pointsUsed == PointsUsed)
+            return;
+        EnsurePaymentFactsMutable();
         if (pointsUsed < 0) throw new ArgumentException("Points cannot be negative");
 
         decimal discount = pointsUsed;
@@ -179,6 +184,9 @@ public class Order : BaseEntity
             throw new DomainException("Payment confirmation requires a transaction ID.");
 
         PaymentTransactionId = externalTransactionId;
+        DateTime confirmedAt = DateTime.UtcNow;
+        // Match PostgreSQL precision before staging the outbox copy of this fact.
+        PaidAt = confirmedAt.AddTicks(-(confirmedAt.Ticks % TimeSpan.TicksPerMicrosecond));
         Status = OrderStatus.Paid;
         
         AddDomainEvent(new OrderPaidEvent(this)); 
@@ -242,8 +250,15 @@ public class Order : BaseEntity
         Status = OrderStatus.Expired;
     }
 
+    private void EnsurePaymentFactsMutable()
+    {
+        if (PaidAt is not null || PaymentTransactionId is not null)
+            throw new DomainException("Confirmed payment facts cannot be changed.");
+    }
+
     public void ApplyGoldDiscount(decimal priceDifference)
     {
+        EnsurePaymentFactsMutable();
         if (priceDifference <= 0 || priceDifference > TotalAmount)
             throw new DomainException("Gold discount must be positive and cannot exceed the order total.");
 

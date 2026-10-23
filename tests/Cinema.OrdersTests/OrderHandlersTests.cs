@@ -107,11 +107,8 @@ public class OrderHandlersTests
     public async Task Failed_Loyalty_Refund_After_Payment_Refund_Leaves_Paid_Order()
     {
         string databaseName = Guid.NewGuid().ToString();
-        (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, 20, paid: true);
+        (Guid orderId, Guid userId, _) = await SeedCancellationOrderAsync(databaseName, 20, paid: true, pointsUsed: 5);
         await using ApplicationDbContext context = CreateContext(databaseName);
-        Order order = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
-        order.ApplyLoyaltyDiscount(5);
-        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(userId);
         IPaymentService payment = Substitute.For<IPaymentService>();
@@ -525,7 +522,7 @@ public class OrderHandlersTests
     }
 
     private static async Task<(Guid OrderId, Guid UserId, Guid SeatId)> SeedCancellationOrderAsync(
-        string databaseName, int minutesUntilStart, bool paid = false, bool used = false)
+        string databaseName, int minutesUntilStart, bool paid = false, bool used = false, int pointsUsed = 0)
     {
         await using ApplicationDbContext context = CreateContext(databaseName);
         Guid userId = Guid.NewGuid();
@@ -538,6 +535,7 @@ public class OrderHandlersTests
             EntityId<Movie>.New(), hall.Id, EntityId<Pricing>.New());
         Order order = OrderTicketFixture.CreateAndTrack(context, userId, session, [seat], new() { [seat.Id] = 25m },
             paid || used ? TicketStatus.Valid : TicketStatus.Reserved);
+        if (pointsUsed > 0) order.ApplyLoyaltyDiscount(pointsUsed);
         if (paid) order.MarkAsPaid("transaction-1");
         if (used) OrderTicketFixture.TrackedForOrder(context, order).Single().MarkAsUsed();
         context.Halls.Add(hall);
