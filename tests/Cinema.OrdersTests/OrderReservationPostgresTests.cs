@@ -48,6 +48,7 @@ using Mapster;
 using System.Data.Common;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
+using System.Text.Json;
 using Xunit;
 
 // Paid notifications intentionally call the existing overload without a cancellation token.
@@ -58,6 +59,298 @@ namespace Cinema.OrdersTests;
 // Only run with a disposable pgvector PostgreSQL database named cinema_orders_test_*.
 public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Payment_Facts_Use_Committed_Order_And_Stage_Without_Email(bool noEmail)
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        IPriceCalculator calculator = Substitute.For<IPriceCalculator>();
+        calculator.CalculatePrice(Arg.Any<Pricing>(), Arg.Any<EntityId<SeatType>>(), Arg.Any<DateTime>()).Returns(100.75m);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value, calculator: calculator);
+        if (noEmail)
+        {
+            User user = await database.Context.Users.SingleAsync(TestContext.Current.CancellationToken);
+            user.Email = null;
+            await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString,
+            withDomainHandlers: true, rawJson: true, retries: true);
+        (await RunPaymentFactsCheckoutAsync(services, database, reserved.Value, pointsUsed: noEmail ? 25 : 0)).IsSuccess.Should().BeTrue();
+        string initial;
+        await using (ApplicationDbContext verify = database.NewContext())
+        {
+            Order order = await verify.Orders.SingleAsync(TestContext.Current.CancellationToken);
+            initial = await PaymentFactsBodyAsync(verify);
+            using JsonDocument json = JsonDocument.Parse(initial);
+            JsonElement data = json.RootElement.GetProperty("data");
+            json.RootElement.GetProperty("pattern").GetString().Should().Be("TicketPurchased");
+            data.GetProperty("eventId").GetGuid().Should().Be(reserved.Value);
+            data.GetProperty("orderId").GetGuid().Should().Be(reserved.Value);
+            data.GetProperty("userId").GetGuid().Should().Be(database.UserId);
+            data.GetProperty("sessionId").GetGuid().Should().Be(database.Session.Id.Value);
+            data.GetProperty("paidAt").GetDateTime().Should().Be(
+                verify.Entry(order).Property<DateTime?>("PaidAt").CurrentValue!.Value);
+            data.GetProperty("purchasedAt").GetDateTime().Should().Be(data.GetProperty("paidAt").GetDateTime());
+            data.GetProperty("paidAmount").GetDecimal().Should().Be(noEmail ? 75.75m : 100.75m);
+            data.GetProperty("pointsUsed").GetInt32().Should().Be(noEmail ? 25 : 0);
+            string genericBody = await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+                .Where(message => message.MessageType.Contains(":TicketPurchasedEvent"))
+                .Select(message => message.Body).SingleAsync(TestContext.Current.CancellationToken);
+            using JsonDocument generic = JsonDocument.Parse(genericBody);
+            generic.RootElement.GetProperty("timestamp").GetDateTime().Should().Be(order.PaidAt!.Value);
+            (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+            (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>().CountAsync(
+                TestContext.Current.CancellationToken)).Should().Be(noEmail ? 2 : 3);
+        }
+        PricingItem changedPrice = await database.Context.PricingItems.SingleAsync(TestContext.Current.CancellationToken);
+        changedPrice.UpdatePrice(999.99m);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        // Reconstruct through the real handler after disposing the original context/scope.
+        await using (AsyncServiceScope scope = services.CreateAsyncScope())
+        {
+            ApplicationDbContext context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            Order committed = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
+            await scope.ServiceProvider.GetRequiredService<IPublisher>().Publish(new OrderPaidEvent(committed),
+                TestContext.Current.CancellationToken);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        await using ApplicationDbContext reloaded = database.NewContext();
+        List<string> bodies = await reloaded.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+            .Where(message => message.MessageType.Contains(":NestJsTicketPurchasedEvent"))
+            .Select(message => message.Body).ToListAsync(TestContext.Current.CancellationToken);
+        bodies.Should().HaveCount(2);
+        string[] fields = ["eventId", "orderId", "userId", "sessionId", "paidAt", "purchasedAt",
+            "totalAmount", "ticketAmount", "totalPrice", "paidAmount", "foodAmount", "pointsUsed"];
+        using JsonDocument original = JsonDocument.Parse(initial);
+        foreach (string body in bodies)
+        {
+            using JsonDocument rebuilt = JsonDocument.Parse(body);
+            foreach (string field in fields)
+                rebuilt.RootElement.GetProperty("data").GetProperty(field).GetRawText().Should().Be(
+                    original.RootElement.GetProperty("data").GetProperty(field).GetRawText(), field);
+        }
+    }
+
+    [Fact]
+    public async Task Payment_Facts_And_All_Outbox_Records_Roll_Back_On_Staging_Failure()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await database.Context.Database.ExecuteSqlRawAsync("""
+            CREATE FUNCTION reject_loyalty_fact() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NEW.message_type LIKE '%NestJsTicketPurchasedEvent%' THEN
+                    RAISE EXCEPTION 'injected loyalty staging failure';
+                END IF;
+                RETURN NEW;
+            END $$;
+            CREATE TRIGGER reject_loyalty_fact BEFORE INSERT ON outbox_message
+                FOR EACH ROW EXECUTE FUNCTION reject_loyalty_fact();
+            """, TestContext.Current.CancellationToken);
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString,
+            withDomainHandlers: true, rawJson: true, retries: true);
+        Result<Guid> result = await RunPaymentFactsCheckoutAsync(services, database, reserved.Value, pointsUsed: 25);
+        result.Error.Code.Should().Be("Payment.OutcomeUnknown");
+        await using ApplicationDbContext verify = database.NewContext();
+        Order order = await verify.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        order.PaidAt.Should().BeNull();
+        order.PaymentTransactionId.Should().BeNull();
+        order.PointsUsed.Should().Be(0);
+        order.PaidAmount.Should().Be(50m);
+        order.Status.Should().Be(OrderStatus.PaymentOutcomeUnknown);
+        (await verify.Tickets.SingleAsync(TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Reserved);
+        (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>().CountAsync(
+            TestContext.Current.CancellationToken)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Payment_Facts_Survive_Lost_Commit_Response_And_Exact_Checkout_Replay()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        LostPaymentCommitAcknowledgement fault = new();
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString,
+            withDomainHandlers: true, rawJson: true, retries: true, transactionInterceptor: fault);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns(PaymentResult.Success("payment-facts-transaction"));
+        (await RunPaymentFactsCheckoutAsync(services, database, reserved.Value, payment)).IsSuccess.Should().BeTrue();
+        string original;
+        await using (ApplicationDbContext verify = database.NewContext()) original = await PaymentFactsBodyAsync(verify);
+        (await RunPaymentFactsCheckoutAsync(services, database, reserved.Value, payment)).IsSuccess.Should().BeTrue();
+        fault.Failures.Should().Be(1);
+        await payment.Received(1).ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext reloaded = database.NewContext();
+        (await PaymentFactsBodyAsync(reloaded)).Should().Be(original);
+        (await reloaded.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>().CountAsync(
+            TestContext.Current.CancellationToken)).Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Concurrent_Payment_Facts_Checkouts_Commit_One_Charge_And_One_Fact()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString,
+            withDomainHandlers: true, rawJson: true, retries: true);
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>()).Returns(async _ =>
+        {
+            entered.TrySetResult();
+            await release.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            return PaymentResult.Success("payment-facts-transaction");
+        });
+        Task<Result<Guid>> first = RunPaymentFactsCheckoutAsync(services, database, reserved.Value, payment);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        try
+        {
+            Result<Guid> second = await RunPaymentFactsCheckoutAsync(services, database, reserved.Value, payment);
+            second.Error.Code.Should().Be("Order.CheckoutInProgress");
+        }
+        finally { release.TrySetResult(); }
+        (await first).IsSuccess.Should().BeTrue();
+        await payment.Received(1).ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>());
+        await using ApplicationDbContext verify = database.NewContext();
+        (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).PaidAt.Should().NotBeNull();
+        (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>().CountAsync(
+            TestContext.Current.CancellationToken)).Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Unknown_Payment_Has_No_Paid_Facts_Until_Authoritative_Confirmation()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        await using ServiceProvider services = CreateOutboxServices(database.ConnectionString,
+            withDomainHandlers: true, rawJson: true, retries: true);
+        IPaymentService payment = Substitute.For<IPaymentService>();
+        payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>())
+            .Returns<Task<PaymentResult>>(_ => throw new TimeoutException("injected unknown payment outcome"));
+        (await RunPaymentFactsCheckoutAsync(services, database, reserved.Value, payment)).Error.Code
+            .Should().Be("Payment.OutcomeUnknown");
+        await using (ApplicationDbContext verify = database.NewContext())
+        {
+            (await verify.Orders.SingleAsync(TestContext.Current.CancellationToken)).PaidAt.Should().BeNull();
+            (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>().CountAsync(
+                TestContext.Current.CancellationToken)).Should().Be(0);
+        }
+        DateTime beforeConfirmation = DateTime.UtcNow.AddMicroseconds(-1);
+        await using (AsyncServiceScope scope = services.CreateAsyncScope())
+        {
+            ApplicationDbContext context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            Order order = await context.Orders.SingleAsync(TestContext.Current.CancellationToken);
+            order.MarkAsPaid("confirmed-by-reconciliation");
+            (await context.Tickets.SingleAsync(TestContext.Current.CancellationToken)).ConfirmPurchase(order);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        await using ApplicationDbContext confirmed = database.NewContext();
+        Order persisted = await confirmed.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        persisted.PaidAt.Should().BeOnOrAfter(beforeConfirmation);
+        using JsonDocument body = JsonDocument.Parse(await PaymentFactsBodyAsync(confirmed));
+        body.RootElement.GetProperty("data").GetProperty("paidAt").GetDateTime().Should().Be(persisted.PaidAt!.Value);
+        await payment.Received(1).ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>());
+    }
+
+    private sealed class LostPaymentCommitAcknowledgement : DbTransactionInterceptor
+    {
+        public int Failures { get; private set; }
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (Failures == 0 && eventData.Context?.ChangeTracker.Entries<Order>()
+                    .Any(entry => entry.Entity.Status == OrderStatus.Paid) == true)
+            {
+                Failures++;
+                throw new IOException("injected lost payment commit acknowledgement");
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task Serialized_Payment_Fact_Recovers_In_New_Publisher_Despite_Email_Failure()
+    {
+        await using ReservationDatabase database = await ReservationDatabase.CreateAsync(template);
+        await EnsureRabbitMqAvailableAsync();
+        Result<Guid> reserved = await database.ReserveAsync(database.Seat.Id.Value);
+        string stagedBody;
+        await using (ServiceProvider unavailable = CreateOutboxServices(database.ConnectionString,
+            withDomainHandlers: true, rawJson: true, retries: true, rabbitPort: 5673))
+        {
+            (await RunPaymentFactsCheckoutAsync(unavailable, database, reserved.Value)).IsSuccess.Should().BeTrue();
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(2));
+            Func<Task> start = () => unavailable.GetRequiredService<IBusControl>().StartAsync(timeout.Token);
+            await start.Should().ThrowAsync<Exception>();
+            await using ApplicationDbContext verify = database.NewContext();
+            stagedBody = await PaymentFactsBodyAsync(verify);
+        }
+        IEmailService email = Substitute.For<IEmailService>();
+        email.SendEmailAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<byte[]>(), Arg.Any<string>())
+            .Returns<Task>(_ => throw new IOException("injected downstream email outage"));
+        ITicketGenerator generator = Substitute.For<ITicketGenerator>();
+        generator.GenerateTicketPdf(Arg.Any<TicketPurchasedMessage>()).Returns([1, 2, 3]);
+        await using ServiceProvider restarted = CreateOutboxServices(database.ConnectionString,
+            rawJson: true, retries: true, captureLoyaltyFacts: true, withPurchaseConsumer: true,
+            emailService: email, ticketGenerator: generator);
+        ConcurrentQueue<string> received = restarted.GetRequiredService<ConcurrentQueue<string>>();
+        List<IHostedService> hostedServices = restarted.GetServices<IHostedService>().ToList();
+        try
+        {
+            foreach (IHostedService service in hostedServices)
+                await service.StartAsync(TestContext.Current.CancellationToken);
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+            while (received.IsEmpty || !email.ReceivedCalls().Any())
+                await Task.Delay(100, timeout.Token);
+            received.Should().ContainSingle().Which.Should().Be(stagedBody);
+            using JsonDocument fact = JsonDocument.Parse(received.Single());
+            fact.RootElement.GetProperty("pattern").GetString().Should().Be("TicketPurchased");
+            await using ApplicationDbContext verify = database.NewContext();
+            Order order = await verify.Orders.SingleAsync(timeout.Token);
+            order.Status.Should().Be(OrderStatus.Paid);
+            fact.RootElement.GetProperty("data").GetProperty("paidAt").GetDateTime().Should().Be(order.PaidAt!.Value);
+            while (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>().CountAsync(timeout.Token) != 0)
+                await Task.Delay(100, timeout.Token);
+        }
+        finally
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+            foreach (IHostedService service in hostedServices.AsEnumerable().Reverse())
+                await service.StopAsync(timeout.Token);
+        }
+    }
+
+    private static Task<string> PaymentFactsBodyAsync(ApplicationDbContext context) =>
+        context.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
+            .Where(message => message.MessageType.Contains(":NestJsTicketPurchasedEvent"))
+            .Select(message => message.Body).SingleAsync(TestContext.Current.CancellationToken);
+
+    private static async Task<Result<Guid>> RunPaymentFactsCheckoutAsync(ServiceProvider services,
+        ReservationDatabase database, Guid orderId, IPaymentService? paymentService = null, int pointsUsed = 0)
+    {
+        await using AsyncServiceScope scope = services.CreateAsyncScope();
+        ApplicationDbContext context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        IPaymentService payment = paymentService ?? Substitute.For<IPaymentService>();
+        if (paymentService is null)
+            payment.ProcessPaymentAsync(Arg.Any<decimal>(), "UAH", "token", Arg.Any<CancellationToken>())
+                .Returns(PaymentResult.Success("payment-facts-transaction"));
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        if (pointsUsed > 0)
+        {
+            loyalty.CalculateDiscountAsync(database.UserId, Arg.Any<decimal>(), Arg.Any<CancellationToken>())
+                .Returns(call => (true, pointsUsed, call.ArgAt<decimal>(1) - pointsUsed));
+            loyalty.DeductPointsAsync(database.UserId, pointsUsed, orderId, Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns((true, 0, ""));
+        }
+        OrderCheckoutOrchestrator checkout = new(context, loyalty, payment,
+            Substitute.For<ISeatLockingService>(), Substitute.For<IGoldUpgradePricingService>(),
+            scope.ServiceProvider.GetRequiredService<IPublishEndpoint>(), NullLogger<OrderCheckoutOrchestrator>.Instance);
+        return await checkout.ProcessCheckoutAsync(database.UserId, database.Session.Id.Value,
+            [database.Seat.Id.Value], orderId, false, pointsUsed > 0, "token", TestContext.Current.CancellationToken);
+    }
+
     [Fact]
     public async Task Paid_Transition_And_Purchase_Outbox_Record_Commit_Or_Roll_Back_Together()
     {
@@ -353,7 +646,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
 
     private static ServiceProvider CreateOutboxServices(string connectionString, bool withDomainHandlers = false,
         bool withPurchaseConsumer = false, IEmailService? emailService = null, ITicketGenerator? ticketGenerator = null,
-        ushort rabbitPort = 5672, bool capturePurchaseEvents = false, bool withIdentity = false)
+        ushort rabbitPort = 5672, bool capturePurchaseEvents = false, bool withIdentity = false, bool rawJson = false, bool retries = false, DbTransactionInterceptor? transactionInterceptor = null, bool captureLoyaltyFacts = false)
     {
         ServiceCollection services = new();
         services.AddLogging();
@@ -383,14 +676,18 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         }
         if (capturePurchaseEvents)
             services.AddSingleton(new ConcurrentQueue<TicketPurchasedEvent>());
+        if (captureLoyaltyFacts)
+            services.AddSingleton(new ConcurrentQueue<string>());
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
         {
-            options.UseNpgsql(connectionString, npgsql => npgsql.UseVector()).UseSnakeCaseNamingConvention();
+            options.UseNpgsql(connectionString, npgsql => { npgsql.UseVector(); if (retries) npgsql.EnableRetryOnFailure(3); }).UseSnakeCaseNamingConvention();
             if (withDomainHandlers)
                 options.AddInterceptors(provider.GetRequiredService<DispatchDomainEventsInterceptor>());
+            if (transactionInterceptor is not null) options.AddInterceptors(transactionInterceptor);
         });
         services.AddMassTransit(registration =>
         {
+            if (captureLoyaltyFacts) registration.AddConsumer<CapturedLoyaltyFactConsumer>();
             if (withPurchaseConsumer)
                 registration.AddConsumer<TicketPurchasedConsumer, TicketPurchasedConsumerDefinition>();
             if (capturePurchaseEvents)
@@ -403,11 +700,15 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             });
             registration.UsingRabbitMq((context, bus) =>
             {
+                if (rawJson) bus.UseRawJsonSerializer();
                 bus.Host("localhost", rabbitPort, "/", host =>
                 {
                     host.Username(Environment.GetEnvironmentVariable("CINEMA_TEST_RABBITMQ_USERNAME") ?? "guest");
                     host.Password(Environment.GetEnvironmentVariable("CINEMA_TEST_RABBITMQ_PASSWORD") ?? "guest");
                 });
+                if (captureLoyaltyFacts)
+                    bus.ReceiveEndpoint("loyalty_ticket_purchased", endpoint =>
+                        endpoint.ConfigureConsumer<CapturedLoyaltyFactConsumer>(context));
                 if (withPurchaseConsumer)
                     bus.ConfigureEndpoints(context);
                 if (capturePurchaseEvents)
@@ -2391,6 +2692,16 @@ public sealed class CapturedPurchaseEventConsumer(ConcurrentQueue<TicketPurchase
     public Task Consume(ConsumeContext<TicketPurchasedEvent> context)
     {
         received.Enqueue(context.Message);
+        return Task.CompletedTask;
+    }
+}
+
+public sealed class CapturedLoyaltyFactConsumer(ConcurrentQueue<string> received)
+    : IConsumer<NestJsTicketPurchasedEvent>
+{
+    public Task Consume(ConsumeContext<NestJsTicketPurchasedEvent> context)
+    {
+        received.Enqueue(context.ReceiveContext.Body.GetString());
         return Task.CompletedTask;
     }
 }

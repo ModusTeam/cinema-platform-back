@@ -500,6 +500,12 @@ public class OrderCheckoutOrchestrator(
         if (order == null)
             return Result.Failure<Guid>(new Error("Order.NotFound", "Order not found"));
 
+        if (order.Status == OrderStatus.Paid)
+        {
+            order.MarkAsPaid(transactionId);
+            return Result.Success(order.Id.Value);
+        }
+
         if (pointsUsed > 0)
             order.ApplyLoyaltyDiscount(pointsUsed);
 
@@ -514,11 +520,11 @@ public class OrderCheckoutOrchestrator(
         int ticketCount = tickets.Count;
 
         await publishEndpoint.Publish(new TicketPurchasedEvent(
-            userId,
-            orderId,
+            order.UserId,
+            order.Id.Value,
             order.TotalAmount,
             ticketCount,
-            DateTime.UtcNow
+            order.PaidAt ?? throw new InvalidOperationException("Confirmed order is missing its persisted payment time.")
         ), ct);
         await context.SaveChangesAsync(ct);
 
