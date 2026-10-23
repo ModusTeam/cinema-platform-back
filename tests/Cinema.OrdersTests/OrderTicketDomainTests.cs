@@ -18,6 +18,52 @@ namespace Cinema.OrdersTests;
 public class OrderTicketDomainTests
 {
     [Fact]
+    public void Confirmed_Payment_Has_One_Stable_Utc_Time_And_Identity()
+    {
+        Order order = Order.New(EntityId<Order>.New(), 100.75m, Guid.NewGuid(), EntityId<Session>.New());
+        order.PaidAt.Should().BeNull();
+        order.StartPayment();
+        order.MarkPaymentOutcomeUnknown();
+        order.PaidAt.Should().BeNull();
+        DateTime before = DateTime.UtcNow;
+        order.ApplyLoyaltyDiscount(25);
+        order.MarkAsPaid("payment-fact");
+        DateTime paidAt = order.PaidAt!.Value;
+        paidAt.Kind.Should().Be(DateTimeKind.Utc);
+        paidAt.Should().BeOnOrAfter(before.AddMicroseconds(-1)).And.BeOnOrBefore(DateTime.UtcNow);
+        (paidAt.Ticks % TimeSpan.TicksPerMicrosecond).Should().Be(0);
+        order.MarkAsPaid("payment-fact");
+        order.PaidAt.Should().Be(paidAt);
+        order.DomainEvents.OfType<OrderPaidEvent>().Should().ContainSingle();
+        Action conflict = () => order.MarkAsPaid("different-payment");
+        conflict.Should().Throw<DomainException>();
+        order.PaidAt.Should().Be(paidAt);
+        order.PaymentTransactionId.Should().Be("payment-fact");
+        order.PaidAmount.Should().Be(75.75m);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Confirmed_Payment_Money_Cannot_Be_Rewritten_Even_After_Cancellation(bool cancelled)
+    {
+        Order order = Order.New(EntityId<Order>.New(), 100.75m, Guid.NewGuid(), EntityId<Session>.New());
+        order.ApplyLoyaltyDiscount(25);
+        order.MarkAsPaid("payment-fact");
+        if (cancelled) order.MarkAsCancelled();
+        Action loyalty = () => order.ApplyLoyaltyDiscount(30);
+        Action gold = () => order.ApplyGoldDiscount(10m);
+        Action compensation = () => order.CompleteGoldCompensation();
+        loyalty.Should().Throw<DomainException>();
+        gold.Should().Throw<DomainException>();
+        compensation.Should().Throw<DomainException>();
+        order.TotalAmount.Should().Be(100.75m);
+        order.PaidAmount.Should().Be(75.75m);
+        order.PointsUsed.Should().Be(25);
+        order.PaymentTransactionId.Should().Be("payment-fact");
+    }
+
+    [Fact]
     public void Order_User_Relationship_Keeps_Foreign_Key_Without_Domain_Navigation()
     {
         using ApplicationDbContext context = CreateContext();

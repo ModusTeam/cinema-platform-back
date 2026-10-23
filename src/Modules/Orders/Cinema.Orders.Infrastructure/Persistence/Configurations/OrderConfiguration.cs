@@ -26,6 +26,9 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(x => x.BookingDate)
             .HasConversion(new DateTimeUtcConverter());
 
+        builder.Property(x => x.PaidAt)
+            .HasColumnType("timestamp with time zone");
+
         builder.Property(x => x.Status)
             .HasConversion<int>();
 
