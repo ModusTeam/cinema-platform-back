@@ -22,7 +22,7 @@ using Xunit;
 namespace Cinema.OrdersTests;
 
 // T002 characterizes existing wiring only: no customer-facts source schema/producer.
-public sealed class CustomerFactsPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
+public sealed partial class CustomerFactsPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
@@ -46,7 +46,7 @@ public sealed class CustomerFactsPostgresTests(PostgresSchemaTemplate template) 
     [Fact]
     public async Task User_Role_And_Outbox_Commit_Together_Without_Available_Broker()
     {
-        await using ProofDatabase database = await CreateDatabaseAsync();
+        await using ProofDatabase database = await CreateDatabaseAsync(useProductionDataSource: true);
         // Reserved but non-listening loopback port: there is no broker to accept a Send.
         using TcpClient probe = new();
         Func<Task> connect = () => probe.ConnectAsync(IPAddress.Loopback, database.BrokerPort, Cancellation).AsTask();
@@ -245,7 +245,7 @@ public sealed class CustomerFactsPostgresTests(PostgresSchemaTemplate template) 
             (await context.Set<OutboxState>().CountAsync(Cancellation)).Should().Be(0);
     }
 
-    private async Task<ProofDatabase> CreateDatabaseAsync(DbTransactionInterceptor? fault = null)
+    private async Task<ProofDatabase> CreateDatabaseAsync(DbTransactionInterceptor? fault = null, bool useProductionDataSource = false)
     {
         (string connection, string admin, string name) = await template.CreateDatabaseAsync();
         Socket unavailableBroker = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -253,11 +253,21 @@ public sealed class CustomerFactsPostgresTests(PostgresSchemaTemplate template) 
         int port = unavailableBroker.LocalEndPoint.Should().BeOfType<IPEndPoint>().Which.Port;
         ServiceCollection services = new();
         services.AddLogging();
-        services.AddSingleton(DatabaseContextConfiguration.CreateDataSource(connection));
+        services.AddScoped<Cinema.Infrastructure.Services.CustomerFactsWriter>();
+        if (useProductionDataSource) services.AddSingleton(DatabaseContextConfiguration.CreateDataSource(connection));
         SaveObservation saves = new();
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
         {
-            DatabaseContextConfiguration.Configure(options, provider.GetRequiredService<NpgsqlDataSource>());
+            if (useProductionDataSource)
+                DatabaseContextConfiguration.Configure(options, provider.GetRequiredService<NpgsqlDataSource>());
+            else
+                // Per-database tests share EF internal services instead of caching a
+                // distinct service provider for each short-lived NpgsqlDataSource.
+                options.UseNpgsql(connection, postgres =>
+                {
+                    postgres.UseVector();
+                    postgres.EnableRetryOnFailure(3);
+                }).UseSnakeCaseNamingConvention();
             options.AddInterceptors(saves);
             if (fault is not null) options.AddInterceptors(fault);
         });

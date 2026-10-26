@@ -15,7 +15,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Cinema.Infrastructure.Persistence;
 
-public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
     : IdentityDbContext<User, IdentityRole<Guid>, Guid>(options), IApplicationDbContext
 {
     public DbSet<Movie> Movies { get; init; }
@@ -35,10 +35,19 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SeatLock> SeatLocks { get; init; }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => SaveChangesAsync(true, cancellationToken);
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
-        return base.SaveChangesAsync(cancellationToken);
+        ValidateCustomerFactsWrites();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
-    
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ValidateCustomerFactsWrites();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
     public async Task<IDbContextTransaction> BeginTransactionAsync(System.Data.IsolationLevel isolationLevel,
         CancellationToken cancellationToken)
     {

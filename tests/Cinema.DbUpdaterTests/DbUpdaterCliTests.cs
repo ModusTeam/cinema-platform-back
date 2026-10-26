@@ -44,7 +44,8 @@ public class DbUpdaterCliTests
             DbContextOptionsBuilder<ApplicationDbContext> options = new();
             DatabaseContextConfiguration.Configure(options, dataSource);
             await using ApplicationDbContext context = new(options.Options);
-            string previousMigration = context.Database.GetMigrations().SkipLast(1).Last();
+            // Pin the historical schema this regression was written against.
+            string previousMigration = "20261017222608_AddMassTransitOutbox";
             await context.GetService<IMigrator>().MigrateAsync(previousMigration, TestContext.Current.CancellationToken);
 
             Guid userId = Guid.NewGuid();
@@ -61,7 +62,12 @@ public class DbUpdaterCliTests
             Order order = Order.New(EntityId<Order>.New(), 50m, userId, session.Id);
             Ticket ticket = Ticket.New(EntityId<Ticket>.New(), 50m, TicketStatus.Valid,
                 order.Id, session.Id, seat.Id);
-            context.Users.Add(new User { Id = userId, UserName = $"migration-{suffix}" });
+            // Seed old Identity columns without using the newer User mapping.
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "AspNetUsers" (id, user_name, email_confirmed, phone_number_confirmed,
+                    two_factor_enabled, lockout_enabled, access_failed_count)
+                VALUES ({userId}, {$"migration-{suffix}"}, false, false, false, false, 0)
+                """, TestContext.Current.CancellationToken);
             context.Movies.Add(movie);
             context.Halls.Add(hall);
             context.SeatTypes.Add(seatType);
