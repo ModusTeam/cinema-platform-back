@@ -361,8 +361,11 @@ public sealed partial class CustomerFactsPostgresTests
     [InlineData(true)]
     public async Task Migration_Applies_To_Clean_And_Prior_Schema_Without_Inventing_Legacy_Facts(bool prior)
     {
-        string connection = Environment.GetEnvironmentVariable("CINEMA_TEST_POSTGRES_CONNECTION")
-            ?? throw new InvalidOperationException("Disposable test connection required");
+        string? connection = Environment.GetEnvironmentVariable("CINEMA_TEST_POSTGRES_CONNECTION");
+
+        if (string.IsNullOrWhiteSpace(connection))
+            Assert.Skip("Set CINEMA_TEST_POSTGRES_CONNECTION to an isolated disposable pgvector database named cinema_orders_test_*.");
+
         NpgsqlConnectionStringBuilder builder = new(connection);
         if (builder.Database?.StartsWith("cinema_orders_test_", StringComparison.Ordinal) != true)
             throw new InvalidOperationException("Not a disposable test target");
