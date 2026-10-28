@@ -15,55 +15,45 @@ public class SetMyDateOfBirthCommandHandler(
     ICurrentUserService currentUser,
     UserManager<User> userManager,
     ISendEndpointProvider sendEndpointProvider,
-    ILogger<SetMyDateOfBirthCommandHandler> logger)
+    ILogger<SetMyDateOfBirthCommandHandler> logger,
+    ICustomerFactsWriter facts)
     : IRequestHandler<SetMyDateOfBirthCommand, Result<SetMyDateOfBirthResponse>>
 {
     public async Task<Result<SetMyDateOfBirthResponse>> Handle(SetMyDateOfBirthCommand request, CancellationToken ct)
     {
-        if (currentUser.UserId == null)
+        if (currentUser.UserId is not { } userId)
             return Result.Failure<SetMyDateOfBirthResponse>(AuthErrors.UserNotAuthenticated);
 
-        var user = await userManager.FindByIdAsync(currentUser.UserId.ToString()!);
-        if (user == null)
-            return Result.Failure<SetMyDateOfBirthResponse>(UserErrors.NotFound);
-
-        if (user.DateOfBirth.HasValue)
-            return Result.Failure<SetMyDateOfBirthResponse>(UserErrors.DateOfBirthAlreadySet);
-
-        user.DateOfBirth = DateTime.SpecifyKind(request.DateOfBirth.Date, DateTimeKind.Utc);
-
-        try
+        DateTime acceptedDate = default;
+        Result result = await facts.ExecuteAsync(userId, async token =>
         {
-            var endpoint = await sendEndpointProvider.GetSendEndpoint(
-                new Uri("queue:loyalty_ticket_purchased"));
+            User? user = await userManager.FindByIdAsync(userId.ToString());
+            if (user is null) return Result.Failure(UserErrors.NotFound);
+            if (user.DateOfBirth.HasValue) return Result.Failure(UserErrors.DateOfBirthAlreadySet);
+            if (user.CustomerFactsRevision == int.MaxValue)
+                return Result.Failure(new Error("User.CustomerFactsRevisionExhausted", "Customer facts revision limit reached."));
 
-            var dateOfBirth = DateOnly
-                .FromDateTime(user.DateOfBirth.Value)
-                .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-
-            var integrationEvent = new NestJsUserDateOfBirthSetEvent(
-                LoyaltyEventPatterns.UserDateOfBirthSet,
-                new UserDateOfBirthSetPayload(
-                    UserId: user.Id,
-                    DateOfBirth: dateOfBirth,
-                    OccurredAtUtc: DateTime.UtcNow));
-
-            await endpoint.Send(integrationEvent, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogCritical(ex,
-                "Failed to stage {Event} for User {UserId}. Identity change was not saved.",
-                nameof(NestJsUserDateOfBirthSetEvent), user.Id);
-            return Result.Failure<SetMyDateOfBirthResponse>(
-                new Error("User.MessageStagingFailed", "Could not save the date of birth change. Please try again."));
-        }
-
-        var updateResult = await userManager.UpdateAsync(user);
-        if (!updateResult.Succeeded)
-            return Result.Failure<SetMyDateOfBirthResponse>(
-                new Error("User.UpdateFailed", updateResult.Errors.First().Description));
-
-        return Result.Success(new SetMyDateOfBirthResponse(user.DateOfBirth.Value));
+            user.RecordFirstDateOfBirth(DateOnly.FromDateTime(request.DateOfBirth), DateTime.UtcNow);
+            acceptedDate = user.DateOfBirth.GetValueOrDefault();
+            try
+            {
+                ISendEndpoint endpoint = await sendEndpointProvider.GetSendEndpoint(new Uri("queue:loyalty_ticket_purchased"));
+                await endpoint.Send(new NestJsUserDateOfBirthSetEvent(LoyaltyEventPatterns.UserDateOfBirthSet,
+                    new UserDateOfBirthSetPayload(user.Id,
+                        DateOnly.FromDateTime(acceptedDate).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                        user.DobFirstSetAtUtc.GetValueOrDefault())), token);
+                await facts.StageAsync(user, Guid.NewGuid(), "DateOfBirthSet", token);
+            }
+            catch (Exception)
+            {
+                logger.LogError("Customer DOB staging failed for User {UserId}: {Code}", userId, "DOB_STAGING_FAILED");
+                return Result.Failure(new Error("User.MessageStagingFailed", "Could not save the date of birth change. Please try again."));
+            }
+            IdentityResult update = await userManager.UpdateAsync(user);
+            return update.Succeeded ? Result.Success()
+                : Result.Failure(new Error("User.UpdateFailed", update.Errors.First().Description));
+        }, ct);
+        return result.IsSuccess ? Result.Success(new SetMyDateOfBirthResponse(acceptedDate))
+            : Result.Failure<SetMyDateOfBirthResponse>(result.Error);
     }
 }

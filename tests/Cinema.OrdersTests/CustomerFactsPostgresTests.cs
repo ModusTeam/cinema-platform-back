@@ -255,6 +255,7 @@ public sealed partial class CustomerFactsPostgresTests(PostgresSchemaTemplate te
         ServiceCollection services = new();
         services.AddLogging();
         services.AddScoped<Cinema.Infrastructure.Services.CustomerFactsWriter>();
+        services.AddScoped<ICustomerFactsWriter>(provider => provider.GetRequiredService<Cinema.Infrastructure.Services.CustomerFactsWriter>());
         services.AddScoped<Cinema.Infrastructure.Services.CustomerRegistrationService>();
         if (useProductionDataSource) services.AddSingleton(DatabaseContextConfiguration.CreateDataSource(connection));
         SaveObservation saves = new();
