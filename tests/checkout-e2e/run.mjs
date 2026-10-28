@@ -17,6 +17,9 @@ const env = {
   E2E_PROJECT: project,
   LOYALTY_REPO: loyaltyRepo,
   MONOLITH_REPO: resolve('.'),
+  E2E_DOCKER_EXECUTABLE: process.env.E2E_DOCKER_EXECUTABLE ?? (process.platform === 'win32'
+    ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Docker/Docker/resources/bin/docker.exe')
+    : '/usr/bin/docker'),
 };
 const compose = [
   'compose',

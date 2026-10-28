@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
+import { existsSync, writeFileSync } from 'node:fs';
 
 function required(name) {
   assert.ok(process.env[name], `${name} missing; use the disposable checkout runner`);
@@ -16,6 +16,8 @@ for (const name of ['E2E_MONOLITH_DATABASE_URL', 'E2E_LOYALTY_DATABASE_URL', 'E2
   assert.equal(new URL(required(name)).hostname, '127.0.0.1', `${name} must be loopback`);
 const composeArgs = JSON.parse(required('E2E_COMPOSE_ARGS'));
 assert.ok(Array.isArray(composeArgs) && composeArgs.every(value => typeof value === 'string'));
+const dockerExecutable = required('E2E_DOCKER_EXECUTABLE');
+assert.ok(isAbsolute(dockerExecutable) && existsSync(dockerExecutable), 'Use an absolute Docker CLI executable');
 const backend = new Pool({ connectionString: required('E2E_MONOLITH_DATABASE_URL') });
 const loyalty = new Pool({ connectionString: required('E2E_LOYALTY_DATABASE_URL') });
 const queue = 'loyalty_ticket_purchased';
@@ -24,25 +26,27 @@ let connection;
 let channel;
 
 function compose(...args) {
-  const result = spawnSync('docker', [...composeArgs, ...args], { stdio: 'inherit', timeout: 90000 });
+  const result = spawnSync(dockerExecutable, [...composeArgs, ...args], { stdio: 'inherit', timeout: 90000 });
   if (result.error) throw result.error;
   assert.equal(result.status, 0, `Compose ${args.join(' ')} failed`);
   // Docker assigns new random published ports when a stopped container starts.
   // Keep loopback isolation and rediscover endpoints instead of fixing ports.
   if (args[0] === 'start') {
     const bindings = [
-      ['cinema-rabbitmq', 5672, 'E2E_RABBIT_URL', 'amqp://guest:guest@'],
-      ['cinema-rabbitmq', 15672, 'E2E_RABBIT_HTTP', 'http://'],
-      ['monolith-api', 8080, 'E2E_MONOLITH_URL', 'http://'],
-      ['loyalty-service', 3000, 'E2E_LOYALTY_URL', 'http://'],
+      ['cinema-rabbitmq', 5672, 'E2E_RABBIT_URL'],
+      ['cinema-rabbitmq', 15672, 'E2E_RABBIT_HTTP'],
+      ['monolith-api', 8080, 'E2E_MONOLITH_URL'],
+      ['loyalty-service', 3000, 'E2E_LOYALTY_URL'],
     ];
-    for (const [service, port, name, prefix] of bindings) {
+    for (const [service, port, name] of bindings) {
       if (!args.includes(service)) continue;
-      const mapped = spawnSync('docker', [...composeArgs, 'port', service, String(port)], { encoding: 'utf8', timeout: 20000 });
+      const mapped = spawnSync(dockerExecutable, [...composeArgs, 'port', service, String(port)], { encoding: 'utf8', timeout: 20000 });
       assert.equal(mapped.status, 0);
       const address = mapped.stdout.trim();
       assert.match(address, /^127\.0\.0\.1:\d+$/);
-      process.env[name] = prefix + address;
+      const endpoint = new URL(required(name));
+      endpoint.host = address;
+      process.env[name] = endpoint.toString().replace(/\/$/, '');
     }
   }
 }
