@@ -246,6 +246,7 @@ public static class ConfigureInfrastructureServices
         services.AddTransient<IPriceCalculator, PriceCalculator>();
         services.AddTransient<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddTransient<ITokenService, TokenService>();
+        services.AddScoped<CustomerFactsWriter>();
         services.AddTransient<IIdentityService, IdentityService>();
         services.AddTransient<IUserService, UserService>();
         services.AddScoped<ILoyaltyService, GrpcLoyaltyService>();
@@ -255,4 +256,3 @@ public static class ConfigureInfrastructureServices
         return services;
     }
 }
-
