@@ -2,6 +2,7 @@ using Cinema.Application.Common.Constants;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
+using Cinema.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -14,17 +15,20 @@ public class ApplicationDbContextInitializer
     private readonly ApplicationDbContext _context;
     private readonly RoleManager<IdentityRole<Guid>> _roleManager;
     private readonly UserManager<User> _userManager;
+    private readonly CustomerRegistrationService _registration;
 
     public ApplicationDbContextInitializer(
         ILogger<ApplicationDbContextInitializer> logger, 
         ApplicationDbContext context,
         UserManager<User> userManager,
-        RoleManager<IdentityRole<Guid>> roleManager)
+        RoleManager<IdentityRole<Guid>> roleManager,
+        CustomerRegistrationService registration)
     {
         _logger = logger;
         _context = context;
         _roleManager = roleManager;
         _userManager = userManager;
+        _registration = registration;
     }
 
     public async Task InitialiseAsync()
@@ -83,16 +87,11 @@ public class ApplicationDbContextInitializer
                 EmailConfirmed = true 
             };
 
-            var result = await _userManager.CreateAsync(admin, "Admin123!");
-
-            if (result.Succeeded)
+            var result = await _registration.CreateAsync(admin, "Admin123!", Roles.Admin);
+            if (result.IsFailure)
             {
-                await _userManager.AddToRoleAsync(admin, Roles.Admin);
-            }
-            else
-            {
-                _logger.LogError("Failed to seed admin user: {Errors}", 
-                    string.Join(", ", result.Errors.Select(e => e.Description)));
+                _logger.LogError("Failed to seed admin user: {Code}", result.Error.Code);
+                throw new InvalidOperationException("Admin registration failed");
             }
         }
 
