@@ -479,7 +479,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             UpdateProfileCommandHandler handler = new(currentUser,
                 scope.ServiceProvider.GetRequiredService<UserManager<User>>(),
                 scope.ServiceProvider.GetRequiredService<ISendEndpointProvider>(),
-                NullLogger<UpdateProfileCommandHandler>.Instance);
+                NullLogger<UpdateProfileCommandHandler>.Instance,
+                scope.ServiceProvider.GetRequiredService<ICustomerFactsWriter>());
             Result result = await handler.Handle(new UpdateProfileCommand("Ada", "Lovelace",
                 new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc)), TestContext.Current.CancellationToken);
             result.IsSuccess.Should().BeTrue();
@@ -493,9 +494,10 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             updated.DateOfBirth.Should().Be(new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             List<string> messageTypes = await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
                 .Select(message => message.MessageType).ToListAsync(TestContext.Current.CancellationToken);
-            messageTypes.Should().HaveCount(2);
+            messageTypes.Should().HaveCount(3);
             messageTypes.Should().ContainSingle(type => type.Contains(nameof(UserProfileUpdatedMessage)));
             messageTypes.Should().ContainSingle(type => type.Contains(nameof(NestJsUserDateOfBirthSetEvent)));
+            messageTypes.Should().ContainSingle(type => type.Contains(nameof(CustomerFactsEnvelope)));
         }
 
         await using (AsyncServiceScope scope = services.CreateAsyncScope())
@@ -507,7 +509,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
                 .Returns(Task.FromException<ISendEndpoint>(new InvalidOperationException("test staging failure")));
             UpdateProfileCommandHandler handler = new(currentUser,
                 scope.ServiceProvider.GetRequiredService<UserManager<User>>(), unavailablePublisher,
-                NullLogger<UpdateProfileCommandHandler>.Instance);
+                NullLogger<UpdateProfileCommandHandler>.Instance,
+                scope.ServiceProvider.GetRequiredService<ICustomerFactsWriter>());
             Result failed = await handler.Handle(new UpdateProfileCommand("Changed", "Name", null),
                 TestContext.Current.CancellationToken);
             failed.IsFailure.Should().BeTrue();
@@ -519,22 +522,23 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             (await verify.Users.SingleAsync(user => user.Id == database.UserId,
                 TestContext.Current.CancellationToken)).FirstName.Should().Be("Ada");
             (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
-                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(3);
         }
 
         await using (AsyncServiceScope scope = services.CreateAsyncScope())
         {
             ApplicationDbContext context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            await using var transaction = await context.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+            await context.Database.ExecuteSqlRawAsync("CREATE FUNCTION fail_dob_save() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected DOB save failure'; END $$; CREATE TRIGGER fail_dob_save BEFORE INSERT ON outbox_message FOR EACH ROW EXECUTE FUNCTION fail_dob_save()", TestContext.Current.CancellationToken);
             ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
             currentUser.UserId.Returns(birthdayUserId);
             SetMyDateOfBirthCommandHandler handler = new(currentUser,
                 scope.ServiceProvider.GetRequiredService<UserManager<User>>(),
                 scope.ServiceProvider.GetRequiredService<ISendEndpointProvider>(),
-                NullLogger<SetMyDateOfBirthCommandHandler>.Instance);
-            (await handler.Handle(new SetMyDateOfBirthCommand(new DateTime(1992, 2, 2)),
-                TestContext.Current.CancellationToken)).IsSuccess.Should().BeTrue();
-            await transaction.RollbackAsync(TestContext.Current.CancellationToken);
+                NullLogger<SetMyDateOfBirthCommandHandler>.Instance,
+                scope.ServiceProvider.GetRequiredService<ICustomerFactsWriter>());
+            Func<Task> failedSave = () => handler.Handle(new SetMyDateOfBirthCommand(new DateTime(1992, 2, 2)),
+                TestContext.Current.CancellationToken);
+            await failedSave.Should().ThrowAsync<DbUpdateException>();
         }
 
         await using (ApplicationDbContext verify = database.NewContext())
@@ -542,7 +546,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             (await verify.Users.SingleAsync(user => user.Id == birthdayUserId,
                 TestContext.Current.CancellationToken)).DateOfBirth.Should().BeNull();
             (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
-                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(2);
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(3);
+            await verify.Database.ExecuteSqlRawAsync("DROP TRIGGER fail_dob_save ON outbox_message; DROP FUNCTION fail_dob_save()", TestContext.Current.CancellationToken);
         }
 
         await using (AsyncServiceScope scope = services.CreateAsyncScope())
@@ -552,7 +557,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             SetMyDateOfBirthCommandHandler handler = new(currentUser,
                 scope.ServiceProvider.GetRequiredService<UserManager<User>>(),
                 scope.ServiceProvider.GetRequiredService<ISendEndpointProvider>(),
-                NullLogger<SetMyDateOfBirthCommandHandler>.Instance);
+                NullLogger<SetMyDateOfBirthCommandHandler>.Instance,
+                scope.ServiceProvider.GetRequiredService<ICustomerFactsWriter>());
             (await handler.Handle(new SetMyDateOfBirthCommand(new DateTime(1992, 2, 2)),
                 TestContext.Current.CancellationToken)).IsSuccess.Should().BeTrue();
         }
@@ -562,7 +568,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             (await verify.Users.SingleAsync(user => user.Id == birthdayUserId,
                 TestContext.Current.CancellationToken)).DateOfBirth.Should().NotBeNull();
             (await verify.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
-                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(3);
+                .CountAsync(TestContext.Current.CancellationToken)).Should().Be(5);
         }
     }
 
@@ -650,6 +656,8 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
     {
         ServiceCollection services = new();
         services.AddLogging();
+        services.AddScoped<Cinema.Infrastructure.Services.CustomerFactsWriter>();
+        services.AddScoped<ICustomerFactsWriter>(provider => provider.GetRequiredService<Cinema.Infrastructure.Services.CustomerFactsWriter>());
         services.Configure<MassTransitHostOptions>(options =>
         {
             options.WaitUntilStarted = true;

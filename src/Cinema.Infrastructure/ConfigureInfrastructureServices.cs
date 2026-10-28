@@ -247,6 +247,7 @@ public static class ConfigureInfrastructureServices
         services.AddTransient<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddTransient<ITokenService, TokenService>();
         services.AddScoped<CustomerFactsWriter>();
+        services.AddScoped<ICustomerFactsWriter>(provider => provider.GetRequiredService<CustomerFactsWriter>());
         services.AddScoped<CustomerRegistrationService>();
         services.AddTransient<IIdentityService, IdentityService>();
         services.AddTransient<IUserService, UserService>();

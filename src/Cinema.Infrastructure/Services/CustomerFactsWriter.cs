@@ -1,4 +1,5 @@
 using Cinema.Application.Common.Contracts;
+using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Shared;
 using Cinema.Infrastructure.Persistence;
@@ -9,9 +10,8 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Cinema.Infrastructure.Services;
 
-// Foundation only: callers must check Identity results and perform DB work only.
-// No registration/DOB handler invokes this writer until the next approved slice.
-public sealed class CustomerFactsWriter(ApplicationDbContext context, ISendEndpointProvider endpoints)
+// Callers check Identity results and perform DB/outbox staging only in the callback.
+public sealed class CustomerFactsWriter(ApplicationDbContext context, ISendEndpointProvider endpoints) : ICustomerFactsWriter
 {
     private Guid? activeUser;
     private bool failed;
