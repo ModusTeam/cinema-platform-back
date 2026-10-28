@@ -1,5 +1,6 @@
 using Cinema.Application.Common.Constants;
 using Cinema.Domain.Entities;
+using Cinema.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -50,12 +51,12 @@ public static class IdentitySeeder
                 EmailConfirmed = true
             };
 
-            var createResult = await userManager.CreateAsync(adminUser, adminPassword);
-            if (!createResult.Succeeded)
+            var createResult = await sp.GetRequiredService<CustomerRegistrationService>()
+                .CreateAsync(adminUser, adminPassword, Roles.Admin);
+            if (createResult.IsFailure)
             {
-                var errors = string.Join(", ", createResult.Errors.Select(e => e.Description));
-                logger.LogError("Failed to seed admin user: {Errors}", errors);
-                throw new Exception($"Failed to seed admin user: {errors}");
+                logger.LogError("Failed to seed admin user: {Code}", createResult.Error.Code);
+                throw new InvalidOperationException("Admin registration failed");
             }
         }
 

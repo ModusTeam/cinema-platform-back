@@ -89,6 +89,9 @@ public class Phase5PostgresTests(PostgresSchemaTemplate template) : IClassFixtur
         tokens.GenerateRefreshToken().Returns(_ => Guid.NewGuid().ToString());
         services.AddSingleton(tokens);
         services.AddScoped<IdentityService>();
+        services.AddScoped<CustomerRegistrationService>();
+        services.AddScoped<CustomerFactsWriter>();
+        services.AddSingleton(NSubstitute.Substitute.For<MassTransit.ISendEndpointProvider>());
         return services.BuildServiceProvider();
     }
 

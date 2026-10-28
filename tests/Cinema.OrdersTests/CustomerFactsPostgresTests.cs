@@ -245,7 +245,8 @@ public sealed partial class CustomerFactsPostgresTests(PostgresSchemaTemplate te
             (await context.Set<OutboxState>().CountAsync(Cancellation)).Should().Be(0);
     }
 
-    private async Task<ProofDatabase> CreateDatabaseAsync(DbTransactionInterceptor? fault = null, bool useProductionDataSource = false)
+    private async Task<ProofDatabase> CreateDatabaseAsync(DbTransactionInterceptor? fault = null, bool useProductionDataSource = false,
+        Action<IServiceCollection>? configureServices = null)
     {
         (string connection, string admin, string name) = await template.CreateDatabaseAsync();
         Socket unavailableBroker = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -254,6 +255,7 @@ public sealed partial class CustomerFactsPostgresTests(PostgresSchemaTemplate te
         ServiceCollection services = new();
         services.AddLogging();
         services.AddScoped<Cinema.Infrastructure.Services.CustomerFactsWriter>();
+        services.AddScoped<Cinema.Infrastructure.Services.CustomerRegistrationService>();
         if (useProductionDataSource) services.AddSingleton(DatabaseContextConfiguration.CreateDataSource(connection));
         SaveObservation saves = new();
         services.AddDbContext<ApplicationDbContext>((provider, options) =>
@@ -291,6 +293,7 @@ public sealed partial class CustomerFactsPostgresTests(PostgresSchemaTemplate te
                 bus.UseRawJsonSerializer();
             });
         });
+        configureServices?.Invoke(services);
         ServiceProvider provider = services.BuildServiceProvider(validateScopes: true);
         ProofDatabase database = new(provider, unavailableBroker, port, admin, name, saves);
         try

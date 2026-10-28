@@ -11,7 +11,8 @@ namespace Cinema.Infrastructure.Services;
 public class IdentityService(
     UserManager<User> userManager,
     ITokenService tokenService,
-    ApplicationDbContext context) : IIdentityService
+    ApplicationDbContext context,
+    CustomerRegistrationService registration) : IIdentityService
 {
     public async Task<Result<Guid>> RegisterAsync(string email, string password, string firstName, string lastName)
     {
@@ -23,17 +24,8 @@ public class IdentityService(
             LastName = lastName
         };
 
-        var result = await userManager.CreateAsync(user, password);
-
-        if (!result.Succeeded)
-        {
-            var errors = string.Join(", ", result.Errors.Select(e => e.Description));
-            return Result.Failure<Guid>(new Error("Identity.RegisterFailed", errors));
-        }
-
-        await userManager.AddToRoleAsync(user, Roles.User);
-
-        return Result.Success(user.Id);
+        Result result = await registration.CreateAsync(user, password, Roles.User);
+        return result.IsSuccess ? Result.Success(user.Id) : Result.Failure<Guid>(result.Error);
     }
 
     public async Task<Result<(string AccessToken, string RefreshToken)>> LoginAsync(string email, string password)
