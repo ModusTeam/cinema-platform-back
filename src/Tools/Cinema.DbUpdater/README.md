@@ -39,4 +39,16 @@ Exit codes: `0` means success or up to date, `1` means pending migrations in che
 
 The updater does not delete or recreate the database, seed sample data, or perform a rollback. Repeated runs preserve existing rows when no migration is pending. **A destructive EF migration can still delete or change existing data** when applied, so review new migrations and back up important databases before running them. This tool executes migrations as written.
 
-`Cinema.DbUpdaterScripts` is deferred until there are real SQL scripts to support. The updater currently handles EF migrations only.
+`Cinema.DbUpdaterScripts` is deferred until there are real SQL scripts to support.
+
+## Restage an authoritative customer fact
+
+```powershell
+dotnet run --project src/Tools/Cinema.DbUpdater -- --restage-customer-fact <eventId>
+```
+
+This separate mode does **not** check/apply migrations or run seeds. Apply the source schema through the normal approved migration process first. It reads one immutable `customer_fact_revisions` snapshot and stages that original v1 envelope and MessageId through the scoped EF Bus Outbox. User state, source revision, timestamps and history remain unchanged. It creates no legacy DOB bonus message. Missing evidence/schema returns exit code 2; it never invents a predecessor or a new revision.
+
+Use the intended database connection and the **same** `RabbitMq:Host`, `RabbitMq:Username`, `RabbitMq:Password` and `RabbitMq:VirtualHost` settings as the API delivery host (`RabbitMq__Host`, etc. for environment variables). The destination is the existing `loyalty_ticket_purchased` queue. The tool does not start RabbitMQ delivery, Redis, SMTP or API workers; the running API's existing durable delivery service sends the new outbox record when the broker is available. With no RabbitMQ settings, the isolated local default is localhost with guest credentials; supply explicit matching settings outside that setup.
+
+Repeated restaging intentionally permits duplicate delivery with the same eventId/revision; the passive consumer deduplicates it. It does not reset quarantine budgets or unblock contradictory history. Diagnose missing/blocked/conflicting facts before replay. Never use this tool against a shared/production database without explicit operational approval. Keep credentials and DOB payloads out of command output and logs.

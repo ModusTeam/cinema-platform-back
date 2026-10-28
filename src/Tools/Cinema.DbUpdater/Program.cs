@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
-const string usage = "Usage: Cinema.DbUpdater [--check | --seed | --help]";
+const string usage = "Usage: Cinema.DbUpdater [--check | --seed | --help | --restage-customer-fact <eventId>]";
 
 if (args.Length == 1 && args[0] == "--help")
 {
@@ -13,11 +13,15 @@ if (args.Length == 1 && args[0] == "--help")
     Console.WriteLine("  (no flag)  Apply pending migrations.");
     Console.WriteLine("  --check    List migration status without changing the database.");
     Console.WriteLine("  --seed     Apply migrations, then run configured seed operations.");
+    Console.WriteLine("  --restage-customer-fact <eventId>  Stage retained source history only; no migrations or seeds.");
     Console.WriteLine("Exit codes: 0 = success, 1 = pending migrations in check mode, 2 = error.");
     return 0;
 }
 
-if (args.Length > 1 || args.Length == 1 && args[0] is not ("--check" or "--seed"))
+Guid restageEventId = default;
+bool restageRequested = args.Length == 2 && args[0] == "--restage-customer-fact"
+    && Guid.TryParse(args[1], out restageEventId);
+if (!restageRequested && (args.Length > 1 || args.Length == 1 && args[0] is not ("--check" or "--seed")))
 {
     Console.Error.WriteLine("Invalid arguments.");
     Console.Error.WriteLine(usage);
@@ -87,6 +91,11 @@ catch (Exception)
 string operation = "Database configuration";
 try
 {
+    if (restageRequested)
+    {
+        operation = "Customer fact restaging";
+        return await CustomerFactReplayOperations.RunAsync(connectionString, configuration, restageEventId, logger, cancellation.Token);
+    }
     await using var dataSource = DatabaseContextConfiguration.CreateDataSource(connectionString);
     var options = new DbContextOptionsBuilder<ApplicationDbContext>();
     DatabaseContextConfiguration.Configure(options, dataSource);
