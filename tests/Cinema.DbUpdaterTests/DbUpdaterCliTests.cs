@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Cinema.DbUpdaterTests;
 
-public class DbUpdaterCliTests
+public partial class DbUpdaterCliTests
 {
     [Fact]
     public async Task Seat_Index_Migration_Preserves_Legacy_Pending_Order_And_Valid_Ticket()
