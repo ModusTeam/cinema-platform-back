@@ -123,11 +123,54 @@ public sealed partial class CustomerFactsPostgresTests
         deadline.CancelAfter(TimeSpan.FromSeconds(15));
         while (true)
         {
-            await using NpgsqlCommand query = new("SELECT count(*) FROM pg_stat_activity WHERE datname=@db AND wait_event_type='Lock' AND query ILIKE '%AspNetUsers%'", observer);
+            await using NpgsqlCommand query = new("SELECT count(*) FROM pg_stat_activity WHERE datname=@db AND wait_event_type='Lock' AND (query ILIKE '%AspNetUsers%' OR query ILIKE '%AspNetUserRoles%')", observer);
             query.Parameters.AddWithValue("db", database.Name);
             if (Convert.ToInt32(await query.ExecuteScalarAsync(deadline.Token)) >= expected) return;
             await Task.Delay(20, deadline.Token);
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Concurrent_Password_Or_Role_Update_Cannot_Overwrite_First_Dob_Facts(bool role)
+    {
+        await using ProofDatabase database = await CreateDatabaseAsync();
+        Guid id = Guid.NewGuid();
+        await using (AsyncServiceScope seed = database.Services.CreateAsyncScope())
+        {
+            await CreateUserAndRoleAsync(seed, id);
+            (await seed.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>()
+                .CreateAsync(new IdentityRole<Guid>("Admin"))).Succeeded.Should().BeTrue();
+        }
+        await using AsyncServiceScope dobScope = database.Services.CreateAsyncScope();
+        await using AsyncServiceScope identityScope = database.Services.CreateAsyncScope();
+        UserManager<User> manager = identityScope.ServiceProvider.GetRequiredService<UserManager<User>>();
+        User stale = await manager.FindByIdAsync(id.ToString()) ?? throw new InvalidOperationException();
+        NpgsqlConnectionStringBuilder target = new(database.AdminConnection) { Database = database.Name };
+        await using NpgsqlConnection barrier = new(target.ConnectionString);
+        await barrier.OpenAsync(Cancellation);
+        await using NpgsqlTransaction held = await barrier.BeginTransactionAsync(Cancellation);
+        await using (NpgsqlCommand hold = new("SELECT id FROM \"AspNetUsers\" WHERE id=@id FOR UPDATE", barrier, held))
+        { hold.Parameters.AddWithValue("id", id); await hold.ExecuteNonQueryAsync(Cancellation); }
+        Task<Result> dob = SetDobAsync(dobScope, id, new DateTime(1992, 2, 29), false);
+        Task<IdentityResult> identity = role ? manager.AddToRoleAsync(stale, "Admin")
+            : manager.ChangePasswordAsync(stale, "Proof1!password", "Changed2!password");
+        try { await WaitForUserLockWaitersAsync(database, 2); }
+        finally { await held.RollbackAsync(Cancellation); }
+        (await dob).IsSuccess.Should().BeTrue();
+        IdentityResult identityResult = await identity;
+        if (!identityResult.Succeeded)
+            identityResult.Errors.Should().Contain(error => error.Code == "ConcurrencyFailure");
+        await using AsyncServiceScope verify = database.Services.CreateAsyncScope();
+        ApplicationDbContext db = AssertSharedContext(verify);
+        User user = await db.Users.SingleAsync(Cancellation);
+        user.DateOfBirth.Should().Be(new DateTime(1992, 2, 29, 0, 0, 0, DateTimeKind.Utc));
+        user.DobFirstSetAtUtc.Should().NotBeNull(); user.CustomerFactsRevision.Should().Be(1);
+        (await db.CustomerFactRevisions.CountAsync(Cancellation)).Should().Be(1);
+        UserManager<User> fresh = verify.ServiceProvider.GetRequiredService<UserManager<User>>();
+        if (role) (await fresh.IsInRoleAsync(user, "Admin")).Should().Be(identityResult.Succeeded);
+        else (await fresh.CheckPasswordAsync(user, "Changed2!password")).Should().Be(identityResult.Succeeded);
     }
 
     [Theory]

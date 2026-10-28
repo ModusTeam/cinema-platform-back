@@ -27,6 +27,24 @@ function compose(...args) {
   const result = spawnSync('docker', [...composeArgs, ...args], { stdio: 'inherit', timeout: 90000 });
   if (result.error) throw result.error;
   assert.equal(result.status, 0, `Compose ${args.join(' ')} failed`);
+  // Docker assigns new random published ports when a stopped container starts.
+  // Keep loopback isolation and rediscover endpoints instead of fixing ports.
+  if (args[0] === 'start') {
+    const bindings = [
+      ['cinema-rabbitmq', 5672, 'E2E_RABBIT_URL', 'amqp://guest:guest@'],
+      ['cinema-rabbitmq', 15672, 'E2E_RABBIT_HTTP', 'http://'],
+      ['monolith-api', 8080, 'E2E_MONOLITH_URL', 'http://'],
+      ['loyalty-service', 3000, 'E2E_LOYALTY_URL', 'http://'],
+    ];
+    for (const [service, port, name, prefix] of bindings) {
+      if (!args.includes(service)) continue;
+      const mapped = spawnSync('docker', [...composeArgs, 'port', service, String(port)], { encoding: 'utf8', timeout: 20000 });
+      assert.equal(mapped.status, 0);
+      const address = mapped.stdout.trim();
+      assert.match(address, /^127\.0\.0\.1:\d+$/);
+      process.env[name] = prefix + address;
+    }
+  }
 }
 async function until(check, label, timeout = 45000) {
   const end = Date.now() + timeout;
@@ -72,12 +90,13 @@ async function projection(userId, revision) {
     `customer projection revision ${revision}`);
   const source = (await facts(userId)).find(fact => fact.revision === revision);
   assert.ok(source);
-  const row = (await loyalty.query('SELECT * FROM customer_facts_projections WHERE user_id=$1', [userId])).rows[0];
+  const row = (await loyalty.query('SELECT *,date_of_birth::text AS calendar_dob FROM customer_facts_projections WHERE user_id=$1', [userId])).rows[0];
   const expected = source.envelope.data;
   assert.equal(row.source_event_id, expected.eventId);
   assert.equal(row.registered_at_utc?.toISOString() ?? null, expected.registeredAtUtc);
   assert.equal(row.dob_first_set_at_utc?.toISOString() ?? null, expected.dobFirstSetAtUtc);
   assert.equal(row.occurred_at_utc.toISOString(), expected.occurredAtUtc);
+  assert.equal(row.calendar_dob, expected.dateOfBirth);
 }
 async function finances(userId) {
   const profile = (await loyalty.query('SELECT balance,lifetime_points,year_points,year_visits,tier,gold_upgrade_used_month FROM loyalty_profiles WHERE user_id=$1', [userId])).rows[0];
@@ -195,8 +214,9 @@ try {
   assert.deepEqual((await facts(delayedUser)).map(fact => fact.snapshot), delayed.map(fact => fact.snapshot));
   zeroFinancials(await finances(delayedUser));
 
-  // A real legacy birthday grant remains exactly once even when its actual
-  // producer event and the passive fact are delivered repeatedly.
+  // A real legacy birthday grant remains exactly once after a schema-equivalent
+  // legacy republish and a repeated original passive fact. This is manual
+  // duplicate evidence, separate from the loyalty suite's lost-ACK redelivery.
   const birthdayUser = await register();
   const now = new Date();
   const birthday = `1992-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
