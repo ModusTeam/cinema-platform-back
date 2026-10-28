@@ -2,6 +2,11 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 
+const selection = process.argv.slice(2);
+if (selection.length > 1 || selection.length === 1 && selection[0] !== '--customer-facts')
+  throw new Error('Usage: bun tests/checkout-e2e/run.mjs [--customer-facts]');
+const customerFactsRequested = selection[0] === '--customer-facts';
+
 const project = `loyalty-e2e-${process.pid}`;
 const loyaltyRepo = resolve(process.env.LOYALTY_REPO ?? '../cinema-loyalty-service');
 const env = {
@@ -47,7 +52,7 @@ function endpoint(service, port) {
   return address;
 }
 mkdirSync('.tools/e2e', { recursive: true });
-for (const name of ['transports-results.json', 'transports-logs.txt', 'checkout-evidence.json']) {
+for (const name of ['transports-results.json', 'transports-logs.txt', 'checkout-evidence.json', 'customer-facts-evidence.json']) {
   rmSync(resolve('.tools/e2e', name), { force: true });
 }
 for (const repo of [env.LOYALTY_REPO, env.MONOLITH_REPO]) {
@@ -120,6 +125,8 @@ try {
     '--runInBand', '--json',
     `--outputFile=${resolve('.tools/e2e/transports-results.json')}`], testEnv);
   run('node', [resolve('tests/checkout-e2e/seat-availability.mjs')], testEnv);
+  if (customerFactsRequested)
+    run('node', [resolve('tests/checkout-e2e/customer-facts-probe.mjs')], testEnv);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   const logs = spawnSync(

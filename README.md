@@ -363,6 +363,30 @@ The scheduling service checks for time-slot overlaps within the same hall before
 
 ## 🧪 Testing
 
+### Authoritative customer facts
+
+Customer registration and first-DOB facts use the same scoped `ApplicationDbContext`, Identity stores and MassTransit EF Bus Outbox. The API registration and both new-admin seed paths use `CustomerRegistrationService`; both DOB handlers use `ICustomerFactsWriter`. Ordinary password/name/role changes create no customer revision. Existing accounts retain unknown registration/first-set timestamps; do not backfill them from delivery time or profile creation. A same-date UpdateProfile remains a success without a new fact; SetMyDOB retains its set-once conflict. DOB validators and HTTP aliases keep their existing rules.
+
+Run backend regressions with a disposable pgvector database named `cinema_orders_test_*`, `CINEMA_TEST_POSTGRES_CONNECTION`, isolated `CINEMA_TEST_REDIS_CONNECTION`, and a disposable RabbitMQ at localhost:5672 (credentials via `CINEMA_TEST_RABBITMQ_USERNAME` / `CINEMA_TEST_RABBITMQ_PASSWORD` when needed):
+
+```powershell
+dotnet build Cinema.sln -c Release
+dotnet test Cinema.sln -c Release -- --fail-skips on --timeout 10m
+```
+
+For real cross-service verification, use clean committed backend and loyalty checkouts, Node.js 22, Bun 1.3.13 and Docker. Install loyalty dependencies from its frozen lockfile and generate its Prisma Client first. From backend:
+
+```powershell
+$env:LOYALTY_REPO = "<absolute clean loyalty checkout>"
+bun tests/checkout-e2e/run.mjs --customer-facts
+```
+
+The existing strict checkout and seat-transition tests still run. The opt-in probe adds real HTTP registration/three DOB routes, source-history equality, RabbitMQ outage, actual API delivery-host restart, produced revision 2 before 1, duplicate/conflicting messages, stored-history restaging after outbox cleanup and legacy birthday dedupe. It uses random loopback ports and disposable storage, records exact repository SHAs and evidence under `.tools/e2e`, and removes its own Compose stack in `finally`. It does not prove lost-ACK redelivery: run loyalty `bun run test:rmq` separately at the same loyalty SHA for that controlled post-commit/pre-ACK crash scenario. Run loyalty `MONOLITH_REPO=<clean backend checkout> bun run test:transports` as the separate agreed transport gate. Do not bypass clean-checkout guards or treat fixture payment behavior as a real payment-provider verification.
+
+**Activation order:** deploy the passive `CUSTOMER_FACTS_CHANGED` reader to every loyalty replica first; stop/drain older backend Identity writers; apply the reviewed additive source migration; deploy all upgraded registration/first-DOB writers together. Ensure the intended User/Admin roles through the configured Identity seeder before accepting registrations. Keep existing RabbitMq host/vhost/queue configuration aligned between API and operator tooling. No new birthday/tier/points rules are activated by these facts. An older writer may mutate DOB without authoritative history; after activation, stop mutations and investigate rather than rolling back to older writers while continuing traffic. Do not delete source history or drop/redeclare shared queues as recovery.
+
+Retained-history restaging is documented in [Cinema.DbUpdater](src/Tools/Cinema.DbUpdater/README.md#restage-an-authoritative-customer-fact). Missing source evidence, BLOCKED projections or identity conflicts require diagnosis; replay cannot manufacture a missing revision or clear a conflict. Commit acknowledgement loss remains ambiguous and is inspected from a fresh scope, without automatic replay of the multi-save operation. Delivery is at-least-once, with persistent consumer deduplication.
+
 ### Postman Collection
 A complete automated test suite is included: **Cinema Booking Flow (Auto).postman_collection.json**
 
