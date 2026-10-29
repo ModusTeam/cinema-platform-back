@@ -78,6 +78,8 @@ public static class ConfigureInfrastructureServices
             DatabaseContextConfiguration.Configure(options, dataSource);
         });
 
+        services.AddScoped<SessionCompletionService>();
+        services.AddSingleton<SessionCompletionJob>();
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
 
         return services;

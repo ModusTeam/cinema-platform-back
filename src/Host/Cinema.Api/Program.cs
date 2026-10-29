@@ -2,6 +2,7 @@ using Cinema.Api.Middleware;
 using Cinema.Api.Modules;
 using Cinema.Application.Jobs;
 using Hangfire;
+using Cinema.Infrastructure.Services;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +23,9 @@ await app.SeedIdentityIfEnabledAsync();
 
 app.Services.GetRequiredService<IRecurringJobManager>().AddOrUpdate<CancelExpiredOrdersJob>(
     "cancel-expired-orders", job => job.Process(CancellationToken.None), Cron.Minutely());
+
+app.Services.GetRequiredService<IRecurringJobManager>().AddOrUpdate<SessionCompletionJob>(
+    "complete-sessions", job => job.Process(CancellationToken.None), Cron.Minutely());
 
 app.UseExceptionHandler();
 app.UseSerilogRequestLogging();

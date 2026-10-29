@@ -1,3 +1,5 @@
+using Cinema.Application.Services;
+using Cinema.Domain.Exceptions;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
@@ -11,12 +13,11 @@ namespace Cinema.Application.Sessions.Commands.CancelSession;
 public class CancelSessionCommandHandler(IApplicationDbContext context) 
     : IRequestHandler<CancelSessionCommand, Result>
 {
-    public async Task<Result> Handle(CancelSessionCommand request, CancellationToken ct)
+    public Task<Result> Handle(CancelSessionCommand request, CancellationToken ct)
+        => SessionLifecycleTransaction.ExecuteCommandAsync(context, request.SessionId, async (session, token) =>
     {
+        ct = token;
         var sessionId = new EntityId<Session>(request.SessionId);
-
-        var session = await context.Sessions
-            .FirstOrDefaultAsync(s => s.Id == sessionId, ct);
 
         if (session == null)
         {
@@ -40,9 +41,9 @@ public class CancelSessionCommandHandler(IApplicationDbContext context)
             await context.SaveChangesAsync(ct);
             return Result.Success();
         }
-        catch (Exception ex)
+        catch (DomainException ex)
         {
             return Result.Failure(new Error("Session.CancelFailed", ex.Message));
         }
-    }
+    }, ct);
 }
