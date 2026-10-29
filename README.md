@@ -72,6 +72,69 @@ User, RefreshToken, Order, Ticket, their statuses, and order events keep their e
 
 ## 🚀 Getting Started
 
+### Movie image uploads (Catalog, Stage 1)
+
+`POST /api/movies/images/upload` requires an **Admin** Bearer JWT and
+`multipart/form-data` fields `file` and `kind` (`poster` or `backdrop`). JPEG,
+PNG and WebP signatures are accepted, up to **10,485,760 bytes (10 MB)** per
+image. ASP.NET buffers multipart files to disk above its default memory threshold;
+the request limit allows an additional 64 KB for multipart overhead. Cloudinary
+also validates the image. Client filenames, MIME types and folder paths are not
+used to select the destination or accepted format.
+
+The Catalog Infrastructure project uses `CloudinaryDotNet` **1.29.3** behind
+the scoped `IMovieImageStorage` / `CloudinaryMovieImageStorage` registration.
+Set `Cloudinary:CloudName`, `Cloudinary:ApiKey`, `Cloudinary:ApiSecret` using
+the API project's existing User Secrets, for example (placeholders only):
+
+```powershell
+dotnet user-secrets set --project src/Host/Cinema.Api 'Cloudinary:CloudName' '<cloud-name>'
+dotnet user-secrets set --project src/Host/Cinema.Api 'Cloudinary:ApiKey' '<api-key>'
+dotnet user-secrets set --project src/Host/Cinema.Api 'Cloudinary:ApiSecret' '<api-secret>'
+```
+
+For deployment use `Cloudinary__CloudName`, `Cloudinary__ApiKey`, and
+`Cloudinary__ApiSecret` environment variables or a managed secret store. Never
+put credentials in appsettings or source control. Missing/invalid configuration
+disables uploads with **503**, without blocking startup. Other responses are
+**400** for invalid fields/content or provider-rejected images, **401/403** for
+authentication/role failures, **413** for oversized files, **415** for other
+request content types, **502** for provider/network/credential errors and **504**
+for provider timeouts. Client cancellation propagates. Deployment proxies may
+apply their own request limits.
+
+Success returns `secureUrl`, `publicId`, `assetId`, `width`, `height`, `format`,
+and `bytes` from Cloudinary. The destination is
+`cinema-platform/movies/posters` or `cinema-platform/movies/backdrops`, with
+server-generated unique names and overwriting disabled. Only HTTPS delivery
+URLs are returned. Stage 1 uploads do not create/update movies or persist image
+references; Stage 2 must decide reference persistence, replacement and abandoned
+upload cleanup. TMDB images keep their existing URLs.
+
+After configuring credentials and starting your normal local API/dependencies,
+use a small test PNG and existing local login tokens in environment variables:
+
+```powershell
+$api = 'https://localhost:7146'
+$image = 'C:/Temp/upload-test.png' # supply a small test image
+$invalid = [IO.Path]::GetTempFileName()
+[IO.File]::WriteAllText($invalid, 'not an image')
+curl.exe -i "$api/api/movies/images/upload" -F "file=@$image" -F 'kind=poster' # 401
+curl.exe -i "$api/api/movies/images/upload" -H "Authorization: Bearer $env:USER_JWT" -F "file=@$image" -F 'kind=poster' # 403
+curl.exe -i "$api/api/movies/images/upload" -H "Authorization: Bearer $env:ADMIN_JWT" -F "file=@$invalid;type=image/png" -F 'kind=poster' # 400
+$uploaded = curl.exe -sS --fail-with-body "$api/api/movies/images/upload" -H "Authorization: Bearer $env:ADMIN_JWT" -F "file=@$image" -F 'kind=poster' | ConvertFrom-Json
+Remove-Item -LiteralPath $invalid
+$uploaded
+curl.exe -I --fail $uploaded.secureUrl
+```
+
+Confirm the HTTPS URL resolves, the returned dimensions/format match the test
+image, and `publicId` belongs to the expected folder in the Cloudinary console.
+Then delete **only that test asset** by its returned `publicId` in the console.
+No deletion endpoint is provided. Automated tests use mocked storage/SDK
+boundaries and require no Cloudinary credentials:
+`dotnet test --project tests/Cinema.CatalogTests/Cinema.CatalogTests.csproj`.
+
 ### Prerequisites
 
 - [.NET 10.0 SDK](https://dotnet.microsoft.com/download)

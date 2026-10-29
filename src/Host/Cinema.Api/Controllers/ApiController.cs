@@ -38,6 +38,10 @@ public abstract class ApiController : ControllerBase
     {
         var statusCode = error.Code switch
         {
+            "MovieImage.TooLarge" => StatusCodes.Status413PayloadTooLarge,
+            "MovieImage.Unavailable" => StatusCodes.Status503ServiceUnavailable,
+            "MovieImage.ProviderFailure" => StatusCodes.Status502BadGateway,
+            "MovieImage.Timeout" => StatusCodes.Status504GatewayTimeout,
             "Seat.Locked" => StatusCodes.Status409Conflict,
             "Hall.LayoutLocked" => StatusCodes.Status409Conflict,
             "Hall.Inactive" => StatusCodes.Status409Conflict,
@@ -67,6 +71,10 @@ public abstract class ApiController : ControllerBase
     private static string GetTitle(Error error) =>
         error.Code switch
         {
+            "MovieImage.TooLarge" => "Payload Too Large",
+            "MovieImage.Unavailable" => "Service Unavailable",
+            "MovieImage.ProviderFailure" => "Image Storage Error",
+            "MovieImage.Timeout" => "Image Storage Timeout",
             var code when code.Contains("NotFound") => "Resource Not Found",
             var code when code.Contains("Validation") => "Validation Error",
             "Seat.Locked" => "Conflict",

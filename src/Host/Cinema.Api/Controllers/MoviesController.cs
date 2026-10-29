@@ -1,4 +1,6 @@
 using Cinema.Api.DTOs.Movies;
+using Cinema.Catalog.Application.Common.Models.MovieImages;
+using Cinema.Catalog.Application.Movies.Services;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Catalog.Application.Movies.Commands.CreateMovie;
 using Cinema.Catalog.Application.Movies.Commands.DeleteMovie;
@@ -30,6 +32,28 @@ public class MoviesController : ApiController
     public MoviesController(IBackgroundJobClient backgroundJobClient)
     {
         _backgroundJobClient = backgroundJobClient;
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("images/upload")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(MovieImageUploadService.MaxFileBytes + 64 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MovieImageUploadService.MaxFileBytes + 64 * 1024,
+        ValueCountLimit = 2, ValueLengthLimit = 64, MultipartHeadersLengthLimit = 4096)]
+    [ProducesResponseType(typeof(MovieImageUploadResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status504GatewayTimeout)]
+    public async Task<IActionResult> UploadImage([FromForm] UploadMovieImageRequest request,
+        [FromServices] MovieImageUploadService uploader, CancellationToken ct)
+    {
+        await using Stream? content = request.File?.OpenReadStream();
+        return HandleResult(await uploader.UploadAsync(content, request.Kind, ct));
     }
 
     [Authorize(Roles = "Admin")]
