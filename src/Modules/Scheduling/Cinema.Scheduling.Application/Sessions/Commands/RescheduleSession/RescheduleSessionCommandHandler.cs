@@ -15,12 +15,11 @@ public class RescheduleSessionCommandHandler(
     IApplicationDbContext context) 
     : IRequestHandler<RescheduleSessionCommand, Result>
 {
-    public async Task<Result> Handle(RescheduleSessionCommand request, CancellationToken ct)
+    public Task<Result> Handle(RescheduleSessionCommand request, CancellationToken ct)
+        => SessionLifecycleTransaction.ExecuteAsync(context, request.SessionId, async (session, token) =>
     {
+        ct = token;
         var sessionId = new EntityId<Session>(request.SessionId);
-        
-        var session = await context.Sessions
-            .FirstOrDefaultAsync(s => s.Id == sessionId, ct);
 
         if (session == null)
         {
@@ -57,5 +56,5 @@ public class RescheduleSessionCommandHandler(
             }
             return Result.Failure(new Error("Session.UpdateFailed", ex.Message));
         }
-    }
+    }, ct);
 }

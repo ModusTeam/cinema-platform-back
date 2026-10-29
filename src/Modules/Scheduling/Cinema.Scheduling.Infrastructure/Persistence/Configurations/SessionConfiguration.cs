@@ -64,6 +64,8 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
             .WithMany()
             .HasForeignKey(x => x.PricingId)
             .OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(s => new { s.EndTime, s.Id })
+            .HasFilter("end_time IS NOT NULL AND status IN (0,1,2)");
         builder.HasQueryFilter(s => s.Hall!.IsActive);
         builder.HasIndex(s => new { s.HallId, s.StartTime, s.OccupancyEndTime })
             .HasDatabaseName("IX_Sessions_Hall_Time_Overlap");

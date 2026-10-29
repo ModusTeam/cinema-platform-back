@@ -14,8 +14,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Cinema.OrdersTests\PostgresSchemaTemplate.cs" Link="Infrastructure\PostgresSchemaTemplate.cs" />
+    <ProjectReference Include="..\..\src\Modules\Orders\Cinema.Orders.Application\Cinema.Orders.Application.csproj" />
     <ProjectReference Include="..\..\src\Cinema.Infrastructure\Cinema.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Modules\Tickets\Cinema.Tickets.Domain\Cinema.Tickets.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Scheduling\Cinema.Scheduling.Application\Cinema.Scheduling.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures/session-completed-v1.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

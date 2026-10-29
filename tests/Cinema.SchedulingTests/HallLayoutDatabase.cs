@@ -17,6 +17,7 @@ internal sealed class HallLayoutDatabase : IAsyncDisposable
     private readonly string _connectionString;
     private readonly string _adminConnectionString;
     private readonly string _databaseName;
+    internal string ConnectionString => _connectionString;
     public Hall Hall { get; private set; } = null!;
     public SeatType Standard { get; private set; } = null!;
     public SeatType Premium { get; private set; } = null!;

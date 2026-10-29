@@ -2,7 +2,7 @@
 
 Scheduling owns sessions, halls, technologies, physical seats and seat types, pricing policies, and their EF configurations. Its domain assembly references Catalog.Domain to preserve `Session.Movie` in the shared EF model. Catalog has no direct reference to Scheduling.
 
-The moved domain and application types keep their existing CLR namespaces while migrations, API contracts, and any external serialized type names still rely on them. Assembly ownership changed; persisted assembly-qualified names for Scheduling types should be checked before deployment if external Hangfire jobs exist. No Scheduling Hangfire jobs are registered in this repository.
+The moved domain and application types keep their existing CLR namespaces while migrations, API contracts, and any external serialized type names still rely on them. Assembly ownership changed; persisted assembly-qualified names for Scheduling types should be checked before deployment if external Hangfire jobs exist. SessionCompletionJob is registered as a minute-level recurring Hangfire scanner.
 
 `Scheduling.Application` temporarily uses the legacy `IApplicationDbContext` and booking-facing interfaces for session detail composition. The shared `ApplicationDbContext` remains in `Cinema.Infrastructure`, loads Scheduling configurations explicitly, and retains the migration assembly and database schema. The existing UTC converter now lives with Scheduling infrastructure and is reused by the shared context and legacy configurations. These dependencies should be revisited when persistence boundaries are extracted.
 
@@ -47,3 +47,24 @@ The policy covers retained history; physically purged sessions cannot be inferre
 `Cinema.SchedulingTests` includes pure validation/domain/pipeline regressions and real PostgreSQL replacement, rollback, history, seat-type and two-order concurrency tests. PostgreSQL tests reuse the existing disposable `cinema_orders_test_*` fixture via `CINEMA_TEST_POSTGRES_CONNECTION`; missing infrastructure is reported as skipped, and CI uses `--fail-skips on`.
 
 The SonarQube job provisions PostgreSQL, Redis, and RabbitMQ as in `.NET CI`, collects Microsoft XML coverage with `dotnet-coverage` between scanner Begin/End, and imports `coverage.xml` using `sonar.cs.vscoveragexml.reportsPaths`. Test projects and generated source are excluded from production coverage metrics. The existing quality gate remains authoritative; importing a report does not itself establish 80% coverage.
+
+
+## Authoritative session completion v1
+
+`SessionCompletionJob` scans up to 50 due sessions per tick in `(end_time, id)` order. A singleton keyset cursor advances even on failures and wraps on an empty page. It is a fairness hint, not durable business state: after a restart all still-eligible rows remain discoverable. A fresh scoped context is used for every attempt. Null screening ends remain unknown; inactive halls do not hide completion candidates. No paid order is required.
+
+Completion, ordinary cancellation and rescheduling use a short READ COMMITTED transaction, Hall UPDATE then Session UPDATE locks, and a 3-second lock timeout. State is reloaded after arbitration. Reservation takes Session SHARE before seat locks, checks availability while holding it, and does not take Hall UPDATE. This closes the demonstrated race where booking could commit after cancellation. Checkout/payment network flows are unchanged. The lifecycle execution strategy has zero callback retries; global Npgsql retries remain enabled. After an ambiguous commit, discard the scope and inspect source state from a new context; never assume rollback or replay the callback.
+
+**Business policy awaiting explicit acceptance before merge:** ordinary cancellation is rejected at or after the original StartTime, regardless of scanner lag. Existing Reserved/Valid/Used ticket restrictions remain. Rescheduling after the original start remains prohibited. Technical interruption/corrections after start need a future audited process; this PR creates no such endpoint.
+
+Ended transition, immutable `session_completion_facts` snapshot and scoped MassTransit EF Bus Outbox record commit together. `ISendEndpointProvider.Send` stages through `UseBusOutbox`; it does not perform broker I/O under lifecycle locks. EventId is generated once, used as transport MessageId and retained with revision 1. The raw envelope is `SESSION_COMPLETED` v1, session-scoped, with UTC `completedAtUtc` formatted to six fractional digits from persisted screening EndTime. OccupancyEndTime and worker time are never substituted. Exact source snapshots survive normal outbox retention. Normal EF update/delete of source history is rejected.
+
+An Ended session without source evidence raises `SESSION_COMPLETION_SOURCE_MISSING` when explicitly checked; no fact is invented. Scanner failures log only SessionId and static code, never exception payloads. Inspect failures operationally; the scanner is not an audited correction mechanism.
+
+### Rollout and replay
+
+Apply the additive source-table/due-index migration only to the intended database, then run the producer only after the passive Loyalty consumer is present on every replica. This development project has no historical completion backfill. The sessions index is an ordinary CREATE INDEX: assess write blocking separately before applying on a large database. No production safety claim follows from disposable tests. Rolling back the schema deletes source evidence; stop the job and retain evidence before any explicitly approved rollback.
+
+There is no operator restaging command in this slice. After transport retention cleanup the original event remains in source history, but recovery requires a separately reviewed restaging operation that reads the exact stored snapshot and retains EventId/MessageId. Do not create a new completion identity or mutate the snapshot. Future correction revisions and automated repair are excluded.
+
+Tests include production serialization against fixtures copied verbatim from Loyalty `87b9caac7ba452eab0586ceee779b45cef491239`, real PostgreSQL lock barriers/rollback, multi-batch poison-row progression, and real RabbitMQ delivery from a restarted outbox publisher. Manual wire duplicates are not lost-ACK proof. The full cross-service E2E and process-kill/broker-restart fault matrix remain independent verification work; no new loyalty economy is activated.

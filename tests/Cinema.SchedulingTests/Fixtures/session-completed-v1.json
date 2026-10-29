@@ -1,0 +1,42 @@
+[
+  {
+    "pattern": "SESSION_COMPLETED",
+    "data": {
+      "schemaVersion": 1,
+      "eventId": "abcdef12-3456-4789-abcd-123456789abc",
+      "sessionId": "12345678-abcd-4123-abcd-123456789abc",
+      "revision": 1,
+      "completedAtUtc": "2024-02-29T23:59:59.123456Z"
+    }
+  },
+  {
+    "pattern": "SESSION_COMPLETED",
+    "data": {
+      "schemaVersion": 1,
+      "eventId": "abcdef12-3456-4789-abcd-123456789abd",
+      "sessionId": "12345678-abcd-4123-abcd-123456789abd",
+      "revision": 1,
+      "completedAtUtc": "2024-02-29T23:59:59.123457Z"
+    }
+  },
+  {
+    "pattern": "SESSION_COMPLETED",
+    "data": {
+      "schemaVersion": 1,
+      "eventId": "abcdef12-3456-4789-abcd-123456789abe",
+      "sessionId": "12345678-abcd-4123-abcd-123456789abe",
+      "revision": 1,
+      "completedAtUtc": "0001-01-01T00:00:00.000001Z"
+    }
+  },
+  {
+    "pattern": "SESSION_COMPLETED",
+    "data": {
+      "schemaVersion": 1,
+      "eventId": "abcdef12-3456-4789-abcd-123456789abf",
+      "sessionId": "12345678-abcd-4123-abcd-123456789abf",
+      "revision": 1,
+      "completedAtUtc": "9999-12-31T23:59:59.999999Z"
+    }
+  }
+]

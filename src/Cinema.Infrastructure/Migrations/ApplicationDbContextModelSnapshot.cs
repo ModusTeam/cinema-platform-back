@@ -592,12 +592,53 @@ namespace Cinema.Infrastructure.Migrations
                     b.HasIndex("PricingId")
                         .HasDatabaseName("ix_sessions_pricing_id");
 
+                    b.HasIndex("EndTime", "Id")
+                        .HasDatabaseName("ix_sessions_end_time_id")
+                        .HasFilter("end_time IS NOT NULL AND status IN (0,1,2)");
+
                     b.HasIndex("HallId", "StartTime", "OccupancyEndTime")
                         .HasDatabaseName("IX_Sessions_Hall_Time_Overlap");
 
                     b.ToTable("sessions", null, t =>
                         {
                             t.HasCheckConstraint("session_screening_end_valid", "end_time IS NULL OR (end_time > start_time AND end_time <= occupancy_end_time)");
+                        });
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.SessionCompletionFact", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<DateTime>("CompletedAtUtc")
+                        .HasPrecision(6)
+                        .HasColumnType("timestamp(6) with time zone")
+                        .HasColumnName("completed_at_utc");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("Snapshot")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("snapshot");
+
+                    b.HasKey("EventId")
+                        .HasName("pk_session_completion_facts");
+
+                    b.HasIndex("SessionId", "Revision")
+                        .IsUnique()
+                        .HasDatabaseName("ix_session_completion_facts_session_id_revision");
+
+                    b.ToTable("session_completion_facts", null, t =>
+                        {
+                            t.HasCheckConstraint("session_completion_v1", "revision = 1");
                         });
                 });
 
@@ -1389,6 +1430,16 @@ namespace Cinema.Infrastructure.Migrations
                     b.Navigation("Movie");
 
                     b.Navigation("Pricing");
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.SessionCompletionFact", b =>
+                {
+                    b.HasOne("Cinema.Domain.Entities.Session", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_session_completion_facts_sessions_session_id");
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.Ticket", b =>

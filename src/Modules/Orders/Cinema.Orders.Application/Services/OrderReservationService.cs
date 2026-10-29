@@ -25,6 +25,10 @@ public class OrderReservationService(
             using var transaction = await context.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
             try
             {
+                await context.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '3s'", ct);
+                // Arbitration with lifecycle: Session SHARE -> Seats. No Hall lock here.
+                await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT id FROM sessions WHERE id = {sessionId} FOR SHARE", ct);
                 var rawSeatIds = seatIds.ToArray();
                 
                 var seats = await context.Seats

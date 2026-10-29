@@ -90,6 +90,16 @@ public class Session
         );
     }
 
+    public bool TryComplete(DateTime cutoffUtc)
+    {
+        if (cutoffUtc.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("UTC cutoff required", nameof(cutoffUtc));
+        if (Status is not (SessionStatus.Scheduled or SessionStatus.OpenForSales or SessionStatus.SoldOut) ||
+            EndTime is not { } end || end > cutoffUtc) return false;
+        Status = SessionStatus.Ended;
+        return true;
+    }
+
     public void SetLoyaltyPaymentAllowed(bool isAllowed)
     {
         IsLoyaltyPaymentAllowed = isAllowed;
@@ -103,9 +113,9 @@ public class Session
         {
             throw new DomainException("Cannot cancel a session that has already ended.");
         }
-        if (StartTime < cancellationTime && OccupancyEndTime > cancellationTime)
+        if (StartTime <= cancellationTime)
         {
-             throw new DomainException("Cannot cancel a session that is currently running.");
+             throw new DomainException("Cannot cancel a session that has already started.");
         }
 
         Status = SessionStatus.Cancelled;

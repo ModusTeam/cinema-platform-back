@@ -39,12 +39,14 @@ public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext>
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        ValidateSessionCompletionWrites();
         ValidateCustomerFactsWrites();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        ValidateSessionCompletionWrites();
         ValidateCustomerFactsWrites();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
