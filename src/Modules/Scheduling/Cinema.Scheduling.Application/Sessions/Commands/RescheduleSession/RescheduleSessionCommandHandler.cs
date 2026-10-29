@@ -3,6 +3,7 @@ using Cinema.Application.Services;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
 using Cinema.Domain.Enums;
+using Cinema.Domain.Exceptions;
 using Cinema.Domain.Shared;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -42,6 +43,10 @@ public class RescheduleSessionCommandHandler(
             await context.SaveChangesAsync(ct);
             
             return Result.Success();
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure(new Error("Session.CannotReschedule", ex.Message));
         }
         catch (DbUpdateException ex)
         {

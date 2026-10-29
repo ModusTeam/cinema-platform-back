@@ -136,9 +136,10 @@ public class ApplicationDbContextInitializer
 
             var sessionId = EntityId<Session>.New();
             var startTime = DateTime.UtcNow.AddDays(1).AddHours(18);
-            var endTime = startTime.AddMinutes(166);
+            var endTime = startTime.AddMinutes(movie.DurationMinutes);
             
-            var session = Session.Create(sessionId, startTime, endTime, movie.Id, hallId, pricingId);
+            var session = Session.Create(sessionId, startTime, endTime, movie.Id, hallId, pricingId,
+                occupancyEndTime: endTime.AddMinutes(15));
             _context.Sessions.Add(session);
 
             await _context.SaveChangesAsync(CancellationToken.None);
