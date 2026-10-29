@@ -68,7 +68,12 @@ public partial class DbUpdaterCliTests
                     two_factor_enabled, lockout_enabled, access_failed_count)
                 VALUES ({userId}, {$"migration-{suffix}"}, false, false, false, false, 0)
                 """, TestContext.Current.CancellationToken);
-            context.Movies.Add(movie);
+            // The pinned schema predates managed image IDs; seed only its movie columns.
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO movies (id,title,description,duration_minutes,release_year,rating,status,is_deleted)
+                VALUES ({movie.Id.Value},{movie.Title},{movie.Description},{movie.DurationMinutes},
+                    {movie.ReleaseYear},{movie.Rating},{(int)movie.Status},{movie.IsDeleted})
+                """, TestContext.Current.CancellationToken);
             context.Halls.Add(hall);
             context.SeatTypes.Add(seatType);
             context.Pricings.Add(pricing);
@@ -111,6 +116,17 @@ public partial class DbUpdaterCliTests
             string indexDefinition = await ScalarAsync<string>(connectionString,
                 "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_tickets_session_id_seat_id'");
             Assert.Contains("ticket_status = ANY (ARRAY[0, 1, 3])", indexDefinition);
+
+            Movie migratedMovie = await context.Movies.SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(movie.Id, migratedMovie.Id);
+            Assert.Null(migratedMovie.PosterPublicId);
+            Assert.Null(migratedMovie.BackdropPublicId);
+            migratedMovie.SetPoster("https://res.cloudinary.com/test/image/upload/poster.png", "test/poster");
+            migratedMovie.SetBackdrop("https://res.cloudinary.com/test/image/upload/backdrop.png", "test/backdrop");
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            Movie reloadedMovie = await context.Movies.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal("test/poster", reloadedMovie.PosterPublicId);
+            Assert.Equal("test/backdrop", reloadedMovie.BackdropPublicId);
 
             Order competing = Order.New(EntityId<Order>.New(), 50m, userId, session.Id);
             context.Orders.Add(competing);

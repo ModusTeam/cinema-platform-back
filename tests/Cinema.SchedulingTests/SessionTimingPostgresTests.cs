@@ -128,7 +128,12 @@ public class SessionTimingPostgresTests(PostgresSchemaTemplate template) : IClas
                     Movie movie = Movie.CreateManual("Timing", "Test", 90, 2026, MovieStatus.ComingSoon);
                     Hall hall = Hall.Create(EntityId<Hall>.New(), "Timing");
                     Pricing pricing = Pricing.New(EntityId<Pricing>.New(), "Timing");
-                    context.Movies.Add(movie);
+                    // The pinned schema predates managed image IDs; seed only its movie columns.
+                    await context.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO movies (id,title,description,duration_minutes,release_year,rating,status,is_deleted)
+                        VALUES ({movie.Id.Value},{movie.Title},{movie.Description},{movie.DurationMinutes},
+                            {movie.ReleaseYear},{movie.Rating},{(int)movie.Status},{movie.IsDeleted})
+                        """, Ct);
                     context.Halls.Add(hall);
                     context.Pricings.Add(pricing);
                     await context.SaveChangesAsync(Ct);

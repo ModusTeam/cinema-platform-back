@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
+      CINEMA_CATALOG_TEST_CONNECTION: Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=postgres_password
       CINEMA_TEST_POSTGRES_CONNECTION: Host=localhost;Port=5432;Database=cinema_orders_test_sonar;Username=postgres;Password=postgres_password
       CINEMA_TEST_REDIS_CONNECTION: localhost:6379
       CINEMA_TEST_RABBITMQ_USERNAME: cinema_test

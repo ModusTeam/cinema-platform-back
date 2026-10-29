@@ -6,7 +6,7 @@ namespace Cinema.Catalog.Domain.Entities;
 
 public class MovieCastMember
 {
-    public int ExternalId { get; set; }
+    public int? ExternalId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Role { get; set; }
     public string? PhotoUrl { get; set; }
@@ -24,6 +24,8 @@ public class Movie : BaseEntity
     
     public string? PosterUrl { get; private set; }
     public string? BackdropUrl { get; private set; }
+    public string? PosterPublicId { get; private set; }
+    public string? BackdropPublicId { get; private set; }
     public string? TrailerUrl { get; private set; }
     
     public MovieStatus Status { get; private set; } = MovieStatus.ComingSoon;
@@ -33,7 +35,7 @@ public class Movie : BaseEntity
     public List<MovieCastMember> Cast { get; private set; } = [];
 
     /// <summary>
-    /// Replaces the full cast list. Intended for use during import/sync only.
+    /// Replaces the full cast list for manual entry or import/sync.
     /// </summary>
     public void SetCast(IEnumerable<MovieCastMember> cast)
     {
@@ -50,7 +52,10 @@ public class Movie : BaseEntity
         string description,
         int durationMinutes,
         int releaseYear,
-        MovieStatus status)
+        MovieStatus status,
+        decimal? rating = null,
+        string? ageRestriction = null,
+        string? trailerUrl = null)
     {
         var movie = new Movie
         {
@@ -61,7 +66,9 @@ public class Movie : BaseEntity
             ReleaseYear = releaseYear,
             Status = status,
             ExternalId = null,
-            Rating = 0
+            Rating = rating ?? 0,
+            AgeRestriction = ageRestriction,
+            TrailerUrl = trailerUrl
         };
 
         return movie;
@@ -82,6 +89,14 @@ public class Movie : BaseEntity
         IsDeleted = false;
     }
     
+    public void ReplaceGenres(IEnumerable<Genre> genres)
+    {
+        List<Genre> selected = genres.ToList();
+        foreach (MovieGenre association in MovieGenres.Where(link => selected.All(genre => genre.Id != link.GenreId)).ToList())
+            MovieGenres.Remove(association);
+        foreach (Genre genre in selected) AddGenre(genre);
+    }
+
     public void ClearGenres()
     {
         MovieGenres.Clear();
@@ -160,6 +175,8 @@ public class Movie : BaseEntity
         ReleaseYear = releaseDate?.Year ?? DateTime.UtcNow.Year;
         PosterUrl = posterUrl;
         BackdropUrl = backdropUrl;
+        PosterPublicId = null;
+        BackdropPublicId = null;
         TrailerUrl = trailerUrl;
         AgeRestriction = ageRestriction;
     }
@@ -185,10 +202,24 @@ public class Movie : BaseEntity
 
     public void UpdateImages(string? posterUrl, string? backdropUrl, string? trailerUrl)
     {
-        PosterUrl = posterUrl;
-        BackdropUrl = backdropUrl;
-        TrailerUrl = trailerUrl;
+        SetPoster(posterUrl, posterUrl == PosterUrl ? PosterPublicId : null);
+        SetBackdrop(backdropUrl, backdropUrl == BackdropUrl ? BackdropPublicId : null);
+        SetTrailer(trailerUrl);
     }
+
+    public void SetPoster(string? url, string? publicId)
+    {
+        PosterUrl = url;
+        PosterPublicId = publicId;
+    }
+
+    public void SetBackdrop(string? url, string? publicId)
+    {
+        BackdropUrl = url;
+        BackdropPublicId = publicId;
+    }
+
+    public void SetTrailer(string? url) => TrailerUrl = url;
     
     public void UpdateSpecs(string? description, int? durationMinutes, decimal? rating, int? releaseYear)
     {

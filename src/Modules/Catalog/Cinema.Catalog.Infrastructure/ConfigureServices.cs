@@ -14,6 +14,12 @@ public static class ConfigureServices
 {
     public static IServiceCollection AddCatalogInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
+        // Validate on first use so missing optional storage credentials do not block the host.
+        services.AddOptions<CloudinaryOptions>()
+            .Bind(configuration.GetSection(CloudinaryOptions.SectionName))
+            .ValidateDataAnnotations();
+        services.AddScoped<IMovieImageStorage, CloudinaryMovieImageStorage>();
+
         services.AddOptions<TmdbSettings>()
             .Bind(configuration.GetSection(TmdbSettings.SectionName))
             .ValidateDataAnnotations()

@@ -4,6 +4,7 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
+    <PackageVersion Include="CloudinaryDotNet" Version="1.29.3" />
     <PackageVersion Include="EFCore.NamingConventions" Version="9.0.0" />
     <PackageVersion Include="FluentEmail.Smtp" Version="3.0.2" />
     <PackageVersion Include="FluentValidation" Version="12.1.1" />

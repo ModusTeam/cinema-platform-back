@@ -18,6 +18,8 @@ public static class ConfigureServices
         TypeAdapterConfig.GlobalSettings.Scan(assembly);
         TypeAdapterConfig.GlobalSettings.Compile();
         services.AddScoped<IMovieTmdbSyncService, MovieTmdbSyncService>();
+        services.AddScoped<MovieImageUploadService>();
+        services.AddScoped<ManualMovieReferences>();
         return services;
     }
 }

@@ -9,6 +9,7 @@
     <ProjectReference Include="..\Cinema.Catalog.Application\Cinema.Catalog.Application.csproj" />
     <ProjectReference Include="..\..\..\Cinema.Application\Cinema.Application.csproj" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="CloudinaryDotNet" />
     <PackageReference Include="Refit.HttpClientFactory" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
     <PackageReference Include="Pgvector.EntityFrameworkCore" />

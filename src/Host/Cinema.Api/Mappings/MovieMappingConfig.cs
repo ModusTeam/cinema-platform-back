@@ -21,7 +21,8 @@ public class MovieMappingConfig : IRegister
             .Map(dest => dest.Genres,       src => src.MovieGenres != null 
                 ? src.MovieGenres.Where(mg => mg.Genre != null).Select(mg => mg.Genre!.Name).ToList() 
                 : new List<string>())
-            .Map(dest => dest.Cast,         src => src.Cast);
+            .Map(dest => dest.Cast,         src => src.Cast)
+            .Map(dest => dest.GenreIds,     src => src.MovieGenres.Select(mg => mg.GenreId.Value).ToList());
 
         config.NewConfig<Movie, MovieListDto>()
             .Map(dest => dest.Id,             src => src.Id.Value)

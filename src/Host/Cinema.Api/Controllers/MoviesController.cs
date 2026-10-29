@@ -1,4 +1,7 @@
 using Cinema.Api.DTOs.Movies;
+using Cinema.Api.Filters;
+using Cinema.Catalog.Application.Common.Models.MovieImages;
+using Cinema.Catalog.Application.Movies.Services;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Catalog.Application.Movies.Commands.CreateMovie;
 using Cinema.Catalog.Application.Movies.Commands.DeleteMovie;
@@ -33,6 +36,28 @@ public class MoviesController : ApiController
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpPost("images/upload")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(MovieImageUploadService.MaxFileBytes + 64 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MovieImageUploadService.MaxFileBytes + 64 * 1024,
+        ValueCountLimit = 2, ValueLengthLimit = 64, MultipartHeadersLengthLimit = 4096)]
+    [ProducesResponseType(typeof(MovieImageUploadResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status504GatewayTimeout)]
+    public async Task<IActionResult> UploadImage([FromForm] UploadMovieImageRequest request,
+        [FromServices] MovieImageUploadService uploader, CancellationToken ct)
+    {
+        await using Stream? content = request.File?.OpenReadStream();
+        return HandleResult(await uploader.UploadAsync(content, request.Kind, ct));
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpGet("tmdb-search")]
     public async Task<IActionResult> SearchTmdb([FromQuery] string query)
     {
@@ -42,6 +67,7 @@ public class MoviesController : ApiController
     
     [Authorize(Roles = "Admin")]
     [HttpPost]
+    [ServiceFilter(typeof(MovieCacheInvalidationFilter))]
     public async Task<IActionResult> Create([FromBody] CreateMovieCommand command)
     {
         return HandleResult(await Mediator.Send(command));
@@ -60,7 +86,7 @@ public class MoviesController : ApiController
     }
     
     [HttpGet]
-    [OutputCache(Duration = 60, VaryByQueryKeys = new[] { "pageNumber", "pageSize", "searchTerm", "genreId" })]
+    [OutputCache(Tags = new[] { MovieCacheInvalidationFilter.CacheTag }, Duration = 60, VaryByQueryKeys = new[] { "pageNumber", "pageSize", "searchTerm", "genreId" })]
     public async Task<ActionResult<PaginatedList<MovieListDto>>> GetMovies([FromQuery] GetMoviesWithPaginationQuery query)
     {
         var result = await Mediator.Send(query);
@@ -91,6 +117,7 @@ public class MoviesController : ApiController
     
     [Authorize(Roles = "Admin")]
     [HttpPatch("{id:guid}/title")]
+    [ServiceFilter(typeof(MovieCacheInvalidationFilter))]
     public async Task<IActionResult> RenameMovie(Guid id, [FromBody] RenameMovieDto dto)
     {
         return HandleResult(await Mediator.Send(new RenameMovieCommand(id, dto.Title)));
@@ -98,22 +125,28 @@ public class MoviesController : ApiController
     
     [Authorize(Roles = "Admin")]
     [HttpPatch("{id:guid}/images")]
+    [ServiceFilter(typeof(MovieCacheInvalidationFilter))]
     public async Task<IActionResult> UpdateImages(Guid id, [FromBody] UpdateMovieImagesDto dto)
     {
         return HandleResult(await Mediator.Send(
-            new UpdateMovieImagesCommand(id, dto.PosterUrl, dto.BackdropUrl, dto.TrailerUrl)));
+            new UpdateMovieImagesCommand(id, dto.PosterUrl, dto.BackdropUrl, dto.TrailerUrl,
+                dto.Poster, dto.Backdrop, dto.HasPoster, dto.HasBackdrop,
+                dto.HasPosterUrl, dto.HasBackdropUrl, dto.HasTrailerUrl)));
     }
     
     [Authorize(Roles = "Admin")]
     [HttpPatch("{id:guid}/details")]
+    [ServiceFilter(typeof(MovieCacheInvalidationFilter))]
     public async Task<IActionResult> UpdateDetails(Guid id, [FromBody] UpdateMovieDetailsDto dto)
     {
         return HandleResult(await Mediator.Send(
-            new UpdateMovieDetailsCommand(id, dto.Description, dto.DurationMinutes, dto.Rating, dto.ReleaseYear)));
+            new UpdateMovieDetailsCommand(id, dto.Description, dto.DurationMinutes, dto.Rating, dto.ReleaseYear,
+                dto.GenreIds, dto.AgeRestriction, dto.HasAgeRestriction, dto.Cast)));
     }
     
     [Authorize(Roles = "Admin")]
     [HttpPatch("{id:guid}/status")]
+    [ServiceFilter(typeof(MovieCacheInvalidationFilter))]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] MovieStatus status)
     {
         return HandleResult(await Mediator.Send(new UpdateMovieStatusCommand(id, status)));
@@ -128,6 +161,7 @@ public class MoviesController : ApiController
     }
     [Authorize(Roles = "Admin")]
     [HttpDelete("{id:guid}")]
+    [ServiceFilter(typeof(MovieCacheInvalidationFilter))]
     public async Task<IActionResult> Delete(Guid id)
     {
         return HandleResult(await Mediator.Send(new DeleteMovieCommand(id)));
@@ -153,6 +187,7 @@ public class MoviesController : ApiController
 
     [Authorize(Roles = "Admin")]
     [HttpPost("{id:guid}/restore")]
+    [ServiceFilter(typeof(MovieCacheInvalidationFilter))]
     public async Task<IActionResult> Restore(Guid id)
     {
         return HandleResult(await Mediator.Send(new RestoreMovieCommand(id)));
