@@ -14,7 +14,8 @@ namespace Cinema.Catalog.Infrastructure.Services;
 public sealed class CloudinaryMovieImageStorage(
     IOptions<CloudinaryOptions> options,
     ILogger<CloudinaryMovieImageStorage> logger,
-    ICloudinaryUploadApi? uploadApi = null) : IMovieImageStorage
+    ICloudinaryUploadApi? uploadApi = null,
+    ICloudinaryAdminApi? adminApi = null) : IMovieImageStorage
 {
     public async Task<Result<MovieImageUploadResult>> UploadAsync(MovieImageUpload image, CancellationToken ct)
     {
@@ -31,12 +32,7 @@ public sealed class CloudinaryMovieImageStorage(
             return Result.Failure<MovieImageUploadResult>(MovieImageErrors.Unavailable);
         }
 
-        string folder = image.Kind switch
-        {
-            MovieImageKind.Poster => "cinema-platform/movies/posters",
-            MovieImageKind.Backdrop => "cinema-platform/movies/backdrops",
-            _ => string.Empty
-        };
+        string folder = GetFolder(image.Kind);
         if (folder.Length == 0)
             return Result.Failure<MovieImageUploadResult>(MovieImageErrors.InvalidKind);
 
@@ -98,6 +94,67 @@ public sealed class CloudinaryMovieImageStorage(
             // Provider exception messages may contain signed request details.
             logger.LogWarning("Movie image storage request failed. Exception type: {ExceptionType}", exception.GetType().Name);
             return Result.Failure<MovieImageUploadResult>(MovieImageErrors.ProviderFailure);
+        }
+    }
+
+    private static string GetFolder(MovieImageKind kind) => kind switch
+    {
+        MovieImageKind.Poster => "cinema-platform/movies/posters",
+        MovieImageKind.Backdrop => "cinema-platform/movies/backdrops",
+        _ => string.Empty
+    };
+
+    public async Task<Result> ValidateReferenceAsync(MovieImageReference image, MovieImageKind kind, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        string folder = GetFolder(kind);
+        string prefix = folder + "/";
+        if (folder.Length == 0 || image.PublicId is null || image.PublicId.Length > 255 ||
+            !image.PublicId.StartsWith(prefix, StringComparison.Ordinal) ||
+            !Guid.TryParseExact(image.PublicId[prefix.Length..], "N", out _) ||
+            image.SecureUrl is null || image.SecureUrl.Length > 500)
+            return Result.Failure(MovieImageErrors.InvalidReference);
+
+        CloudinaryOptions settings;
+        try { settings = options.Value; }
+        catch (OptionsValidationException) { return Result.Failure(MovieImageErrors.Unavailable); }
+
+        if (!Uri.TryCreate(image.SecureUrl, UriKind.Absolute, out Uri? url) ||
+            url.Scheme != "https" || url.Host != "res.cloudinary.com" || !url.IsDefaultPort ||
+            !string.IsNullOrEmpty(url.UserInfo) || !string.IsNullOrEmpty(url.Query) ||
+            !string.IsNullOrEmpty(url.Fragment) ||
+            !url.AbsolutePath.StartsWith($"/{settings.CloudName}/image/upload/", StringComparison.Ordinal))
+            return Result.Failure(MovieImageErrors.InvalidReference);
+
+        try
+        {
+            ICloudinaryAdminApi client = adminApi ?? CreateClient(settings);
+            GetResourceResult resource = await client.GetResourceAsync(new GetResourceParams(image.PublicId)
+            {
+                ResourceType = ResourceType.Image,
+                Type = "upload"
+            }, ct);
+            ct.ThrowIfCancellationRequested();
+            if (resource.StatusCode == HttpStatusCode.NotFound)
+                return Result.Failure(MovieImageErrors.InvalidReference);
+            if (resource.Error is not null || (int)resource.StatusCode is < 200 or >= 300)
+                return Result.Failure(MovieImageErrors.ProviderFailure);
+            if (resource.PublicId != image.PublicId || resource.ResourceType != ResourceType.Image ||
+                resource.Type != "upload" || resource.SecureUrl != image.SecureUrl ||
+                resource.Width <= 0 || resource.Height <= 0 || resource.Bytes <= 0 ||
+                resource.Format is not ("jpg" or "jpeg" or "png" or "webp"))
+                return Result.Failure(MovieImageErrors.InvalidReference);
+            return Result.Success();
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return Result.Failure(MovieImageErrors.Timeout);
+        }
+        catch (TimeoutException) { return Result.Failure(MovieImageErrors.Timeout); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogWarning("Movie image verification failed. Exception type: {ExceptionType}", exception.GetType().Name);
+            return Result.Failure(MovieImageErrors.ProviderFailure);
         }
     }
 

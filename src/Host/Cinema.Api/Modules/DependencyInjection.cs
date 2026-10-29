@@ -68,6 +68,7 @@ public static class DependencyInjection
 
 
         services.AddOutputCache(ConfigureOutputCaching);
+        services.AddScoped<Cinema.Api.Filters.MovieCacheInvalidationFilter>();
         
         services.AddStackExchangeRedisOutputCache(options =>
         {

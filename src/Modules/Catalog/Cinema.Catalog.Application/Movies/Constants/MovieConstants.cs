@@ -6,6 +6,7 @@ namespace Cinema.Catalog.Application.Movies.Constants;
 /// </summary>
 public static class MovieConstants
 {
+    public const int MaxDurationMinutes = 600;
     /// <summary>Maximum number of cast members to import per movie from TMDB.</summary>
     public const int MaxImportedCastMembers = 12;
 

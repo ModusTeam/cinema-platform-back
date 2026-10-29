@@ -66,6 +66,11 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("character varying(10)")
                         .HasColumnName("age_restriction");
 
+                    b.Property<string>("BackdropPublicId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("backdrop_public_id");
+
                     b.Property<string>("BackdropUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -91,6 +96,11 @@ namespace Cinema.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
+
+                    b.Property<string>("PosterPublicId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("poster_public_id");
 
                     b.Property<string>("PosterUrl")
                         .HasMaxLength(500)
@@ -1177,7 +1187,7 @@ namespace Cinema.Infrastructure.Migrations
                                 .ValueGeneratedOnAdd()
                                 .HasColumnType("integer");
 
-                            b1.Property<int>("ExternalId")
+                            b1.Property<int?>("ExternalId")
                                 .HasColumnType("integer");
 
                             b1.Property<string>("Name")
