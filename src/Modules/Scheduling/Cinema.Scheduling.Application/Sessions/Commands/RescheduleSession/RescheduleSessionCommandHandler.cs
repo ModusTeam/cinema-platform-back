@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Application.Services;
 using Cinema.Domain.Common;
@@ -16,7 +17,7 @@ public class RescheduleSessionCommandHandler(
     : IRequestHandler<RescheduleSessionCommand, Result>
 {
     public Task<Result> Handle(RescheduleSessionCommand request, CancellationToken ct)
-        => SessionLifecycleTransaction.ExecuteAsync(context, request.SessionId, async (session, token) =>
+        => SessionLifecycleTransaction.ExecuteCommandAsync(context, request.SessionId, async (session, token) =>
     {
         ct = token;
         var sessionId = new EntityId<Session>(request.SessionId);
@@ -47,7 +48,7 @@ public class RescheduleSessionCommandHandler(
         {
             return Result.Failure(new Error("Session.CannotReschedule", ex.Message));
         }
-        catch (DbUpdateException ex)
+        catch (DbUpdateException ex) when (ex.InnerException is not DbException { SqlState: "55P03" })
         {
             if (ex.InnerException != null && ex.InnerException.Message.Contains("no_overlapping_sessions"))
             {

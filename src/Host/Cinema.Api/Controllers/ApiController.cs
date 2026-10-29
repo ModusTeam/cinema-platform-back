@@ -39,6 +39,7 @@ public abstract class ApiController : ControllerBase
         var statusCode = error.Code switch
         {
             "Seat.Locked" => StatusCodes.Status409Conflict,
+            "Session.Busy" => StatusCodes.Status409Conflict,
             "Hall.LayoutLocked" => StatusCodes.Status409Conflict,
             "Hall.Inactive" => StatusCodes.Status409Conflict,
             "Seat.AlreadyLocked" => StatusCodes.Status409Conflict,
@@ -70,6 +71,7 @@ public abstract class ApiController : ControllerBase
             var code when code.Contains("NotFound") => "Resource Not Found",
             var code when code.Contains("Validation") => "Validation Error",
             "Seat.Locked" => "Conflict",
+            "Session.Busy" => "Conflict",
             "Hall.LayoutLocked" => "Conflict",
             "Hall.Inactive" => "Conflict",
             "Seat.AlreadyLocked" => "Conflict",

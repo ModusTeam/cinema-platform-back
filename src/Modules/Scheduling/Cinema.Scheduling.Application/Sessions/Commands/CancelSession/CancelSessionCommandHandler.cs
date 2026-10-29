@@ -14,7 +14,7 @@ public class CancelSessionCommandHandler(IApplicationDbContext context)
     : IRequestHandler<CancelSessionCommand, Result>
 {
     public Task<Result> Handle(CancelSessionCommand request, CancellationToken ct)
-        => SessionLifecycleTransaction.ExecuteAsync(context, request.SessionId, async (session, token) =>
+        => SessionLifecycleTransaction.ExecuteCommandAsync(context, request.SessionId, async (session, token) =>
     {
         ct = token;
         var sessionId = new EntityId<Session>(request.SessionId);

@@ -303,6 +303,60 @@ public class SessionCompletionPostgresTests(PostgresSchemaTemplate template) : I
         (await verify.Tickets.CountAsync(Ct)).Should().Be(0);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Lifecycle_lock_timeout_returns_busy_without_writes(bool reschedule)
+    {
+        await using HallLayoutDatabase db=await HallLayoutDatabase.CreateAsync(template);
+        Guid id;
+        await using(ApplicationDbContext seed=db.NewContext())
+        {
+            Session session=db.NewSession();id=session.Id.Value;
+            seed.Sessions.Add(session);await seed.SaveChangesAsync(Ct);
+        }
+        await using NpgsqlConnection blocker=new(db.ConnectionString);
+        await blocker.OpenAsync(Ct);
+        await using NpgsqlTransaction transaction=await blocker.BeginTransactionAsync(Ct);
+        await using(NpgsqlCommand command=new("SELECT id FROM halls WHERE id=@id FOR UPDATE",blocker,transaction))
+        {command.Parameters.AddWithValue("id",db.Hall.Id.Value);await command.ExecuteNonQueryAsync(Ct);}
+        await using ApplicationDbContext context=db.NewContext();
+        Cinema.Domain.Shared.Result result;
+        if(reschedule)
+            result=await new Cinema.Application.Sessions.Commands.RescheduleSession.RescheduleSessionCommandHandler(
+                new SessionSchedulingService(context,Substitute.For<Cinema.Domain.Interfaces.IMovieInfoProvider>()),context).Handle(new(id,DateTime.UtcNow.AddDays(5)),Ct);
+        else result=await new Cinema.Application.Sessions.Commands.CancelSession.CancelSessionCommandHandler(context).Handle(new(id),Ct);
+        result.IsFailure.Should().BeTrue();result.Error.Code.Should().Be("Session.Busy");
+        await using ApplicationDbContext verify=db.NewContext();
+        (await verify.Sessions.SingleAsync(Ct)).Status.Should().Be(SessionStatus.Scheduled);
+        (await verify.Set<SessionCompletionFact>().CountAsync(Ct)).Should().Be(0);
+        (await verify.Set<OutboxMessage>().CountAsync(Ct)).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EF_wrapped_lock_conflict_returns_busy_and_rolls_back(bool reschedule)
+    {
+        await using HallLayoutDatabase db=await HallLayoutDatabase.CreateAsync(template);
+        Guid id;
+        await using(ApplicationDbContext seed=db.NewContext())
+        {
+            Session session=db.NewSession();id=session.Id.Value;
+            seed.Sessions.Add(session);await seed.SaveChangesAsync(Ct);
+            await seed.Database.ExecuteSqlRawAsync("CREATE FUNCTION fail_lifecycle_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test lock failure' USING ERRCODE='55P03'; END $$; CREATE TRIGGER fail_lifecycle_write BEFORE UPDATE ON sessions FOR EACH ROW EXECUTE FUNCTION fail_lifecycle_write();",Ct);
+        }
+        await using ApplicationDbContext context=db.NewContext();
+        Cinema.Domain.Shared.Result result;
+        if(reschedule)
+            result=await new Cinema.Application.Sessions.Commands.RescheduleSession.RescheduleSessionCommandHandler(
+                new SessionSchedulingService(context,Substitute.For<Cinema.Domain.Interfaces.IMovieInfoProvider>()),context).Handle(new(id,DateTime.UtcNow.AddDays(5)),Ct);
+        else result=await new Cinema.Application.Sessions.Commands.CancelSession.CancelSessionCommandHandler(context).Handle(new(id),Ct);
+        result.Error.Code.Should().Be("Session.Busy");
+        await using ApplicationDbContext verify=db.NewContext();
+        (await verify.Sessions.SingleAsync(Ct)).Status.Should().Be(SessionStatus.Scheduled);
+    }
+
     private static async Task<Guid> Due(HallLayoutDatabase db, bool inactive = false)
     {
         await using ApplicationDbContext context = db.NewContext();

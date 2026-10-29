@@ -1,3 +1,5 @@
+using System.Data.Common;
+using Cinema.Domain.Shared;
 using Cinema.Application.Common.Interfaces;
 using Cinema.Domain.Common;
 using Cinema.Domain.Entities;
@@ -9,6 +11,20 @@ namespace Cinema.Application.Services;
 // Lost commit acknowledgement requires fresh-scope verification, not callback replay.
 public static class SessionLifecycleTransaction
 {
+    public static async Task<Result> ExecuteCommandAsync(IApplicationDbContext context, Guid id,
+        Func<Session?, CancellationToken, Task<Result>> operation, CancellationToken ct)
+    {
+        try { return await ExecuteAsync(context, id, operation, ct); }
+        catch (Exception exception) when (
+            exception is DbException { SqlState: "55P03" } ||
+            exception.InnerException is DbException { SqlState: "55P03" })
+        {
+            // PostgreSQL lock_not_available, including an EF-wrapped SaveChanges error.
+            // The transaction has already been disposed/rolled back at this boundary.
+            return Result.Failure(new Error("Session.Busy", "Session is being modified. Retry later."));
+        }
+    }
+
     public static async Task<T> ExecuteAsync<T>(IApplicationDbContext context, Guid id,
         Func<Session?, CancellationToken, Task<T>> operation, CancellationToken ct, bool includeInactive = false)
     {
