@@ -33,22 +33,25 @@ public class SessionSchedulingService(
         return Session.Create(
             EntityId<Session>.New(),
             startTime,
-            occupyEndTime,
+            sessionEndTime,
             movieId,
             hallId,
             pricingId,
-            isLoyaltyPaymentAllowed
+            isLoyaltyPaymentAllowed,
+            occupancyEndTime: occupyEndTime
         );
     }
 
     public async Task RescheduleSessionAsync(Session session, DateTime newStartTime, CancellationToken ct)
     {
-        var duration = session.EndTime - session.StartTime;
-        var newEndTime = newStartTime.Add(duration);
+        DateTime? newEndTime = session.EndTime is { } end
+            ? newStartTime.Add(end - session.StartTime)
+            : null;
+        DateTime newOccupancyEndTime = newStartTime.Add(session.OccupancyEndTime - session.StartTime);
         
-        await ValidateSessionOverlapAsync(session.HallId, newStartTime, newEndTime, session.Id, ct);
+        await ValidateSessionOverlapAsync(session.HallId, newStartTime, newOccupancyEndTime, session.Id, ct);
 
-        session.Reschedule(newStartTime, newEndTime);
+        session.Reschedule(newStartTime, newEndTime, newOccupancyEndTime);
     }
 
     private async Task ValidateSessionOverlapAsync(
@@ -64,7 +67,7 @@ public class SessionSchedulingService(
                 s.HallId == hallId &&
                 s.Status != SessionStatus.Cancelled &&
                 s.StartTime < end && 
-                s.EndTime > start);
+                s.OccupancyEndTime > start);
 
         if (excludeSessionId != null)
         {

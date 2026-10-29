@@ -6,7 +6,8 @@ public record SessionDto
 {
     public Guid Id { get; init; }
     public DateTime StartTime { get; init; }
-    public DateTime EndTime { get; init; }
+    public DateTime? EndTime { get; init; }
+    public DateTime OccupancyEndTime { get; init; }
     public string Status { get; init; } = string.Empty;
     public Guid MovieId { get; init; }
     public string MovieTitle { get; init; } = string.Empty;
@@ -25,6 +26,7 @@ public record SessionDto
             Id = session.Id.Value,
             StartTime = session.StartTime,
             EndTime = session.EndTime,
+            OccupancyEndTime = session.OccupancyEndTime,
             Status = session.Status.ToString(),
             MovieId = session.MovieId.Value,
             MovieTitle = session.Movie?.Title ?? "Unknown Movie",

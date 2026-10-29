@@ -17,7 +17,7 @@ public class DeleteHallCommandHandler(IApplicationDbContext context) : IRequestH
         if (hall == null) return Result.Failure(new Error("Hall.NotFound", "Hall not found."));
         
         var hasActiveSessions = await context.Sessions
-            .AnyAsync(s => s.HallId == hallId && s.EndTime > DateTime.UtcNow, cancellationToken);
+            .AnyAsync(s => s.HallId == hallId && s.OccupancyEndTime > DateTime.UtcNow, cancellationToken);
 
         if (hasActiveSessions)
         {

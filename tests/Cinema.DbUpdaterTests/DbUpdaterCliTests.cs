@@ -72,8 +72,13 @@ public partial class DbUpdaterCliTests
             context.Halls.Add(hall);
             context.SeatTypes.Add(seatType);
             context.Pricings.Add(pricing);
-            context.Sessions.Add(session);
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            // This fixture targets the historical schema, before occupancy had its own column.
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO sessions (id,start_time,end_time,status,movie_id,hall_id,pricing_id,is_loyalty_payment_allowed,event_type)
+                VALUES ({session.Id.Value},{session.StartTime},{session.OccupancyEndTime},{(int)session.Status},
+                    {movie.Id.Value},{hall.Id.Value},{pricing.Id.Value},{session.IsLoyaltyPaymentAllowed},{session.EventType})
+                """, TestContext.Current.CancellationToken);
             // Seed the previous schema explicitly: the current EF model already includes PaidAt.
             await context.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO orders (id, total_amount, paid_amount, booking_date, status, user_id, session_id, points_used)

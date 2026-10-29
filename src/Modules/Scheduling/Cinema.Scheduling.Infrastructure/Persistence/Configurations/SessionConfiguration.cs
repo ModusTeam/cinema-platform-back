@@ -20,8 +20,14 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
             .HasConversion(new DateTimeUtcConverter());
 
         builder.Property(x => x.EndTime)
+            .HasConversion(new DateTimeUtcConverter());
+
+        builder.Property(x => x.OccupancyEndTime)
             .IsRequired()
             .HasConversion(new DateTimeUtcConverter());
+
+        builder.ToTable(table => table.HasCheckConstraint("session_screening_end_valid",
+            "end_time IS NULL OR (end_time > start_time AND end_time <= occupancy_end_time)"));
 
         builder.Property(x => x.Status)
             .HasConversion<int>();
@@ -59,7 +65,7 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
             .HasForeignKey(x => x.PricingId)
             .OnDelete(DeleteBehavior.Restrict);
         builder.HasQueryFilter(s => s.Hall!.IsActive);
-        builder.HasIndex(s => new { s.HallId, s.StartTime, s.EndTime })
+        builder.HasIndex(s => new { s.HallId, s.StartTime, s.OccupancyEndTime })
             .HasDatabaseName("IX_Sessions_Hall_Time_Overlap");
     }
 }
