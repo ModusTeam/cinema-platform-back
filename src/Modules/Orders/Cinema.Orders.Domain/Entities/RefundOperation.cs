@@ -8,6 +8,7 @@ public enum RefundState { Approved, Dispatching, Pending, Unknown, Succeeded, De
 // An already-authorized instruction. This foundation does not evaluate H-16 or expose approval APIs.
 public sealed class RefundOperation
 {
+    public const string ConflictingProviderOutcomesCode = "CONFLICTING_PROVIDER_OUTCOMES";
     private RefundOperation() { }
     public Guid Id { get; private set; }
     public EntityId<Order> OrderId { get; private set; }
@@ -83,8 +84,13 @@ public sealed class RefundOperation
     }
     public void ConfirmObservedSuccess(DateTime now)
     {
-        if (State == RefundState.Declined || LeaseExpiresAtUtc > now) throw new InvalidOperationException("Active or contradictory provider claim");
+        if (State == RefundState.Declined || LastCode == ConflictingProviderOutcomesCode || LeaseExpiresAtUtc > now) throw new InvalidOperationException("Active or contradictory provider claim");
         State = RefundState.Succeeded; LeaseToken = null; LeaseExpiresAtUtc = null; LastCode = null;
+    }
+    public void FlagConflictingSuccess()
+    {
+        if (State != RefundState.Declined) throw new InvalidOperationException("Expected a contradictory decline");
+        State = RefundState.ReconciliationRequired; LastCode = ConflictingProviderOutcomesCode;
     }
     private static DateTime Microseconds(DateTime value) => value.AddTicks(-(value.Ticks % 10));
 }
@@ -116,8 +122,8 @@ public sealed class RefundProviderObservation
             Outcome = outcome,
             ProviderReference = reference,
             EvidenceCode = code,
-            ProviderOccurredAtUtc = occurredAt,
-            ObservedAtUtc = observedAt
+            ProviderOccurredAtUtc = occurredAt?.AddTicks(-(occurredAt.Value.Ticks % 10)),
+            ObservedAtUtc = observedAt.AddTicks(-(observedAt.Ticks % 10))
         };
     }
 }

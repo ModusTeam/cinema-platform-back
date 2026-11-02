@@ -21,6 +21,70 @@ public class RefundFoundationPostgresTests(PostgresSchemaTemplate template) : IC
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
+    public async Task Repeated_observation_with_submicrosecond_timestamp_is_an_exact_replay()
+    {
+        await using Fixture f = await Fixture.Create(template);
+        RefundOperationStore store = f.Store();
+        Guid id = (await store.PersistApprovedAsync(f.Candidate(), Ct)).Value.Id;
+        RefundClaim claim = (await store.ClaimAsync(id, Ct))!;
+        DateTime occurred = new DateTime(2026, 11, 2, 12, 0, 0, DateTimeKind.Utc).AddTicks(1234567);
+        RefundProviderOutcome outcome = new(RefundOutcomeKind.Succeeded, "microsecond-reference", "CONFIRMED", occurred);
+        await store.ObserveAsync(claim, outcome, Ct);
+        await f.Store().ObserveAsync(claim, outcome, Ct);
+        await using ApplicationDbContext verify = f.Context();
+        RefundProviderObservation receipt = await verify.Set<RefundProviderObservation>().SingleAsync(Ct);
+        receipt.ProviderOccurredAtUtc.Should().Be(occurred.AddTicks(-7));
+        receipt.ClaimToken.Should().Be(claim.Token);
+        Func<Task> conflict = () => store.ObserveAsync(claim, outcome with { ProviderOccurredAtUtc = occurred.AddTicks(10) }, Ct);
+        await conflict.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Stale_success_and_newer_decline_require_reconciliation_in_either_commit_order(bool successFirst)
+    {
+        await using Fixture f = await Fixture.Create(template);
+        RefundOperationStore store = f.Store();
+        Guid id = (await store.PersistApprovedAsync(f.Candidate(), Ct)).Value.Id;
+        RefundClaim stale = (await store.ClaimAsync(id, Ct))!;
+        await f.Due(id, true);
+        RefundClaim current = (await store.ClaimAsync(id, Ct))!;
+        RefundProviderOutcome success = new(RefundOutcomeKind.Succeeded, "authoritative-late-success");
+        await store.ObserveAsync(current, new(RefundOutcomeKind.Declined, EvidenceCode: "DECLINED"), Ct);
+        PauseSave pause = new();
+        Task first = successFirst
+            ? f.Store(pause).ObserveAsync(stale, success, Ct)
+            : f.Store(pause).ResolveAsync(current, RefundState.Declined, "DECLINED", Ct);
+        await pause.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        Task second = successFirst
+            ? store.ResolveAsync(current, RefundState.Declined, "DECLINED", Ct)
+            : store.ObserveAsync(stale, success, Ct);
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct); timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            await using ApplicationDbContext monitor = f.Context();
+            while (!await monitor.Database.SqlQuery<bool>($"""SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock') AS "Value" """).SingleAsync(timeout.Token)) await Task.Delay(10, timeout.Token);
+            second.IsCompleted.Should().BeFalse();
+        }
+        finally { pause.Release.TrySetResult(); }
+        await first; await second;
+        (await store.ResolveAsync(stale, RefundState.Succeeded, null, Ct)).Should().BeFalse();
+        RefundOperation recovered = (await f.Store().GetAsync(id, Ct))!;
+        recovered.State.Should().Be(RefundState.ReconciliationRequired);
+        recovered.LastCode.Should().Be("CONFLICTING_PROVIDER_OUTCOMES");
+        await using ApplicationDbContext verify = f.Context();
+        (await verify.Set<RefundProviderObservation>().CountAsync(Ct)).Should().Be(2);
+        (await verify.Set<RefundProviderObservation>().SingleAsync(x => x.ClaimToken == current.Token, Ct)).Outcome.Should().Be(RefundState.Declined);
+        (await store.SuccessfulObservationAsync(id, Ct))!.ProviderReference.Should().Be("authoritative-late-success");
+        await f.Store().ObserveAsync(stale, success, Ct);
+        UnsupportedProvider provider = new();
+        (await new RefundExecutor(f.Store(), provider).ExecuteAsync(id, Ct)).Should().Be(RefundState.ReconciliationRequired);
+        provider.Calls.Should().Be(0);
+        (await verify.Orders.SingleAsync(Ct)).Status.Should().Be(Cinema.Domain.Enums.OrderStatus.Paid);
+    }
+
+    [Fact]
     public async Task Concurrent_creation_waits_on_real_order_lock_and_returns_one_identity()
     {
         await using Fixture f = await Fixture.Create(template);
@@ -122,7 +186,10 @@ public class RefundFoundationPostgresTests(PostgresSchemaTemplate template) : IC
         await using Fixture f = await Fixture.Create(template); RefundOperation candidate = f.Candidate();
         RefundProviderRequest request = new(candidate.Id, candidate.ProviderKey, candidate.ChargeReference, candidate.Amount, candidate.Currency);
         string root = Directory.GetCurrentDirectory(); while (!File.Exists(Path.Combine(root, "Cinema.sln"))) root = Directory.GetParent(root)!.FullName;
-        string host = Path.Combine(root, "tests/RefundProviderFixture/bin/Release/net10.0/RefundProviderFixture.dll");
+        DirectoryInfo output = new(AppContext.BaseDirectory);
+        string configuration = output.Parent!.Name;
+        string host = Path.Combine(root, "tests", "RefundProviderFixture", "bin", configuration, output.Name, "RefundProviderFixture.dll");
+        File.Exists(host).Should().BeTrue("the fixture must be built in the active test configuration");
         async Task<(int Code, string Output)> Run(string mode)
         {
             ProcessStartInfo info = new("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };

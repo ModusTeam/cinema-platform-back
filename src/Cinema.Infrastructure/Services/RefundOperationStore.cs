@@ -50,10 +50,12 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
             if (op is null) return null;
             DateTime now = await Now(db, ct);
             // Local authoritative success is not a new money attempt and must survive budget exhaustion.
-            if (op.State != RefundState.Declined && !(op.LeaseExpiresAtUtc > now) &&
+            if (op.LastCode != RefundOperation.ConflictingProviderOutcomesCode && !(op.LeaseExpiresAtUtc > now) &&
                 await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == id && x.Outcome == RefundState.Succeeded, ct))
             {
-                op.ConfirmObservedSuccess(now); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null;
+                if (op.State == RefundState.Declined) op.FlagConflictingSuccess();
+                else op.ConfirmObservedSuccess(now);
+                await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null;
             }
             bool first = op.DispatchStartedAtUtc is null;
             Guid token = Guid.NewGuid();
@@ -66,17 +68,22 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
     public Task ObserveAsync(RefundClaim claim, RefundProviderOutcome outcome, CancellationToken ct)
         => Run(async db =>
         {
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '3s'", ct);
+            RefundOperation op = await db.Set<RefundOperation>().FromSqlInterpolated($"SELECT * FROM refund_operations WHERE id={claim.OperationId} FOR UPDATE").SingleAsync(ct);
+            RefundProviderObservation incoming = RefundProviderObservation.Create(claim.OperationId, claim.Token, State(outcome.Kind), outcome.ProviderReference,
+                outcome.EvidenceCode, outcome.ProviderOccurredAtUtc, await Now(db, ct));
             RefundProviderObservation? prior = await db.Set<RefundProviderObservation>().AsNoTracking()
                 .SingleOrDefaultAsync(x => x.OperationId == claim.OperationId && x.ClaimToken == claim.Token, ct);
             if (prior is not null)
             {
-                if (prior.Outcome != State(outcome.Kind) || prior.ProviderReference != outcome.ProviderReference || prior.EvidenceCode != outcome.EvidenceCode || prior.ProviderOccurredAtUtc != outcome.ProviderOccurredAtUtc)
+                if (prior.Outcome != incoming.Outcome || prior.ProviderReference != incoming.ProviderReference || prior.EvidenceCode != incoming.EvidenceCode || prior.ProviderOccurredAtUtc != incoming.ProviderOccurredAtUtc)
                     throw new InvalidOperationException("Conflicting observation for one provider claim");
-                return true;
             }
-            db.Add(RefundProviderObservation.Create(claim.OperationId, claim.Token, State(outcome.Kind), outcome.ProviderReference,
-                outcome.EvidenceCode, outcome.ProviderOccurredAtUtc, await Now(db, ct)));
-            await db.SaveChangesAsync(ct); return true;
+            else db.Add(incoming);
+            // Serialize with resolution: evidence remains append-only; a stale worker cannot own the head.
+            if (incoming.Outcome == RefundState.Succeeded && op.State == RefundState.Declined) op.FlagConflictingSuccess();
+            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
         }, ct);
 
     public Task<RefundProviderOutcome?> SuccessfulObservationAsync(Guid id, CancellationToken ct)
@@ -95,6 +102,10 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
             RefundOperation? op = await db.Set<RefundOperation>().FromSqlInterpolated($"SELECT * FROM refund_operations WHERE id={claim.OperationId} FOR UPDATE").SingleOrDefaultAsync(ct);
             DateTime now = await Now(db, ct);
             if (op is null || op.State != RefundState.Dispatching || op.LeaseToken != claim.Token || op.LeaseExpiresAtUtc <= now) return false;
+            if (outcome == RefundState.Declined && await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == claim.OperationId && x.Outcome == RefundState.Succeeded, ct))
+            {
+                outcome = RefundState.ReconciliationRequired; code = RefundOperation.ConflictingProviderOutcomesCode;
+            }
             op.Resolve(outcome, now, code); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
         }, ct);
 
