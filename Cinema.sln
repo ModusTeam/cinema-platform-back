@@ -79,6 +79,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.DbUpdaterTests", "te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cinema.CatalogTests", "tests\Cinema.CatalogTests\Cinema.CatalogTests.csproj", "{BFF229DB-D541-403C-8803-9DA62EA9B957}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RefundProviderFixture", "tests\RefundProviderFixture\RefundProviderFixture.csproj", "{C3CF7855-E35A-4734-ADA4-5422DF27B815}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -401,6 +403,18 @@ Global
 		{BFF229DB-D541-403C-8803-9DA62EA9B957}.Release|x64.Build.0 = Release|Any CPU
 		{BFF229DB-D541-403C-8803-9DA62EA9B957}.Release|x86.ActiveCfg = Release|Any CPU
 		{BFF229DB-D541-403C-8803-9DA62EA9B957}.Release|x86.Build.0 = Release|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Debug|x64.Build.0 = Debug|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Debug|x86.Build.0 = Debug|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Release|x64.ActiveCfg = Release|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Release|x64.Build.0 = Release|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Release|x86.ActiveCfg = Release|Any CPU
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -441,5 +455,6 @@ Global
 		{2309B23B-F381-4B96-8035-0DA587562E7A} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{BEEC579A-EFAF-43E2-846F-1728B1890108} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{BFF229DB-D541-403C-8803-9DA62EA9B957} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{C3CF7855-E35A-4734-ADA4-5422DF27B815} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

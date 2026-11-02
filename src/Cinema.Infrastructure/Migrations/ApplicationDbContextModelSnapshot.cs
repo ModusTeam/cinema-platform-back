@@ -438,6 +438,185 @@ namespace Cinema.Infrastructure.Migrations
                     b.ToTable("refresh_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Cinema.Domain.Entities.RefundOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("AdmissionEvidence")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("admission_evidence");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<DateTime>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at_utc");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<string>("ChargeReference")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("charge_reference");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<DateTime?>("DispatchStartedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatch_started_at_utc");
+
+                    b.Property<string>("LastCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("last_code");
+
+                    b.Property<DateTime?>("LeaseExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at_utc");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<DateTime>("NextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at_utc");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<DateTime>("PaidAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("paid_at_utc");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("provider_key");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("reason");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("state");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_refund_operations");
+
+                    b.HasIndex("OrderId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_refund_operations_order_id");
+
+                    b.HasIndex("ProviderKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_refund_operations_provider_key");
+
+                    b.HasIndex("State", "NextAttemptAtUtc")
+                        .HasDatabaseName("ix_refund_operations_state_next_attempt_at_utc");
+
+                    b.ToTable("refund_operations", null, t =>
+                        {
+                            t.HasCheckConstraint("refund_admission_object", "jsonb_typeof(admission_evidence::jsonb) = 'object'");
+
+                            t.HasCheckConstraint("refund_amount_positive", "amount > 0");
+
+                            t.HasCheckConstraint("refund_approval_time", "approved_at_utc >= paid_at_utc");
+
+                            t.HasCheckConstraint("refund_attempts", "attempts >= 0 AND attempts <= 8");
+
+                            t.HasCheckConstraint("refund_claim_pair", "(lease_token IS NULL) = (lease_expires_at_utc IS NULL)");
+
+                            t.HasCheckConstraint("refund_currency", "currency ~ '^[A-Z]{3}$'");
+
+                            t.HasCheckConstraint("refund_key_identity", "provider_key = 'refund:' || replace(id::text, '-', '')");
+
+                            t.HasCheckConstraint("refund_state", "state IN ('Approved','Dispatching','Pending','Unknown','Succeeded','Declined','ReconciliationRequired')");
+                        });
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.RefundProviderObservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClaimToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("claim_token");
+
+                    b.Property<string>("EvidenceCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("evidence_code");
+
+                    b.Property<DateTime>("ObservedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("observed_at_utc");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operation_id");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("outcome");
+
+                    b.Property<DateTime?>("ProviderOccurredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("provider_occurred_at_utc");
+
+                    b.Property<string>("ProviderReference")
+                        .HasColumnType("text")
+                        .HasColumnName("provider_reference");
+
+                    b.HasKey("Id")
+                        .HasName("pk_refund_provider_observations");
+
+                    b.HasIndex("OperationId", "ClaimToken")
+                        .IsUnique()
+                        .HasDatabaseName("ix_refund_provider_observations_operation_id_claim_token");
+
+                    b.ToTable("refund_provider_observations", null, t =>
+                        {
+                            t.HasCheckConstraint("refund_observation_outcome", "outcome IN ('Pending','Unknown','Succeeded','Declined','ReconciliationRequired')");
+                        });
+                });
+
             modelBuilder.Entity("Cinema.Domain.Entities.Seat", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1359,6 +1538,26 @@ namespace Cinema.Infrastructure.Migrations
                         .HasConstraintName("fk_refresh_tokens_users_user_id");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.RefundOperation", b =>
+                {
+                    b.HasOne("Cinema.Domain.Entities.Order", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_refund_operations_orders_order_id");
+                });
+
+            modelBuilder.Entity("Cinema.Domain.Entities.RefundProviderObservation", b =>
+                {
+                    b.HasOne("Cinema.Domain.Entities.RefundOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_refund_provider_observations_refund_operations_operation_id");
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.Seat", b =>

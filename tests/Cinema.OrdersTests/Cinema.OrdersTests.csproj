@@ -20,4 +20,8 @@
     <ProjectReference Include="..\..\src\Modules\Booking\Cinema.Booking.Application\Cinema.Booking.Application.csproj" />
     <ProjectReference Include="..\..\src\Modules\Booking\Cinema.Booking.Infrastructure\Cinema.Booking.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../RefundProviderFixture/DurableRefundProvider.cs" Link="Fixtures/DurableRefundProvider.cs" />
+    <ProjectReference Include="../RefundProviderFixture/RefundProviderFixture.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
 </Project>
