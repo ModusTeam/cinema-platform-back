@@ -300,6 +300,11 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("paid_at");
 
+                    b.Property<string>("PaidCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("paid_currency");
+
                     b.Property<string>("PaymentTransactionId")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -341,7 +346,10 @@ namespace Cinema.Infrastructure.Migrations
                     b.HasIndex("Status", "BookingDate")
                         .HasDatabaseName("ix_orders_status_booking_date");
 
-                    b.ToTable("orders", (string)null);
+                    b.ToTable("orders", null, t =>
+                        {
+                            t.HasCheckConstraint("order_paid_currency", "paid_currency IS NULL OR (paid_currency ~ '^[A-Z]{3}$' AND paid_amount > 0 AND paid_at IS NOT NULL AND payment_transaction_id IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Cinema.Domain.Entities.Pricing", b =>

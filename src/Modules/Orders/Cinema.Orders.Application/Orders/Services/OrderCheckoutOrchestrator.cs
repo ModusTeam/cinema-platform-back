@@ -218,7 +218,8 @@ public class OrderCheckoutOrchestrator(
 
         var (pointsToDeduct, amountToPay) = loyaltyDiscountResult.Value;
 
-        var paymentResult = await ProcessPaymentFlowAsync(order, amountToPay, paymentToken, pointsToDeduct, checkoutLock, ct);
+        const string chargeCurrency = "UAH";
+        var paymentResult = await ProcessPaymentFlowAsync(order, amountToPay, chargeCurrency, paymentToken, pointsToDeduct, checkoutLock, ct);
         if (!paymentResult.IsSuccess)
         {
             if (paymentResult.FailureCode == UnknownPaymentOutcomeCode)
@@ -233,14 +234,15 @@ public class OrderCheckoutOrchestrator(
 
         try
         {
-            return await ConfirmOrderAsync(orderId, paymentResult.TransactionId!, userId, pointsToDeduct, ct);
+            return await ConfirmOrderAsync(orderId, paymentResult.TransactionId!, chargeCurrency, userId, pointsToDeduct, ct);
         }
         catch (Exception ex)
         {
             logger.LogCritical(ex, "Confirmation failed after payment for Order {OrderId}. Manual reconciliation required.", orderId);
             context.ClearChangeTracker();
             Order? persistedOrder = await context.Orders.SingleOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), CancellationToken.None);
-            if (persistedOrder?.Status == OrderStatus.Paid && persistedOrder.PaymentTransactionId == paymentResult.TransactionId)
+            if (persistedOrder?.Status == OrderStatus.Paid && persistedOrder.PaymentTransactionId == paymentResult.TransactionId &&
+                (persistedOrder.PaidAmount > 0 ? persistedOrder.PaidCurrency == chargeCurrency : persistedOrder.PaidCurrency is null))
                 return Result.Success(orderId);
             if (persistedOrder?.Status == OrderStatus.PaymentProcessing)
             {
@@ -403,7 +405,7 @@ public class OrderCheckoutOrchestrator(
     }
 
     private async Task<PaymentResult> ProcessPaymentFlowAsync(
-        Order order, decimal amountToPay, string paymentToken, int pointsToDeduct, CheckoutOrderLock checkoutLock, CancellationToken ct)
+        Order order, decimal amountToPay, string currency, string paymentToken, int pointsToDeduct, CheckoutOrderLock checkoutLock, CancellationToken ct)
     {
         Guid userId = order.UserId;
         Guid orderId = order.Id.Value;
@@ -426,7 +428,7 @@ public class OrderCheckoutOrchestrator(
         PaymentResult paymentResult;
         try
         {
-            paymentResult = await paymentService.ProcessPaymentAsync(amountToPay, "UAH", paymentToken, ct);
+            paymentResult = await paymentService.ProcessPaymentAsync(amountToPay, currency, paymentToken, ct);
         }
         catch (Exception ex)
         {
@@ -492,7 +494,7 @@ public class OrderCheckoutOrchestrator(
     }
 
     private async Task<Result<Guid>> ConfirmOrderAsync(
-        Guid orderId, string transactionId, Guid userId, int pointsUsed, CancellationToken ct)
+        Guid orderId, string transactionId, string currency, Guid userId, int pointsUsed, CancellationToken ct)
     {
         var order = await context.Orders
             .FirstOrDefaultAsync(o => o.Id == new EntityId<Order>(orderId), ct);
@@ -502,14 +504,14 @@ public class OrderCheckoutOrchestrator(
 
         if (order.Status == OrderStatus.Paid)
         {
-            order.MarkAsPaid(transactionId);
+            order.MarkAsPaid(transactionId, currency);
             return Result.Success(order.Id.Value);
         }
 
         if (pointsUsed > 0)
             order.ApplyLoyaltyDiscount(pointsUsed);
 
-        order.MarkAsPaid(transactionId);
+        order.MarkAsPaid(transactionId, currency);
         order.CompleteGoldCheckout();
 
         List<Ticket> tickets = await context.Tickets.IgnoreQueryFilters()

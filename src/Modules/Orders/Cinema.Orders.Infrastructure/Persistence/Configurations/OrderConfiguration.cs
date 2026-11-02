@@ -10,6 +10,8 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
 {
     public void Configure(EntityTypeBuilder<Order> builder)
     {
+        builder.ToTable("orders", table => table.HasCheckConstraint("order_paid_currency", "paid_currency IS NULL OR (paid_currency ~ '^[A-Z]{3}$' AND paid_amount > 0 AND paid_at IS NOT NULL AND payment_transaction_id IS NOT NULL)"));
+        builder.Property(x => x.PaidCurrency).HasMaxLength(3);
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Id)

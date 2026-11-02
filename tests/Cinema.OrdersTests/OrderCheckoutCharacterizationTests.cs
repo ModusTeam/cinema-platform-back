@@ -25,6 +25,33 @@ namespace Cinema.OrdersTests;
 public class OrderCheckoutCharacterizationTests
 {
     [Fact]
+    public async Task Confirmation_recovery_does_not_hide_a_conflicting_persisted_currency()
+    {
+        await using CheckoutFixture f = await CheckoutFixture.CreateAsync();
+        f.Payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>()).Returns(async _ =>
+        {
+            f.Order.MarkAsPaid("same-provider-reference", "USD");
+            await f.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return PaymentResult.Success("same-provider-reference");
+        });
+        (await f.CheckoutAsync()).Error.Code.Should().Be("Payment.OutcomeUnknown");
+        (await f.Context.Orders.SingleAsync(TestContext.Current.CancellationToken)).PaidCurrency.Should().Be("USD");
+    }
+    [Fact]
+    public async Task Confirmed_currency_is_the_actual_provider_instruction_and_survives_checkout_replay()
+    {
+        await using CheckoutFixture f = await CheckoutFixture.CreateAsync();
+        f.Payment.ProcessPaymentAsync(50m, "UAH", "token", Arg.Any<CancellationToken>()).Returns(PaymentResult.Success("currency-charge"));
+        (await f.CheckoutAsync()).IsSuccess.Should().BeTrue();
+        f.Context.ChangeTracker.Clear();
+        Order paid = await f.Context.Orders.SingleAsync(TestContext.Current.CancellationToken);
+        paid.PaidCurrency.Should().Be("UAH");
+        DateTime? originalTime = paid.PaidAt;
+        (await f.CheckoutAsync()).IsSuccess.Should().BeTrue();
+        paid.PaidAt.Should().Be(originalTime);
+        await f.Payment.Received(1).ProcessPaymentAsync(50m, paid.PaidCurrency!, "token", Arg.Any<CancellationToken>());
+    }
+    [Fact]
     public async Task Missing_Or_Other_Users_Order_Is_Rejected_Before_Payment()
     {
         await using CheckoutFixture fixture = await CheckoutFixture.CreateAsync();

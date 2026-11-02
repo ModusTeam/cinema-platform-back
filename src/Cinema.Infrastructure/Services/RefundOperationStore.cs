@@ -10,7 +10,7 @@ namespace Cinema.Infrastructure.Services;
 public sealed record RefundClaim(Guid OperationId, Guid Token, bool FirstDispatch, RefundProviderRequest Request);
 
 // Not registered in production. Each phase owns a fresh context; no Order/Ticket projections or network calls.
-public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext> contexts)
+public sealed partial class RefundOperationStore(IDbContextFactory<ApplicationDbContext> contexts)
 {
     public Task<Result<RefundOperation>> PersistApprovedAsync(RefundOperation candidate, CancellationToken ct)
         => Run(async db =>
@@ -20,13 +20,15 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '3s'", ct);
             Order? order = await db.Orders.FromSqlInterpolated($"SELECT * FROM orders WHERE id={candidate.OrderId.Value} FOR UPDATE").SingleOrDefaultAsync(ct);
+            if (order?.PaidCurrency is null || order.PaidCurrency != candidate.Currency)
+                return Result.Failure<RefundOperation>(new Error("Refund.CurrencyReconciliationRequired", "Original charge currency is unknown or does not match."));
             RefundOperation? existing = await db.Set<RefundOperation>().SingleOrDefaultAsync(x => x.OrderId == candidate.OrderId, ct);
             if (existing is not null)
             {
                 bool same = existing.UserId == candidate.UserId && existing.SessionId == candidate.SessionId &&
                     existing.ChargeReference == candidate.ChargeReference && existing.Amount == candidate.Amount && existing.Currency == candidate.Currency &&
                     existing.ActorId == candidate.ActorId && existing.Reason == candidate.Reason && existing.AdmissionEvidence == candidate.AdmissionEvidence &&
-                    existing.PaidAtUtc == candidate.PaidAtUtc;
+                    existing.PaidAtUtc == candidate.PaidAtUtc && existing.ApprovedAtUtc == candidate.ApprovedAtUtc;
                 return same ? Result.Success(existing) : Result.Failure<RefundOperation>(new Error("Refund.IdentityConflict", "Order already owns a refund instruction"));
             }
             DateTime now = await Now(db, ct);
@@ -49,8 +51,17 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
             RefundOperation? op = await db.Set<RefundOperation>().FromSqlInterpolated($"SELECT * FROM refund_operations WHERE id={id} FOR UPDATE").SingleOrDefaultAsync(ct);
             if (op is null) return null;
             DateTime now = await Now(db, ct);
+            if (!(op.LeaseExpiresAtUtc > now) && op.State is RefundState.Approved or RefundState.Dispatching or RefundState.Pending or RefundState.Unknown)
+            {
+                string? currency = await db.Orders.IgnoreQueryFilters().AsNoTracking().Where(x => x.Id == op.OrderId)
+                    .Select(x => x.PaidCurrency).SingleOrDefaultAsync(ct);
+                if (currency is null || currency != op.Currency)
+                {
+                    op.FlagUnverifiedCurrency(now); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null;
+                }
+            }
             // Local authoritative success is not a new money attempt and must survive budget exhaustion.
-            if (op.LastCode != RefundOperation.ConflictingProviderOutcomesCode && !(op.LeaseExpiresAtUtc > now) &&
+            if (op.LastCode is not (RefundOperation.ConflictingProviderOutcomesCode or RefundOperation.UnverifiedCurrencyCode) && !(op.LeaseExpiresAtUtc > now) &&
                 await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == id && x.Outcome == RefundState.Succeeded, ct))
             {
                 if (op.State == RefundState.Declined || await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == id && x.Outcome == RefundState.Declined, ct))
