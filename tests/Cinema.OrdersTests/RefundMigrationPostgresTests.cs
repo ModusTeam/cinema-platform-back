@@ -26,10 +26,11 @@ public class RefundMigrationPostgresTests
         {
             await using ApplicationDbContext db = new(new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseNpgsql(builder.ConnectionString, p => p.UseVector()).UseSnakeCaseNamingConvention().Options);
-            if (prior) await db.GetService<IMigrator>().MigrateAsync("20261029212722_AddManagedMovieImages", TestContext.Current.CancellationToken);
+            if (prior) await db.GetService<IMigrator>().MigrateAsync("20261102162916_AddDurableRefundFoundation", TestContext.Current.CancellationToken);
             await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
             db.Database.HasPendingModelChanges().Should().BeFalse();
             (await db.Database.GetPendingMigrationsAsync(TestContext.Current.CancellationToken)).Should().BeEmpty();
+            (await db.Database.SqlQuery<string>($"""SELECT data_type AS "Value" FROM information_schema.columns WHERE table_schema='public' AND table_name='refund_provider_observations' AND column_name='provider_reference' """).SingleAsync(TestContext.Current.CancellationToken)).Should().Be("text");
             (await db.Database.SqlQuery<int>($"""SELECT count(*)::integer AS "Value" FROM pg_trigger WHERE tgname IN ('protect_refund_operation','protect_refund_observation') AND NOT tgisinternal """).SingleAsync(TestContext.Current.CancellationToken)).Should().Be(2);
             // Isolate the trigger function from parent graphs; keep one connection for the temporary probe.
             await db.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);

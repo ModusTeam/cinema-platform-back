@@ -111,7 +111,7 @@ public sealed class RefundProviderObservation
         string? reference, string? code, DateTime? occurredAt, DateTime observedAt)
     {
         if (operation == Guid.Empty || token == Guid.Empty || observedAt.Kind != DateTimeKind.Utc ||
-            occurredAt is { Kind: not DateTimeKind.Utc } || reference?.Length > 256 || code?.Length > 64 ||
+            occurredAt is { Kind: not DateTimeKind.Utc } || code?.Length > 64 ||
             outcome is RefundState.Approved or RefundState.Dispatching ||
             outcome == RefundState.Succeeded && string.IsNullOrWhiteSpace(reference)) throw new ArgumentException("Invalid provider observation");
         return new()

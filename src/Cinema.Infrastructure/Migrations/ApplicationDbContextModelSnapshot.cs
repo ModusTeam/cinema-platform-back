@@ -601,8 +601,7 @@ namespace Cinema.Infrastructure.Migrations
                         .HasColumnName("provider_occurred_at_utc");
 
                     b.Property<string>("ProviderReference")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)")
+                        .HasColumnType("text")
                         .HasColumnName("provider_reference");
 
                     b.HasKey("Id")

@@ -39,6 +39,6 @@ public sealed class RefundProviderObservationConfiguration : IEntityTypeConfigur
         b.HasOne<RefundOperation>().WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OperationId, x.ClaimToken }).IsUnique();
         b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(32);
-        b.Property(x => x.ProviderReference).HasMaxLength(256); b.Property(x => x.EvidenceCode).HasMaxLength(64);
+        b.Property(x => x.ProviderReference).HasColumnType("text"); b.Property(x => x.EvidenceCode).HasMaxLength(64);
     }
 }

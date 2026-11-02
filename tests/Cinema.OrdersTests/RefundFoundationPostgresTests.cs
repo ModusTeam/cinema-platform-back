@@ -20,6 +20,28 @@ namespace Cinema.OrdersTests;
 public class RefundFoundationPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    [Fact]
+    public async Task Late_success_retains_complete_provider_reference_even_when_longer_than_256_characters()
+    {
+        await using Fixture f = await Fixture.Create(template);
+        RefundOperationStore store = f.Store();
+        Guid id = (await store.PersistApprovedAsync(f.Candidate(), Ct)).Value.Id;
+        RefundClaim stale = (await store.ClaimAsync(id, Ct))!;
+        await f.Due(id, true);
+        RefundClaim current = (await store.ClaimAsync(id, Ct))!;
+        await store.ObserveAsync(current, new(RefundOutcomeKind.Declined), Ct);
+        (await store.ResolveAsync(current, RefundState.Declined, null, Ct)).Should().BeTrue();
+        string reference = new('r', 1024);
+        RefundProviderOutcome success = new(RefundOutcomeKind.Succeeded, reference);
+        await store.ObserveAsync(stale, success, Ct);
+        await f.Store().ObserveAsync(stale, success, Ct);
+        (await f.Store().SuccessfulObservationAsync(id, Ct))!.ProviderReference.Should().Be(reference);
+        (await store.GetAsync(id, Ct))!.State.Should().Be(RefundState.ReconciliationRequired);
+        await using ApplicationDbContext verify = f.Context();
+        (await verify.Set<RefundProviderObservation>().CountAsync(Ct)).Should().Be(2);
+        (await verify.Set<RefundProviderObservation>().SingleAsync(x => x.ClaimToken == stale.Token, Ct)).Outcome.Should().Be(RefundState.Succeeded);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
