@@ -9,6 +9,9 @@ public enum RefundState { Approved, Dispatching, Pending, Unknown, Succeeded, De
 public sealed class RefundOperation
 {
     public const string ConflictingProviderOutcomesCode = "CONFLICTING_PROVIDER_OUTCOMES";
+    public const string UnverifiedCurrencyCode = "ORIGINAL_CURRENCY_UNVERIFIED";
+    public static bool IsOrdinaryApprovalAllowed(DateTime start, DateTime approval)
+        => start.Kind == DateTimeKind.Utc && approval.Kind == DateTimeKind.Utc && start - approval > TimeSpan.FromMinutes(60);
     private RefundOperation() { }
     public Guid Id { get; private set; }
     public EntityId<Order> OrderId { get; private set; }
@@ -84,13 +87,18 @@ public sealed class RefundOperation
     }
     public void ConfirmObservedSuccess(DateTime now)
     {
-        if (State == RefundState.Declined || LastCode == ConflictingProviderOutcomesCode || LeaseExpiresAtUtc > now) throw new InvalidOperationException("Active or contradictory provider claim");
+        if (State == RefundState.Declined || LastCode is ConflictingProviderOutcomesCode or UnverifiedCurrencyCode || LeaseExpiresAtUtc > now) throw new InvalidOperationException("Active or contradictory provider claim");
         State = RefundState.Succeeded; LeaseToken = null; LeaseExpiresAtUtc = null; LastCode = null;
     }
     public void FlagConflictingProviderOutcomes(DateTime now)
     {
         if (State == RefundState.Approved || LeaseExpiresAtUtc > now) throw new InvalidOperationException("Active or undispatched provider claim");
         State = RefundState.ReconciliationRequired; LastCode = ConflictingProviderOutcomesCode; LeaseToken = null; LeaseExpiresAtUtc = null;
+    }
+    public void FlagUnverifiedCurrency(DateTime now)
+    {
+        if (State is RefundState.Succeeded or RefundState.Declined || LeaseExpiresAtUtc > now) throw new InvalidOperationException("Terminal or active provider claim");
+        State = RefundState.ReconciliationRequired; LastCode = UnverifiedCurrencyCode; LeaseToken = null; LeaseExpiresAtUtc = null;
     }
     private static DateTime Microseconds(DateTime value) => value.AddTicks(-(value.Ticks % 10));
 }

@@ -21,6 +21,19 @@ public class RefundFoundationPostgresTests(PostgresSchemaTemplate template) : IC
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
+    public async Task Refund_instruction_cannot_supply_currency_not_owned_by_the_paid_order()
+    {
+        await using Fixture f = await Fixture.Create(template);
+        RefundOperation original = f.Candidate();
+        RefundOperation mismatch = RefundOperation.Create(original.Id, original.OrderId.Value, original.UserId,
+            original.SessionId, original.ChargeReference, original.Amount, "USD", original.PaidAtUtc,
+            original.ApprovedAtUtc, original.ActorId, original.Reason, original.AdmissionEvidence);
+        (await f.Store().PersistApprovedAsync(mismatch, Ct)).IsFailure.Should().BeTrue();
+        await using ApplicationDbContext verify = f.Context();
+        (await verify.Set<RefundOperation>().CountAsync(Ct)).Should().Be(0);
+    }
+
+    [Fact]
     public async Task Late_success_retains_complete_provider_reference_even_when_longer_than_256_characters()
     {
         await using Fixture f = await Fixture.Create(template);
@@ -416,7 +429,7 @@ public class RefundFoundationPostgresTests(PostgresSchemaTemplate template) : IC
             Hall hall = Hall.Create(EntityId<Hall>.New(), "refund"); Movie movie = Movie.CreateManual("refund", "test", 90, 2026, MovieStatus.ComingSoon);
             Pricing pricing = Pricing.New(EntityId<Pricing>.New(), "refund"); DateTime start = DateTime.UtcNow.AddDays(3);
             Session session = Session.Create(EntityId<Session>.New(), start, start.AddHours(2), movie.Id, hall.Id, pricing.Id);
-            Order order = Order.New(EntityId<Order>.New(), 100m, user.Id, session.Id); order.MarkAsPaid("charge_" + Guid.NewGuid().ToString("N"));
+            Order order = Order.New(EntityId<Order>.New(), 100m, user.Id, session.Id); order.MarkAsPaid("charge_" + Guid.NewGuid().ToString("N"), "UAH");
             db.AddRange(user, hall, movie, pricing, session, order); await db.SaveChangesAsync(Ct);
             await DurableRefundProvider.InitializeAsync(connection, Ct);
             return new(connection, admin, name, order);

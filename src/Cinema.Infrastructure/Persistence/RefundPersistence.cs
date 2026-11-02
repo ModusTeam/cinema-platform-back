@@ -10,6 +10,10 @@ public partial class ApplicationDbContext
     private void ValidateRefundWrites()
     {
         ChangeTracker.DetectChanges();
+        foreach (var e in ChangeTracker.Entries<Order>())
+            if (e.State == EntityState.Modified && e.Property(x => x.PaidCurrency).IsModified &&
+                (e.Property(x => x.PaidAt).OriginalValue is not null || e.Property(x => x.PaymentTransactionId).OriginalValue is not null))
+                throw new InvalidOperationException("Confirmed payment currency is immutable");
         foreach (var e in ChangeTracker.Entries<RefundOperation>())
         {
             if (e.State == EntityState.Deleted || e.State == EntityState.Modified && e.Properties.Any(p => p.IsModified && !RefundMutableFields.Contains(p.Metadata.Name)))

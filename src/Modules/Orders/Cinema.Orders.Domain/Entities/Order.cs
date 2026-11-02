@@ -12,6 +12,7 @@ public class Order : BaseEntity
     public decimal PaidAmount { get; private set; }
     public DateTime BookingDate { get; private set; }
     public DateTime? PaidAt { get; private set; }
+    public string? PaidCurrency { get; private set; }
     public OrderStatus Status { get; private set; }
     public string? PaymentTransactionId { get; private set; }
 
@@ -168,11 +169,15 @@ public class Order : BaseEntity
         PaidAmount = TotalAmount - discount;
     }
 
-    public void MarkAsPaid(string externalTransactionId)
+    // Null is an unverified historical/reconciliation fact, never an inferred currency.
+    public void MarkAsPaid(string externalTransactionId, string? currency = null)
     {
+        if (currency is not null && (currency.Length != 3 || !currency.All(char.IsAsciiLetterUpper)))
+            throw new DomainException("Payment currency must be an uppercase three-letter code.");
+        string? confirmedCurrency = PaidAmount > 0 ? currency : null;
         if (Status == OrderStatus.Paid)
         {
-            if (PaymentTransactionId != externalTransactionId)
+            if (PaymentTransactionId != externalTransactionId || currency is not null && PaidCurrency != confirmedCurrency)
                 throw new DomainException("Order was paid with a different transaction.");
             return;
 
@@ -184,6 +189,7 @@ public class Order : BaseEntity
             throw new DomainException("Payment confirmation requires a transaction ID.");
 
         PaymentTransactionId = externalTransactionId;
+        PaidCurrency = confirmedCurrency;
         DateTime confirmedAt = DateTime.UtcNow;
         // Match PostgreSQL precision before staging the outbox copy of this fact.
         PaidAt = confirmedAt.AddTicks(-(confirmedAt.Ticks % TimeSpan.TicksPerMicrosecond));

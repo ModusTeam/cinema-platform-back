@@ -81,6 +81,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         await using (ApplicationDbContext verify = database.NewContext())
         {
             Order order = await verify.Orders.SingleAsync(TestContext.Current.CancellationToken);
+            order.PaidCurrency.Should().Be("UAH");
             initial = await PaymentFactsBodyAsync(verify);
             using JsonDocument json = JsonDocument.Parse(initial);
             JsonElement data = json.RootElement.GetProperty("data");
@@ -116,6 +117,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
         await using ApplicationDbContext reloaded = database.NewContext();
+        (await reloaded.Orders.SingleAsync(TestContext.Current.CancellationToken)).PaidCurrency.Should().Be("UAH");
         List<string> bodies = await reloaded.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>()
             .Where(message => message.MessageType.Contains(":NestJsTicketPurchasedEvent"))
             .Select(message => message.Body).ToListAsync(TestContext.Current.CancellationToken);
