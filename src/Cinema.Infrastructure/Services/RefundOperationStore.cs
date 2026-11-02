@@ -53,7 +53,8 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
             if (op.LastCode != RefundOperation.ConflictingProviderOutcomesCode && !(op.LeaseExpiresAtUtc > now) &&
                 await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == id && x.Outcome == RefundState.Succeeded, ct))
             {
-                if (op.State == RefundState.Declined) op.FlagConflictingSuccess();
+                if (op.State == RefundState.Declined || await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == id && x.Outcome == RefundState.Declined, ct))
+                    op.FlagConflictingProviderOutcomes(now);
                 else op.ConfirmObservedSuccess(now);
                 await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null;
             }
@@ -71,8 +72,9 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '3s'", ct);
             RefundOperation op = await db.Set<RefundOperation>().FromSqlInterpolated($"SELECT * FROM refund_operations WHERE id={claim.OperationId} FOR UPDATE").SingleAsync(ct);
+            DateTime now = await Now(db, ct);
             RefundProviderObservation incoming = RefundProviderObservation.Create(claim.OperationId, claim.Token, State(outcome.Kind), outcome.ProviderReference,
-                outcome.EvidenceCode, outcome.ProviderOccurredAtUtc, await Now(db, ct));
+                outcome.EvidenceCode, outcome.ProviderOccurredAtUtc, now);
             RefundProviderObservation? prior = await db.Set<RefundProviderObservation>().AsNoTracking()
                 .SingleOrDefaultAsync(x => x.OperationId == claim.OperationId && x.ClaimToken == claim.Token, ct);
             if (prior is not null)
@@ -82,7 +84,10 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
             }
             else db.Add(incoming);
             // Serialize with resolution: evidence remains append-only; a stale worker cannot own the head.
-            if (incoming.Outcome == RefundState.Succeeded && op.State == RefundState.Declined) op.FlagConflictingSuccess();
+            if (incoming.Outcome == RefundState.Succeeded && op.State == RefundState.Declined ||
+                incoming.Outcome == RefundState.Declined && op.State == RefundState.Succeeded &&
+                await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == claim.OperationId && x.Outcome == RefundState.Succeeded, ct))
+                op.FlagConflictingProviderOutcomes(now);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
         }, ct);
 
@@ -102,7 +107,8 @@ public sealed class RefundOperationStore(IDbContextFactory<ApplicationDbContext>
             RefundOperation? op = await db.Set<RefundOperation>().FromSqlInterpolated($"SELECT * FROM refund_operations WHERE id={claim.OperationId} FOR UPDATE").SingleOrDefaultAsync(ct);
             DateTime now = await Now(db, ct);
             if (op is null || op.State != RefundState.Dispatching || op.LeaseToken != claim.Token || op.LeaseExpiresAtUtc <= now) return false;
-            if (outcome == RefundState.Declined && await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == claim.OperationId && x.Outcome == RefundState.Succeeded, ct))
+            RefundState? conflictingOutcome = outcome switch { RefundState.Declined => RefundState.Succeeded, RefundState.Succeeded => RefundState.Declined, _ => null };
+            if (conflictingOutcome is not null && await db.Set<RefundProviderObservation>().AnyAsync(x => x.OperationId == claim.OperationId && x.Outcome == conflictingOutcome, ct))
             {
                 outcome = RefundState.ReconciliationRequired; code = RefundOperation.ConflictingProviderOutcomesCode;
             }

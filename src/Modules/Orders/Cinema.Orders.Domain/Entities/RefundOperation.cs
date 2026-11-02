@@ -87,10 +87,10 @@ public sealed class RefundOperation
         if (State == RefundState.Declined || LastCode == ConflictingProviderOutcomesCode || LeaseExpiresAtUtc > now) throw new InvalidOperationException("Active or contradictory provider claim");
         State = RefundState.Succeeded; LeaseToken = null; LeaseExpiresAtUtc = null; LastCode = null;
     }
-    public void FlagConflictingSuccess()
+    public void FlagConflictingProviderOutcomes(DateTime now)
     {
-        if (State != RefundState.Declined) throw new InvalidOperationException("Expected a contradictory decline");
-        State = RefundState.ReconciliationRequired; LastCode = ConflictingProviderOutcomesCode;
+        if (State == RefundState.Approved || LeaseExpiresAtUtc > now) throw new InvalidOperationException("Active or undispatched provider claim");
+        State = RefundState.ReconciliationRequired; LastCode = ConflictingProviderOutcomesCode; LeaseToken = null; LeaseExpiresAtUtc = null;
     }
     private static DateTime Microseconds(DateTime value) => value.AddTicks(-(value.Ticks % 10));
 }

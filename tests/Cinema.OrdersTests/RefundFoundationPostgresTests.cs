@@ -20,6 +20,51 @@ namespace Cinema.OrdersTests;
 public class RefundFoundationPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Stale_decline_and_newer_success_require_reconciliation_in_either_order(bool successFirst)
+    {
+        await using Fixture f = await Fixture.Create(template);
+        RefundOperationStore store = f.Store();
+        Guid id = (await store.PersistApprovedAsync(f.Candidate(), Ct)).Value.Id;
+        RefundClaim stale = (await store.ClaimAsync(id, Ct))!;
+        await f.Due(id, true);
+        RefundClaim current = (await store.ClaimAsync(id, Ct))!;
+        RefundProviderOutcome decline = new(RefundOutcomeKind.Declined, EvidenceCode: "STALE_DECLINE");
+        if (!successFirst) await store.ObserveAsync(stale, decline, Ct);
+        await store.ObserveAsync(current, new(RefundOutcomeKind.Succeeded, "newer-success"), Ct);
+        (await store.ResolveAsync(current, RefundState.Succeeded, null, Ct)).Should().BeTrue();
+        if (successFirst) await store.ObserveAsync(stale, decline, Ct);
+        (await store.ResolveAsync(stale, RefundState.Declined, null, Ct)).Should().BeFalse();
+        (await store.GetAsync(id, Ct))!.State.Should().Be(RefundState.ReconciliationRequired);
+        (await store.GetAsync(id, Ct))!.LastCode.Should().Be("CONFLICTING_PROVIDER_OUTCOMES");
+        await using ApplicationDbContext verify = f.Context();
+        (await verify.Set<RefundProviderObservation>().CountAsync(Ct)).Should().Be(2);
+        UnsupportedProvider provider = new();
+        (await new RefundExecutor(f.Store(), provider).ExecuteAsync(id, Ct)).Should().Be(RefundState.ReconciliationRequired);
+        provider.Calls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Recovery_cannot_promote_success_when_both_outcomes_were_committed_before_head_resolution()
+    {
+        await using Fixture f = await Fixture.Create(template);
+        RefundOperationStore store = f.Store();
+        Guid id = (await store.PersistApprovedAsync(f.Candidate(), Ct)).Value.Id;
+        RefundClaim stale = (await store.ClaimAsync(id, Ct))!;
+        await f.Due(id, true);
+        RefundClaim current = (await store.ClaimAsync(id, Ct))!;
+        await store.ObserveAsync(stale, new(RefundOutcomeKind.Declined), Ct);
+        await store.ObserveAsync(current, new(RefundOutcomeKind.Succeeded, "unresolved-success"), Ct);
+        await f.Due(id, true);
+        UnsupportedProvider provider = new();
+        (await new RefundExecutor(f.Store(), provider).ExecuteAsync(id, Ct)).Should().Be(RefundState.ReconciliationRequired);
+        provider.Calls.Should().Be(0);
+        (await store.GetAsync(id, Ct))!.LastCode.Should().Be("CONFLICTING_PROVIDER_OUTCOMES");
+        (await store.SuccessfulObservationAsync(id, Ct))!.ProviderReference.Should().Be("unresolved-success");
+    }
+
     [Fact]
     public async Task Repeated_observation_with_submicrosecond_timestamp_is_an_exact_replay()
     {
