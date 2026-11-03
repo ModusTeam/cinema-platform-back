@@ -9,6 +9,7 @@ using Cinema.Application.Orders.Queries.CalculateCheckoutPreview;
 using Cinema.Application.Orders.Queries.GetOrderStatus;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Serialization;
 
 namespace Cinema.Api.Controllers;
 
@@ -98,8 +99,8 @@ public class OrdersController : ApiController
     }
 }
 
-public record CreateOrderRequest(Guid SessionId, List<Guid> SeatIds, string PaymentToken, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);
-public record ReserveOrderRequest(Guid SessionId, List<Guid> SeatIds);
-public record StartCheckoutRequest(string PaymentToken, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);
-public record LoyaltyDiscountPreviewRequest(Guid SessionId, List<Guid> SeatIds);
-public record CheckoutPreviewRequest(Guid SessionId, List<Guid> SeatIds, bool UseLoyaltyPoints, bool ApplyGoldUpgrade);
+public record CreateOrderRequest([property: JsonRequired] Guid SessionId, List<Guid> SeatIds, string PaymentToken, bool UseLoyaltyPoints = false, bool ApplyGoldUpgrade = false);
+public record ReserveOrderRequest([property: JsonRequired] Guid SessionId, List<Guid> SeatIds);
+public record StartCheckoutRequest(string PaymentToken, bool UseLoyaltyPoints = false, bool ApplyGoldUpgrade = false);
+public record LoyaltyDiscountPreviewRequest([property: JsonRequired] Guid SessionId, List<Guid> SeatIds);
+public record CheckoutPreviewRequest([property: JsonRequired] Guid SessionId, List<Guid> SeatIds, bool UseLoyaltyPoints = false, bool ApplyGoldUpgrade = false);

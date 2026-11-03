@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MediatR;
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using Cinema.Application.AdminLoyalty.Commands;
 using Cinema.Application.AdminLoyalty.Queries;
 using Cinema.Application.AdminLoyalty.GrantVipStatus;
@@ -70,5 +71,5 @@ namespace Cinema.Api.Controllers.Admin
         }
     }
     public record GrantVipRequestDto(string Reason);
-    public record ModifyPointsRequestDto(Guid UserId, int Points, string Reason);
+    public record ModifyPointsRequestDto([property: JsonRequired] Guid UserId, [property: JsonRequired] int Points, string Reason);
 }

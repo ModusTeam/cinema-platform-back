@@ -7,6 +7,7 @@ using Cinema.Application.Seats.Dtos;
 using Cinema.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Serialization;
 
 namespace Cinema.Api.Controllers;
 
@@ -53,4 +54,4 @@ public class SeatsController : ApiController
     }
 }
 
-public record UpdateSeatStatusRequest(SeatStatus Status);
+public record UpdateSeatStatusRequest([property: JsonRequired] SeatStatus Status);

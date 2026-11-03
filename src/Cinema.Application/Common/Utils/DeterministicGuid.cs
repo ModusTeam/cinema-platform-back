@@ -11,6 +11,8 @@ public static class DeterministicGuid
             throw new ArgumentNullException(nameof(input));
 
         byte[] inputBytes = Encoding.UTF8.GetBytes(input);
+        // Legacy Loyalty deduplication keys depend on these exact bytes. This is not
+        // a security token; changing the hash requires an explicit identity migration.
         byte[] hashBytes = MD5.HashData(inputBytes);
 
         // Set version to 3 (0011) - MD5-based UUID

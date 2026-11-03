@@ -24,7 +24,7 @@ public class IdempotencyBehavior<TRequest, TResponse>(
             
             return JsonSerializer.Deserialize<TResponse>(cachedResult)!;
         }
-        var response = await next();
+        var response = await next(cancellationToken);
         
         var options = new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24) };
         var serialized = JsonSerializer.Serialize(response);
