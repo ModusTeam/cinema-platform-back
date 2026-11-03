@@ -23,6 +23,7 @@ public class SearchTmdbQueryHandler(
 {
     public async Task<List<TmdbSearchResult>> Handle(SearchTmdbQuery request, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(request.Query)) return [];
 
         var cacheKey = $"{TmdbConstants.SearchCacheKeyPrefix}{request.Query.Trim().ToLower()}";
@@ -39,7 +40,7 @@ public class SearchTmdbQueryHandler(
                     return new List<TmdbSearchResult>();
                 }
 
-                var response = await tmdbApi.SearchMoviesAsync(request.Query, settings.Value.ApiKey);
+                var response = await tmdbApi.SearchMoviesAsync(request.Query, settings.Value.ApiKey, ct);
                 if (response?.Results == null) 
                 {
                     logger.LogWarning("TMDB returned null results for query: {Query}", request.Query);
@@ -60,7 +61,7 @@ public class SearchTmdbQueryHandler(
                 logger.LogError(apiEx, "TMDB API Error: {StatusCode} - {Content}", apiEx.StatusCode, apiEx.Content);
                 return new List<TmdbSearchResult>();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogError(ex, "Failed to search TMDB for query: {Query}", request.Query);
                 return new List<TmdbSearchResult>();

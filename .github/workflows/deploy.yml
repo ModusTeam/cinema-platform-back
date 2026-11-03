@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-backend-main
   cancel-in-progress: true
@@ -14,62 +17,35 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - name: "[DEBUG] Show runner info"
+      - name: Validate trusted deployment configuration
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.HOST }}
+          DEPLOY_USER: ${{ secrets.USERNAME }}
+          DEPLOY_KEY: ${{ secrets.SSH_KEY }}
+          DEPLOY_FINGERPRINT: ${{ secrets.SSH_HOST_FINGERPRINT }}
         run: |
-          echo "=========================================="
-          echo "Runner IP (IPv4):"
-          curl -s https://api.ipify.org
-          echo ""
-          echo "Runner OS: $(uname -a)"
-          echo "=========================================="
-
-      - name: "[DEBUG] Test TCP port 22"
-        run: |
-          echo "=========================================="
-          echo "Target host: ${{ secrets.HOST }}"
-          echo "Testing port 22 with nc (timeout 10s)..."
-          nc -zv -w 10 ${{ secrets.HOST }} 22 \
-            && echo "✅ PORT 22 IS OPEN" \
-            || echo "❌ PORT 22 IS CLOSED OR TIMEOUT"
-          echo "=========================================="
-
-      - name: "[DEBUG] Validate SSH key format"
-        run: |
-          echo "=========================================="
-          echo "Checking SSH key format..."
-          echo "${{ secrets.SSH_KEY }}" > /tmp/test_key
-          chmod 600 /tmp/test_key
-          ssh-keygen -l -f /tmp/test_key \
-            && echo "✅ SSH key is VALID" \
-            || echo "❌ SSH key is INVALID or wrong format"
-          rm -f /tmp/test_key
-          echo "=========================================="
-
-      - name: "[DEBUG] Test SSH handshake (verbose)"
-        run: |
-          echo "=========================================="
-          echo "Testing SSH connection with verbose output..."
-          echo "${{ secrets.SSH_KEY }}" > /tmp/test_key
-          chmod 600 /tmp/test_key
-          ssh -vvv \
-            -o StrictHostKeyChecking=no \
-            -o ConnectTimeout=15 \
-            -o BatchMode=yes \
-            -i /tmp/test_key \
-            ${{ secrets.USERNAME }}@${{ secrets.HOST }} \
-            "echo '✅ SSH CONNECTION SUCCESSFUL'" \
-            2>&1 | head -50
-          rm -f /tmp/test_key
-          echo "=========================================="
+          set -euo pipefail
+          if [[ -z "$DEPLOY_HOST" || -z "$DEPLOY_USER" || -z "$DEPLOY_KEY" ]]; then
+            echo '::error::Required deployment credentials are missing.'
+            exit 1
+          fi
+          if [[ ! "$DEPLOY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]; then
+            echo '::error::SSH_HOST_FINGERPRINT must contain an independently verified SHA256 host fingerprint.'
+            exit 1
+          fi
 
       - name: Clean remote backend workspace (remove stale files)
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
           script: |
             set -euo pipefail
             echo "Cleaning /root/cinema-platform/backend ..."
@@ -77,20 +53,22 @@ jobs:
             mkdir -p /root/cinema-platform/backend
 
       - name: Copy files via SSH (fresh sync)
-        uses: appleboy/scp-action@v0.1.4
+        uses: appleboy/scp-action@8a92fcdb1eb4ffbf538b2fa286739760aac8a95b # v0.1.4
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
           source: "."
           target: "/root/cinema-platform/backend"
 
       - name: Build and Restart .NET Container
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
           script: |
             set -euo pipefail
             cd /root/cinema-platform

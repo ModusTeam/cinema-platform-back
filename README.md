@@ -574,6 +574,56 @@ Configure any SMTP server in `appsettings.json`:
 
 ---
 
+## Deployment security prerequisites
+
+The `Deploy .NET Backend` workflow is manually disabled in GitHub. This change does
+not enable it. If enabled separately, it runs on pushes to `main`; complete and
+verify these prerequisites before merging deployment changes or enabling it:
+
+- Retain the existing `HOST`, `USERNAME` and `SSH_KEY` repository secrets.
+- Provision `SSH_HOST_FINGERPRINT` as the intended server host key's SHA-256
+  fingerprint: `SHA256:` followed by 43 unpadded Base64 characters. Obtain it through
+  an independently authenticated server console or an already trusted administrator
+  channel, for example with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`
+  **on the trusted server console**. Verify the host and selected host key out of band.
+  Do not bootstrap trust using unauthenticated `ssh-keyscan` or a deployment connection.
+  Store only the fingerprint token, not the full command output, in the secret.
+- Missing/malformed configuration fails before remote operations. All SSH/SCP actions
+  verify that fingerprint; rotation requires independent verification and updating the
+  secret. There is no insecure fallback. Real connectivity must be tested separately
+  by an authorized operator; CI syntax checks cannot establish it.
+
+Actions are pinned to upstream commits with version comments, and the GitHub token
+has read-only contents access and is not persisted in the checkout. Existing remote
+commands still delete `/root/cinema-platform/backend`, copy the source, rebuild/restart
+`cinema-api`, and prune unused images. This remains a destructive, non-atomic deployment;
+operators must verify that path and have a recovery plan. No deployment is executed
+by local validation. The pinned Appleboy actions still consume version-tagged Docker
+images (`drone-ssh:1.7.3`, `drone-scp:1.6.7`); an action SHA alone does not pin those
+image digests or certify their transitive dependencies. Upstream also labels SCP
+`v0.1.6` a security patch. Compatibility-tested action/image maintenance remains a
+prerequisite to re-enabling deployment; this PR preserves the current action versions.
+
+## API and Loyalty compatibility notes
+
+Order request `sessionId` and admin points request `userId`/`points` must be present
+in JSON. Existing command validation continues to reject empty GUIDs and zero point
+adjustments; negative admin adjustments remain supported. Omitted `useLoyaltyPoints`
+and `applyGoldUpgrade` remain `false`. Seat status updates require an explicit `status`;
+undefined enum values (including `0`) still fail existing validation.
+Payment/refund recovery persistence keeps its
+existing cancellation policy after external side effects.
+
+`DeterministicGuid` deliberately retains its legacy MD5 mapping for `deduct-{orderId}`
+and `refund-{orderId}`. Inputs are fixed operation prefixes and backend-generated order
+UUIDs, not arbitrary user text; these identifiers are neither authentication tokens
+nor signatures. Loyalty persists the exact key and checks operation/user/order/amount
+on replay. Switching the algorithm would bypass historical deduplication and could
+repeat a financial operation. Compatibility vectors lock down the existing mapping.
+The Sonar weak-hash finding remains an explicitly documented compatibility risk for
+human risk acceptance; no analyzer suppression or Quality Gate relaxation is added.
+Any future algorithm change requires an explicit historical identity migration.
+
 ## 📜 License
 
 This project is licensed under the **MIT License**.
