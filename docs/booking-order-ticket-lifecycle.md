@@ -14,6 +14,10 @@ Availability, booking validation, session occupancy, and session or seat changes
 
 ## Target ownership and transitions
 
+Ticket validation coordinates with durable refunds using Session SHARE -> Order UPDATE -> Ticket UPDATE. After locked reload, every RefundOperation state blocks ticket use until an explicit resolution workflow releases ownership; Declined or an expired lease is not an access-reopening signal. The existing Admin endpoint policy, same-day UTC rule and ticket status errors remain unchanged. Concurrent validations serialize and only one may commit Used.
+
+Legacy paid cancellation checks durable ownership under the same lock order before external effects. This is not a durable cancellation claim: an already in-flight legacy refund may still overlap a later approval or ticket use and overwrite Used on its old save path. Both windows are explicit activation blockers; they require durable legacy execution ownership/recovery, not a transaction held across provider calls. New refund execution stays inactive.
+
 Redis locks are short lived admission hints. A `Ticket` in `Reserved` status is the durable reservation owned by `OrderId`; it is not a purchased ticket. `Valid` means confirmed purchase, `Used` means admission, `Refunded` means a purchase was refunded, and `Released` means an unpaid reservation ended. Historical rows remain. `PaymentProcessing` and `PaymentOutcomeUnknown` retain the reservation until a definitive outcome is established. No separate reservation aggregate is needed because a ticket already carries order, session, and seat identity and has its own historical row.
 
 | Order | Ticket | Meaning |

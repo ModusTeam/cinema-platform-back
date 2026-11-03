@@ -8,6 +8,7 @@ using Cinema.Application.Orders.Services;
 using System.Data;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using System.Data.Common;
 
 namespace Cinema.Application.Orders.Commands.CancelOrder;
 
@@ -80,6 +81,13 @@ public class CancelOrderCommandHandler(
             }
         }
 
+        if (order.Status == OrderStatus.Paid)
+        {
+            Result<List<Ticket>> guard = await GuardPaidSourceAsync(order, currentUserId, isAdmin, ct);
+            if (guard.IsFailure) return Result.Failure(guard.Error);
+            tickets = guard.Value;
+        }
+
         if (!string.IsNullOrEmpty(order.PaymentTransactionId) && order.Status == OrderStatus.Paid)
         {
             var refundResult = await paymentService.RefundPaymentAsync(order.PaymentTransactionId, ct);
@@ -148,4 +156,57 @@ public class CancelOrderCommandHandler(
 
         return Result.Success();
     }
+
+    // An authoritative preflight, NOT a durable cancellation claim. Once this transaction
+    // commits, a later approval can still overlap the legacy network call. Activation blocker.
+    private async Task<Result<List<Ticket>>> GuardPaidSourceAsync(Order order, Guid? userId, bool isAdmin, CancellationToken ct)
+    {
+        try
+        {
+            if (!context.Database.IsRelational())
+            {
+                if (await context.RefundOperations.AnyAsync(x => x.OrderId == order.Id, ct)) return RefundOwned();
+                return Result.Success(await context.Tickets.IgnoreQueryFilters().Where(x => x.OrderId == order.Id).ToListAsync(ct));
+            }
+            if (context.Database.CurrentTransaction is not null) throw new InvalidOperationException("Fresh cancellation scope required.");
+            return await new CheckoutExecutionStrategy(context).ExecuteAsync(async () =>
+            {
+                var sessionId = order.SessionId;
+                await using var transaction = await context.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+                await context.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '3s'", ct);
+                await context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM sessions WHERE id={sessionId.Value} FOR SHARE", ct);
+                await context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM orders WHERE id={order.Id.Value} FOR UPDATE", ct);
+                foreach (var entry in context.ChangeTracker.Entries<Order>().Where(x => x.Entity.Id == order.Id).ToList()) await entry.ReloadAsync(ct);
+                if (order.UserId != userId && !isAdmin) return Invalid("Order.NotFound", "Order not found.");
+                if (order.Status != OrderStatus.Paid || order.SessionId != sessionId) return Invalid("Order.InvalidState", "Order state changed during cancellation.");
+                if (await context.RefundOperations.AsNoTracking().AnyAsync(x => x.OrderId == order.Id, ct)) return RefundOwned();
+                List<Ticket> current = await context.Tickets.FromSqlInterpolated($"SELECT * FROM tickets WHERE order_id={order.Id.Value} ORDER BY id FOR UPDATE")
+                    .IgnoreQueryFilters().ToListAsync(ct);
+                foreach (var entry in context.ChangeTracker.Entries<Ticket>().Where(x => current.Contains(x.Entity)).ToList()) await entry.ReloadAsync(ct);
+                if (order.GoldPaymentOutcomeUnknown) return Invalid("Order.PaymentReconciliationRequired", "Payment outcome requires reconciliation.");
+                if (order.GoldCheckoutState is GoldCheckoutState.UsePending or GoldCheckoutState.Consumed or GoldCheckoutState.CompensationPending)
+                    return Invalid("Order.GoldRecoveryRequired", "GOLD recovery must finish first.");
+                if (current.Count == 0 || current.Any(x => x.OrderId != order.Id || x.SessionId != order.SessionId || x.TicketStatus != TicketStatus.Valid) ||
+                    order.PaidAmount > 0 && string.IsNullOrEmpty(order.PaymentTransactionId))
+                    return Invalid("Order.InvalidState", "Paid source requires reconciliation.");
+                if (!isAdmin)
+                {
+                    DateTime? start = await context.Sessions.IgnoreQueryFilters().AsNoTracking().Where(x => x.Id == sessionId).Select(x => (DateTime?)x.StartTime).SingleOrDefaultAsync(ct);
+                    if (start is null) return Invalid("Order.InvalidState", "Order session is unavailable.");
+                    if (start <= DateTime.UtcNow.AddMinutes(10)) return Invalid("Order.TooLate", "Cancellation is only allowed up to 10 minutes before the session starts.");
+                }
+                await transaction.CommitAsync(ct);
+                return Result.Success(current);
+            });
+        }
+        catch (Exception exception) when (exception is DbException { SqlState: "55P03" } || exception.InnerException is DbException { SqlState: "55P03" })
+        {
+            context.ClearChangeTracker();
+            return Invalid("Order.Busy", "Order lifecycle is being modified. Retry later.");
+        }
+        catch { context.ClearChangeTracker(); throw; }
+    }
+
+    private static Result<List<Ticket>> RefundOwned() => Invalid("Order.RefundLifecycleOwned", "Use the durable refund resolution workflow for this order.");
+    private static Result<List<Ticket>> Invalid(string code, string message) => Result.Failure<List<Ticket>>(new Error(code, message));
 }

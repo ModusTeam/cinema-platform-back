@@ -18,6 +18,7 @@ public interface IApplicationDbContext
     DbSet<Genre> Genres { get; }
     DbSet<PricingItem> PricingItems { get; }
     DbSet<Order> Orders { get; }
+    DbSet<RefundOperation> RefundOperations { get; }
     DbSet<User> Users { get; }
     DbSet<Ticket> Tickets { get; }
     DbSet<SeatLock> SeatLocks { get; }
