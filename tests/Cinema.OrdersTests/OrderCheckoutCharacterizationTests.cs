@@ -473,7 +473,7 @@ public class OrderCheckoutCharacterizationTests
         (await fixture.Context.Orders.SingleAsync(TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.PaymentOutcomeUnknown);
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(fixture.UserId);
-        Result cancellation = await new CancelOrderCommandHandler(fixture.Context, currentUser, fixture.Payment, fixture.Loyalty)
+        Result cancellation = await new CancelOrderCommandHandler(fixture.Context, currentUser)
             .Handle(new CancelOrderCommand(fixture.Order.Id.Value), TestContext.Current.CancellationToken);
         cancellation.Error.Code.Should().Be("Order.PaymentReconciliationRequired");
         await fixture.Loyalty.Received(1).RollbackGoldUpgradeAsync(fixture.UserId, fixture.Order.Id.Value, Arg.Any<CancellationToken>());

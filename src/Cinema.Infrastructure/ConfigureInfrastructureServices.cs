@@ -81,6 +81,7 @@ public static class ConfigureInfrastructureServices
         services.AddScoped<SessionCompletionService>();
         services.AddSingleton<SessionCompletionJob>();
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
+        services.AddScoped<IPaidOrderCancellation, PaidOrderCancellation>();
 
         return services;
     }

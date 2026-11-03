@@ -64,7 +64,9 @@ public sealed class PostgresSchemaTemplate : IAsyncDisposable
                 .UseNpgsql(templateConnectionString, x => x.UseVector())
                 .UseSnakeCaseNamingConvention().Options;
             await using ApplicationDbContext context = new(options);
-            await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
+            // Production uses migrations, including durable lifecycle arbitration
+            // and immutable-evidence triggers that EnsureCreated would omit.
+            await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
             return new TemplateDatabase(templateConnectionString, adminConnectionString, databaseName);
         }
         catch

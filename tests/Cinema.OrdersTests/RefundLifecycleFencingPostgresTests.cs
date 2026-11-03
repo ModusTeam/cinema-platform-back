@@ -34,7 +34,7 @@ public partial class RefundAdmissionPostgresTests
     }
 
     [Fact]
-    public async Task Legacy_in_flight_without_durable_claim_still_allows_ticket_use_ACTIVATION_BLOCKER()
+    public async Task Paid_cancellation_claim_blocks_ticket_use_while_provider_is_in_flight()
     {
         await using Fixture f = await Fixture.Create(template);
         await using ApplicationDbContext cancellation = f.Context(); IPaymentService payment = Substitute.For<IPaymentService>(); ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
@@ -46,7 +46,7 @@ public partial class RefundAdmissionPostgresTests
         {
             await using ApplicationDbContext validation = f.Context();
             Guid id = (await validation.Tickets.IgnoreQueryFilters().SingleAsync(Ct)).Id.Value;
-            (await new ValidateTicketCommandHandler(validation, new ScreeningClock(f.Start)).Handle(new(id), Ct)).IsSuccess.Should().BeTrue();
+            (await new ValidateTicketCommandHandler(validation, new ScreeningClock(f.Start)).Handle(new(id), Ct)).Error.Code.Should().Be("Ticket.RefundResolutionRequired");
         }
         finally { release.TrySetResult(); }
         (await cancel).IsSuccess.Should().BeTrue();
@@ -267,14 +267,14 @@ public partial class RefundAdmissionPostgresTests
         loyalty.RollbackGoldUpgradeAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((true, string.Empty));
         (await Legacy(f, context, payment, loyalty).Handle(new(f.Order.Id.Value), Ct)).Error.Code.Should().Be("Order.RefundLifecycleOwned");
         ICurrentUserService other = Substitute.For<ICurrentUserService>(); other.UserId.Returns(Guid.NewGuid());
-        (await new CancelOrderCommandHandler(context, other, payment, loyalty).Handle(new(f.Order.Id.Value), Ct)).Error.Code.Should().Be("Order.NotFound");
+        (await new CancelOrderCommandHandler(context, other).Handle(new(f.Order.Id.Value), Ct)).Error.Code.Should().Be("Order.NotFound");
         await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, Ct);
         await loyalty.DidNotReceiveWithAnyArgs().RefundPointsAsync(default, default, default, default!, Ct);
         await loyalty.DidNotReceiveWithAnyArgs().RollbackGoldUpgradeAsync(default, default, Ct);
     }
 
     [Fact]
-    public async Task Legacy_provider_call_already_in_flight_can_overlap_later_approval_ACTIVATION_BLOCKER()
+    public async Task Paid_cancellation_claim_blocks_later_ordinary_approval_without_holding_network_locks()
     {
         await using Fixture f = await Fixture.Create(template);
         await using ApplicationDbContext context = f.Context(); IPaymentService payment = Substitute.For<IPaymentService>(); ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
@@ -288,14 +288,14 @@ public partial class RefundAdmissionPostgresTests
             await using NpgsqlConnection probe = new(f.Connection); await probe.OpenAsync(Ct);
             await using NpgsqlCommand command = new("SELECT id FROM orders WHERE id=@id FOR UPDATE NOWAIT", probe);
             command.Parameters.AddWithValue("id", f.Order.Id.Value); await command.ExecuteNonQueryAsync(Ct);
-            (await f.Admission().ApproveAsync(f.Order.Id.Value, Guid.NewGuid(), Ct)).IsSuccess.Should().BeTrue();
+            (await f.Admission().ApproveAsync(f.Order.Id.Value, Guid.NewGuid(), Ct)).Error.Code.Should().Be("Refund.CancellationOwned");
         }
         finally { release.TrySetResult(); }
         (await cancel).IsSuccess.Should().BeTrue();
         await payment.Received(1).RefundPaymentAsync(f.Order.PaymentTransactionId!, Arg.Any<CancellationToken>());
         await using ApplicationDbContext verify = f.Context();
         (await verify.Orders.SingleAsync(Ct)).Status.Should().Be(OrderStatus.Cancelled);
-        (await verify.Set<RefundOperation>().SingleAsync(Ct)).State.Should().Be(RefundState.Approved);
+        (await verify.Set<RefundOperation>().CountAsync(Ct)).Should().Be(0);
     }
 
     [Fact]
@@ -313,7 +313,7 @@ public partial class RefundAdmissionPostgresTests
     private static CancelOrderCommandHandler Legacy(Fixture f, ApplicationDbContext db, IPaymentService payment, ILoyaltyService loyalty)
     {
         ICurrentUserService user = Substitute.For<ICurrentUserService>(); user.UserId.Returns(f.Order.UserId);
-        return new(db, user, payment, loyalty);
+        return new(db, user, f.Cancellation(payment, loyalty));
     }
 
     private sealed class InitialTicketReads : DbCommandInterceptor

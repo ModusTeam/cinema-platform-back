@@ -83,7 +83,8 @@ public class ValidateTicketCommandHandler(IApplicationDbContext context, TimePro
 
         // Every durable operation owns the lifecycle until an explicit resolution releases it.
         // Even Declined has no approved ticket-reopening protocol and may have late conflicting evidence.
-        if (await context.RefundOperations.AsNoTracking().AnyAsync(x => x.OrderId == ticket.OrderId, ct))
+        if (await context.RefundOperations.AsNoTracking().AnyAsync(x => x.OrderId == ticket.OrderId, ct) ||
+            await context.PaidCancellations.AsNoTracking().AnyAsync(x => x.OrderId == ticket.OrderId, ct))
             return Result.Failure<string>(new Error("Ticket.RefundResolutionRequired", "Refund resolution is required before ticket use."));
         
         if (ticket.Session!.StartTime.Date != (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime.Date)

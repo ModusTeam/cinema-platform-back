@@ -45,6 +45,8 @@ public sealed partial class RefundOperationStore
                 Order? order = await db.Orders.FromSqlInterpolated($"SELECT * FROM orders WHERE id={orderId} FOR UPDATE")
                     .IgnoreQueryFilters().SingleOrDefaultAsync(ct);
                 if (order is null || order.UserId != actor) return Failure("Order.NotFound", "Order not found.");
+                if (await db.PaidCancellations.AnyAsync(x => x.OrderId == order.Id, ct))
+                    return Failure("Refund.CancellationOwned", "Paid cancellation owns this order lifecycle.");
                 if (session is null || order.SessionId != source.SessionId) return Failure("Refund.SourceMismatch", "Order session requires reconciliation.");
                 RefundOperation? existing = await db.Set<RefundOperation>().SingleOrDefaultAsync(x => x.OrderId == order.Id, ct);
                 if (existing is not null)

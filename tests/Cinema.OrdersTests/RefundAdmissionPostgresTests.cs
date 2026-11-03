@@ -16,6 +16,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using NSubstitute;
 using Xunit;
@@ -256,11 +257,20 @@ public partial class RefundAdmissionPostgresTests(PostgresSchemaTemplate templat
 
     private sealed class Fixture(string connection, string admin, string name, Order order, DateTime start) : IAsyncDisposable
     {
+        private readonly List<ServiceProvider> cancellationProviders = [];
         public string Connection => connection; public Order Order => order; public DateTime Start => start;
         private DbContextOptions<ApplicationDbContext> Options(IInterceptor[] interceptors) => new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseNpgsql(connection, pg => { pg.UseVector(); pg.EnableRetryOnFailure(3); }).UseSnakeCaseNamingConvention().AddInterceptors(interceptors).Options;
         public ApplicationDbContext Context(params IInterceptor[] interceptors) => new(Options(interceptors));
         public RefundOperationStore Store(params IInterceptor[] interceptors) => new(new PooledDbContextFactory<ApplicationDbContext>(Options(interceptors)));
+        public PaidOrderCancellation Cancellation(IPaymentService payment, ILoyaltyService loyalty, params IInterceptor[] interceptors)
+        {
+            ServiceCollection services = new();
+            services.AddDbContext<ApplicationDbContext>(b => b.UseNpgsql(connection, p => { p.UseVector(); p.EnableRetryOnFailure(3); })
+                .UseSnakeCaseNamingConvention().AddInterceptors(interceptors));
+            ServiceProvider provider = services.BuildServiceProvider(); cancellationProviders.Add(provider);
+            return new(provider.GetRequiredService<IServiceScopeFactory>(), payment, loyalty);
+        }
         public OrdinaryRefundAdmission Admission(Guid? actor = null, IInterceptor[]? interceptors = null)
         {
             ICurrentUserService user = Substitute.For<ICurrentUserService>(); Guid id = actor ?? order.UserId;
@@ -295,7 +305,7 @@ public partial class RefundAdmissionPostgresTests(PostgresSchemaTemplate templat
             db.AddRange(user, hall, movie, pricing, session, type, seat, order, ticket); await db.SaveChangesAsync(Ct);
             return new(connection, admin, name, order, start);
         }
-        public async ValueTask DisposeAsync() { await using NpgsqlConnection db = new(admin); await db.OpenAsync(); await using NpgsqlCommand drop = new($"DROP DATABASE {name} WITH (FORCE)", db); await drop.ExecuteNonQueryAsync(); }
+        public async ValueTask DisposeAsync() { foreach (ServiceProvider provider in cancellationProviders) await provider.DisposeAsync(); await using NpgsqlConnection db = new(admin); await db.OpenAsync(); await using NpgsqlCommand drop = new($"DROP DATABASE {name} WITH (FORCE)", db); await drop.ExecuteNonQueryAsync(); }
     }
     private sealed class PauseSave : SaveChangesInterceptor
     {
