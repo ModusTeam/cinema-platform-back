@@ -22,7 +22,7 @@ using Xunit;
 
 namespace Cinema.OrdersTests;
 
-public class RefundAdmissionPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
+public partial class RefundAdmissionPostgresTests(PostgresSchemaTemplate template) : IClassFixture<PostgresSchemaTemplate>
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
@@ -49,24 +49,6 @@ public class RefundAdmissionPostgresTests(PostgresSchemaTemplate template) : ICl
         (await f.Admission().ApproveAsync(f.Order.Id.Value, Guid.NewGuid(), Ct)).Error.Code.Should().Be("Refund.IdentityConflict");
     }
 
-    [Fact]
-    public async Task Admission_first_retains_its_valid_ticket_snapshot_before_later_ticket_use()
-    {
-        await using Fixture f = await Fixture.Create(template); PauseSave pause = new();
-        Task<Result<RefundOperation>> approval = f.Admission(interceptors: [pause]).ApproveAsync(f.Order.Id.Value, Guid.NewGuid(), Ct);
-        await pause.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
-        await using ApplicationDbContext writer = f.Context();
-        Task<int> change = writer.Database.ExecuteSqlInterpolatedAsync($"UPDATE tickets SET ticket_status={(int)TicketStatus.Used} WHERE order_id={f.Order.Id.Value}", Ct);
-        try { await f.WaitForLock(); change.IsCompleted.Should().BeFalse(); }
-        finally { pause.Release.TrySetResult(); }
-        RefundOperation op = (await approval).Value; await change;
-        using JsonDocument evidence = JsonDocument.Parse(op.AdmissionEvidence);
-        evidence.RootElement.GetProperty("tickets")[0].GetProperty("status").GetString().Should().Be("Valid");
-        await using ApplicationDbContext verify = f.Context();
-        (await verify.Tickets.IgnoreQueryFilters().SingleAsync(Ct)).TicketStatus.Should().Be(TicketStatus.Used);
-        // Admission is historical evidence, not an activated reservation or monetary executor.
-        (await verify.Set<RefundOperation>().SingleAsync(Ct)).State.Should().Be(RefundState.Approved);
-    }
     [Fact]
     public async Task Historical_operation_with_unverified_currency_cannot_reach_provider_execution()
     {
