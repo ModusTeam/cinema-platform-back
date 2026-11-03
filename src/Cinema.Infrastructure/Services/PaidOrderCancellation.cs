@@ -174,6 +174,8 @@ public sealed class PaidOrderCancellation(
             DateTime now = await Now(db, ct);
             if (!admin && session.StartTime <= now.AddMinutes(10))
                 return Reject("Order.TooLate", "Cancellation is only allowed up to 10 minutes before the session starts.");
+            if (order.PaidAmount > 0 && order.PaidCurrency is null)
+                return Reject("Order.CurrencyReconciliationRequired", "Original charge currency requires authoritative reconciliation.");
             string snapshot = JsonSerializer.Serialize(new
             {
                 policy = "legacy-paid-cancellation-v1", session.StartTime, session.Status,

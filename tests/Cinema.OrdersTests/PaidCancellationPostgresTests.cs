@@ -287,16 +287,29 @@ public partial class RefundAdmissionPostgresTests
     }
 
     [Fact]
-    public async Task Unknown_currency_is_retained_as_null_and_unrelated_caller_cannot_discover_claim()
+    public async Task Unknown_cash_currency_rejects_without_owner_or_ticket_lockout()
     {
         await using Fixture f = await Fixture.Create(template, currency: null); IPaymentService payment = SuccessfulPayment(); ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
         (await f.Cancellation(payment, loyalty).CancelAsync(f.Order.Id.Value, f.Order.UserId, false, Ct)).Error.Code.Should().Be("Order.CurrencyReconciliationRequired");
         (await f.Cancellation(payment, loyalty).CancelAsync(f.Order.Id.Value, Guid.NewGuid(), false, Ct)).Error.Code.Should().Be("Order.NotFound");
         (await f.Cancellation(payment, loyalty).CancelAsync(f.Order.Id.Value, null, false, Ct)).Error.Code.Should().Be("Auth.Required");
-        await using ApplicationDbContext verify = f.Context(); PaidCancellation op = await verify.PaidCancellations.SingleAsync(Ct);
-        op.PaidCurrency.Should().BeNull();
-        using JsonDocument snapshot = JsonDocument.Parse(op.SourceSnapshot); snapshot.RootElement.GetProperty("PaidCurrency").ValueKind.Should().Be(JsonValueKind.Null);
+        await using (ApplicationDbContext verify = f.Context())
+        {
+            (await verify.PaidCancellations.CountAsync(Ct)).Should().Be(0);
+            (await verify.RefundOperations.CountAsync(Ct)).Should().Be(0);
+            Order order = await verify.Orders.SingleAsync(Ct);
+            order.Status.Should().Be(OrderStatus.Paid);
+            order.PaidCurrency.Should().BeNull();
+            (await verify.Tickets.IgnoreQueryFilters().SingleAsync(Ct)).TicketStatus.Should().Be(TicketStatus.Valid);
+        }
         await payment.DidNotReceiveWithAnyArgs().RefundPaymentAsync(default!, Ct);
+        loyalty.ReceivedCalls().Should().BeEmpty();
+        await using ApplicationDbContext validation = f.Context();
+        Guid ticketId = (await validation.Tickets.IgnoreQueryFilters().SingleAsync(Ct)).Id.Value;
+        (await new ValidateTicketCommandHandler(validation, new ScreeningClock(f.Start)).Handle(new(ticketId), Ct)).IsSuccess.Should().BeTrue();
+        await using ApplicationDbContext persisted = f.Context();
+        (await persisted.Tickets.IgnoreQueryFilters().SingleAsync(Ct)).TicketStatus.Should().Be(TicketStatus.Used);
+        (await persisted.PaidCancellations.CountAsync(Ct)).Should().Be(0);
     }
 
     [Fact]
