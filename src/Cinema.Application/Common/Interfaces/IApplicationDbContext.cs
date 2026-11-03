@@ -19,6 +19,7 @@ public interface IApplicationDbContext
     DbSet<PricingItem> PricingItems { get; }
     DbSet<Order> Orders { get; }
     DbSet<RefundOperation> RefundOperations { get; }
+    DbSet<PaidCancellation> PaidCancellations { get; }
     DbSet<User> Users { get; }
     DbSet<Ticket> Tickets { get; }
     DbSet<SeatLock> SeatLocks { get; }

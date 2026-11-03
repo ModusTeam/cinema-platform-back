@@ -20,6 +20,8 @@ public sealed partial class RefundOperationStore(IDbContextFactory<ApplicationDb
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             await db.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '3s'", ct);
             Order? order = await db.Orders.FromSqlInterpolated($"SELECT * FROM orders WHERE id={candidate.OrderId.Value} FOR UPDATE").SingleOrDefaultAsync(ct);
+            if (await db.PaidCancellations.AnyAsync(x => x.OrderId == candidate.OrderId, ct))
+                return Result.Failure<RefundOperation>(new Error("Refund.CancellationOwned", "Paid cancellation owns this order lifecycle."));
             if (order?.PaidCurrency is null || order.PaidCurrency != candidate.Currency)
                 return Result.Failure<RefundOperation>(new Error("Refund.CurrencyReconciliationRequired", "Original charge currency is unknown or does not match."));
             RefundOperation? existing = await db.Set<RefundOperation>().SingleOrDefaultAsync(x => x.OrderId == candidate.OrderId, ct);

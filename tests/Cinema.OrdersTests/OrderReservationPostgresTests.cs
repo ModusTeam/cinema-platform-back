@@ -39,6 +39,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using Cinema.Infrastructure.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Cinema.Application.Common.Settings;
@@ -1197,8 +1198,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         currentUser.UserId.Returns(database.UserId);
         IPaymentService payment = Substitute.For<IPaymentService>();
 
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment,
-                Substitute.For<ILoyaltyService>(), dispatcher)
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, postCommitDispatcher: dispatcher)
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -1239,7 +1239,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             await AssertCancellationStateAsync(database, reserved.Value, OrderStatus.Cancelled, TicketStatus.Released);
         });
 
-        Result result = await new CancelOrderCommandHandler(cancellation, CancellationUser(database), payment, loyalty, dispatcher)
+        Result result = await new CancelOrderCommandHandler(cancellation, CancellationUser(database), postCommitDispatcher: dispatcher)
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -1264,8 +1264,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         IPaymentService payment = Substitute.For<IPaymentService>();
         ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
         IPostCommitDomainEventDispatcher dispatcher = Substitute.For<IPostCommitDomainEventDispatcher>();
-        Func<Task> cancel = async () => await new CancelOrderCommandHandler(
-            cancellation, CancellationUser(database), payment, loyalty, dispatcher)
+        Func<Task> cancel = async () => await new CancelOrderCommandHandler(cancellation, CancellationUser(database), postCommitDispatcher: dispatcher)
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         (await cancel.Should().ThrowAsync<DbUpdateException>())
@@ -1292,7 +1291,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         IPaymentService payment = Substitute.For<IPaymentService>();
         ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
 
-        Result result = await new CancelOrderCommandHandler(cancellation, CancellationUser(database), payment, loyalty)
+        Result result = await new CancelOrderCommandHandler(cancellation, CancellationUser(database))
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.Error.Code.Should().Be("Order.InvalidState");
@@ -1320,8 +1319,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             paymentStarted.TrySetResult();
             return finishPayment.Task;
         });
-        Task<Result> cancel = new CancelOrderCommandHandler(
-            cancellation, CancellationUser(database), payment, loyalty, dispatcher)
+        Task<Result> cancel = new CancelOrderCommandHandler(cancellation, CancellationUser(database), postCommitDispatcher: dispatcher)
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
         Task<Result<Guid>>? checkout = null;
         try
@@ -1361,8 +1359,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         IPostCommitDomainEventDispatcher dispatcher = Substitute.For<IPostCommitDomainEventDispatcher>();
         IPaymentService payment = Substitute.For<IPaymentService>();
         ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
-        Func<Task> cancel = async () => await new CancelOrderCommandHandler(
-            cancellation, CancellationUser(database), payment, loyalty, dispatcher)
+        Func<Task> cancel = async () => await new CancelOrderCommandHandler(cancellation, CancellationUser(database), postCommitDispatcher: dispatcher)
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         await cancel.Should().ThrowAsync<IOException>().WithMessage("injected lost commit acknowledgement");
@@ -1433,7 +1430,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.IsInRole("Admin").Returns(true);
 
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, Substitute.For<IPaymentService>(), Substitute.For<ILoyaltyService>())
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser)
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -1455,7 +1452,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
                 TestContext.Current.CancellationToken);
             order.ApplyLoyaltyDiscount(10);
-            order.MarkAsPaid("payment-1");
+            order.MarkAsPaid("payment-1", "UAH");
             await ConfirmTicketsAsync(paidContext, order);
             await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
@@ -1470,15 +1467,15 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             .Returns((true, string.Empty));
         await using (ApplicationDbContext cancellation = database.NewContext())
         {
-            Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, loyalty)
+            Result result = await new CancelOrderCommandHandler(cancellation, currentUser, database.Cancellation(payment, loyalty))
                 .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
             result.IsSuccess.Should().BeTrue();
         }
         await using (ApplicationDbContext repeated = database.NewContext())
         {
-            Result result = await new CancelOrderCommandHandler(repeated, currentUser, payment, loyalty)
+            Result result = await new CancelOrderCommandHandler(repeated, currentUser, database.Cancellation(payment, loyalty))
                 .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
-            result.Error.Code.Should().Be("Order.AlreadyCancelled");
+            result.IsSuccess.Should().BeTrue();
         }
 
         await payment.Received(1).RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>());
@@ -1505,8 +1502,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         IPaymentService payment = Substitute.For<IPaymentService>();
 
         await using ApplicationDbContext cancellation = database.NewContext();
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment,
-            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(order.Id.Value),
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser).Handle(new CancelOrderCommand(order.Id.Value),
             TestContext.Current.CancellationToken);
 
         result.Error.Code.Should().Be("Order.InvalidState");
@@ -1568,7 +1564,11 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
                 TestContext.Current.CancellationToken);
             order.ApplyGoldDiscount(20m);
             ticket.ApplyGoldUpgrade(30m);
-            order.MarkAsPaid("payment-1");
+            order.StartPayment();
+            order.BeginGoldCheckout(ticket.Id.Value, 50m);
+            order.ConfirmGoldUse();
+            order.MarkAsPaid("payment-1", "UAH");
+            order.CompleteGoldCheckout();
             ticket.ConfirmPurchase(order);
             await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
@@ -1582,7 +1582,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             .Returns((true, string.Empty));
 
         await using ApplicationDbContext cancellation = database.NewContext();
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, payment, loyalty)
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser, database.Cancellation(payment, loyalty))
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -1606,8 +1606,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         currentUser.UserId.Returns(database.UserId);
 
         await using ApplicationDbContext cancellation = database.NewContext();
-        Result result = await new CancelOrderCommandHandler(cancellation, currentUser,
-            Substitute.For<IPaymentService>(), Substitute.For<ILoyaltyService>())
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser)
             .Handle(new CancelOrderCommand(reserved.Value), TestContext.Current.CancellationToken);
 
         result.Error.Code.Should().Be("Order.TooLate");
@@ -1627,7 +1626,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         {
             Order order = await paidContext.Orders.SingleAsync(o => o.Id == new EntityId<Order>(reserved.Value),
                 TestContext.Current.CancellationToken);
-            order.MarkAsPaid("payment-1");
+            order.MarkAsPaid("payment-1", "UAH");
             await ConfirmTicketsAsync(paidContext, order);
             await paidContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
@@ -1647,12 +1646,12 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         await using ApplicationDbContext cancellation = database.NewContext(publisher, new FailOrderUpdateInterceptor());
         handler = new(cancellation, locks, notifier, NullLogger<OrderCancelledEventHandler>.Instance);
 
-        Func<Task> cancel = async () => await new CancelOrderCommandHandler(cancellation, currentUser, payment,
-            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(reserved.Value),
+        ILoyaltyService loyalty = Substitute.For<ILoyaltyService>();
+        Result result = await new CancelOrderCommandHandler(cancellation, currentUser,
+            database.Cancellation(payment, loyalty, publisher, new FailOrderUpdateInterceptor())).Handle(new CancelOrderCommand(reserved.Value),
             TestContext.Current.CancellationToken);
 
-        DbUpdateException failure = (await cancel.Should().ThrowAsync<DbUpdateException>()).Which;
-        failure.InnerException.Should().BeOfType<InvalidOperationException>();
+        result.Error.Code.Should().Be("Order.CancellationReconciliationRequired");
         await payment.Received(1).RefundPaymentAsync("payment-1", Arg.Any<CancellationToken>());
         await locks.DidNotReceiveWithAnyArgs().UnlockSeatsAsync(default, default!, default, default);
         await notifier.DidNotReceiveWithAnyArgs().NotifySeatUnlockedAsync(default, default, default);
@@ -1661,6 +1660,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             TestContext.Current.CancellationToken)).Status.Should().Be(OrderStatus.Paid);
         (await verify.Tickets.SingleAsync(t => t.OrderId == new EntityId<Order>(reserved.Value),
             TestContext.Current.CancellationToken)).TicketStatus.Should().Be(TicketStatus.Valid);
+        (await verify.PaidCancellations.SingleAsync(TestContext.Current.CancellationToken)).RefundReference.Should().Be("refund-1");
     }
 
     private static async Task ConfirmTicketsAsync(ApplicationDbContext context, Order order)
@@ -1965,8 +1965,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
         ICurrentUserService currentUser = Substitute.For<ICurrentUserService>();
         currentUser.UserId.Returns(database.UserId);
         currentUser.IsInRole("Admin").Returns(true);
-        Result cancellation = await new CancelOrderCommandHandler(cancellationContext, currentUser, payment,
-            Substitute.For<ILoyaltyService>()).Handle(new CancelOrderCommand(reserved.Value),
+        Result cancellation = await new CancelOrderCommandHandler(cancellationContext, currentUser).Handle(new CancelOrderCommand(reserved.Value),
                 TestContext.Current.CancellationToken);
 
         cancellation.Error.Code.Should().Be("Order.InvalidState");
@@ -2588,6 +2587,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
 
     private sealed class ReservationDatabase : IAsyncDisposable
     {
+        private readonly List<ServiceProvider> cancellationProviders = [];
         public string ConnectionString { get; }
         public ApplicationDbContext Context { get; }
         public Seat Seat { get; private set; } = null!;
@@ -2663,6 +2663,26 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
             return new ApplicationDbContext(options);
         }
 
+        public PaidOrderCancellation Cancellation(IPaymentService payment, ILoyaltyService loyalty,
+            IPublisher? publisher = null, DbCommandInterceptor? fault = null)
+        {
+            ServiceCollection services = new();
+            if (publisher is not null)
+            {
+                services.AddSingleton(publisher);
+                services.AddScoped<DispatchDomainEventsInterceptor>();
+                services.AddScoped<IPostCommitDomainEventDispatcher>(sp => sp.GetRequiredService<DispatchDomainEventsInterceptor>());
+            }
+            services.AddDbContext<ApplicationDbContext>((sp, b) =>
+            {
+                b.UseNpgsql(ConnectionString, p => { p.UseVector(); p.EnableRetryOnFailure(3); }).UseSnakeCaseNamingConvention();
+                if (publisher is not null) b.AddInterceptors(sp.GetRequiredService<DispatchDomainEventsInterceptor>());
+                if (fault is not null) b.AddInterceptors(fault);
+            });
+            ServiceProvider provider = services.BuildServiceProvider(); cancellationProviders.Add(provider);
+            return new(provider.GetRequiredService<IServiceScopeFactory>(), payment, loyalty);
+        }
+
         public async Task<Seat> AddSeatAsync()
         {
             Seat second = Seat.New(EntityId<Seat>.New(), "A", 2, 1, 2, SeatStatus.Active,
@@ -2687,6 +2707,7 @@ public class OrderReservationPostgresTests(PostgresSchemaTemplate template) : IC
 
         public async ValueTask DisposeAsync()
         {
+            foreach (ServiceProvider provider in cancellationProviders) await provider.DisposeAsync();
             await Context.DisposeAsync();
             await using NpgsqlConnection admin = new(_adminConnectionString);
             await admin.OpenAsync();

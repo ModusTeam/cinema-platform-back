@@ -32,6 +32,7 @@ public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext>
     public DbSet<PricingItem> PricingItems { get; init; }
     public DbSet<Order> Orders { get; init; }
     public DbSet<RefundOperation> RefundOperations { get; init; }
+    public DbSet<PaidCancellation> PaidCancellations { get; init; }
     public DbSet<Ticket> Tickets { get; init; }
     public DbSet<SeatLock> SeatLocks { get; init; }
 
